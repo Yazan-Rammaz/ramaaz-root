@@ -8,32 +8,36 @@ import { DEV_TOKEN_COOKIE } from "@/lib/auth/registration-token";
  * A Route Handler rather than a Server Action, by request — the browser calls
  * this directly (see features/auth/dev/useDevCredentials.ts).
  *
- * ── Why this is fenced off so hard ──────────────────────────────────────────
+ * ── ⚠️ This is enabled on the DEPLOYED worker too ───────────────────────────
  * It wraps POST /v1/dev/reset-root, which DELETES the current root admin and
- * creates a replacement, and it returns a plaintext password to the browser.
- * Both are fine on a staging bootstrap and unacceptable anywhere else, so it
- * refuses unless BOTH hold:
+ * creates a replacement, and it returns that admin's plaintext password to
+ * whoever called it.
  *
- *   1. NODE_ENV is not production, and
- *   2. NEXT_PUBLIC_DEV_AUTOFILL === "1"
+ * It originally also required NODE_ENV !== production. That guard was removed
+ * by request, so the ONLY thing standing in front of it is the flag below.
+ * On the public worker URL that means anyone who finds the endpoint can reset
+ * the root admin and read the new password. It cannot be protected further:
+ * the caller is the browser, so any shared secret would ship in the client
+ * bundle and be equally public.
  *
- * Otherwise it 404s — indistinguishable from the route not existing.
+ * That is a deliberate, temporary trade for a staging-only environment. Before
+ * this worker is ever pointed at production data, set NEXT_PUBLIC_DEV_AUTOFILL
+ * to "0" and redeploy, or delete this route.
  *
  * ── Turning it off ─────────────────────────────────────────────────────────
- * Set NEXT_PUBLIC_DEV_AUTOFILL=0 in .env.local (or delete the line) and restart
- * `npm run dev`. That disables the route AND the client that calls it, because
- * both read the same flag. Delete this file and the `dev/` folder to remove it
- * outright.
+ * Locally:  NEXT_PUBLIC_DEV_AUTOFILL=0 in .env.local, restart `npm run dev`.
+ * Deployed: set it to "0" in wrangler.jsonc and `npm run deploy`.
+ * One flag disables the route AND the client that calls it. Deleting this file
+ * and src/features/auth/dev/ removes it outright.
  */
 
 // Reads process.env and holds the token in module memory.
 export const runtime = "nodejs";
 
 function isEnabled() {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    process.env.NEXT_PUBLIC_DEV_AUTOFILL === "1"
-  );
+  // Flag only — the NODE_ENV check was removed so this works on the deployed
+  // worker. See the warning above.
+  return process.env.NEXT_PUBLIC_DEV_AUTOFILL === "1";
 }
 
 export async function POST() {

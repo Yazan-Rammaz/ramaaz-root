@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { Icon } from '@/components/ui/Icon';
 import { PasscodeUnlock } from '@/features/auth/components/PasscodeUnlock';
 import { readLoginFlow } from '@/lib/auth/login-flow';
 import { getPrivateCode } from '@/lib/auth/cookies';
@@ -51,10 +52,15 @@ export default async function EnterPasscodePage() {
 
             <div className="h-45/100 flex items-end justify-center">
                 <div className="bg-muted/40 relative h-200 w-200 overflow-hidden rad-15">
-                    <div
-                        aria-hidden
-                        className="absolute inset-0 opacity-60"
-                        style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+                    {/* No photo for this admin yet, so fall back to the default
+                        avatar glyph rather than an empty blurred plate. When a
+                        real photo exists it renders here instead — the KYC
+                        reference image is the natural source. */}
+                    <Icon
+                        name="side/avatar"
+                        width={200}
+                        height={200}
+                        className="absolute inset-0 h-full w-full object-cover"
                     />
                 </div>
             </div>

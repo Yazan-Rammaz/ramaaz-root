@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
-  "name": "root-dashboard",
+  "name": "ramaaz-root",
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -16,9 +16,19 @@
     // name, which is how the old placeholder ("https://yourdomain.com") could
     // have silently overridden a correctly-set secret.
     //
-    // DEV_RESET_KEY and REGISTRATION_TOKEN are deliberately ABSENT: they are
-    // local-development-only, and the reset endpoint they unlock deletes the
-    // root admin.
-    "NEST_API_URL": "https://staging-backend.ramaaz.store"
+    // DEV_RESET_KEY is deliberately ABSENT here — it is a real secret and must
+    // be set with `wrangler secret put DEV_RESET_KEY`, never committed.
+    "NEST_API_URL": "https://staging-backend.ramaaz.store",
+
+    // ⚠️ TEMPORARY, AND LIVE ON THE PUBLIC WORKER URL.
+    //
+    // Enables /api/dev/reset on the deployed site, by request. Anyone who can
+    // reach the worker can then delete the root admin and read the replacement's
+    // password — there is no way to protect it, because the caller is the
+    // browser and any shared secret would ship in the client bundle.
+    //
+    // Acceptable only while this points at STAGING. Set to "0" and redeploy
+    // before this worker ever talks to production data.
+    "NEXT_PUBLIC_DEV_AUTOFILL": "1"
   }
 }
