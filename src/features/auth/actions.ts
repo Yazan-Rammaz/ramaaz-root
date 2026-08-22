@@ -267,7 +267,7 @@ export async function setPasscodeAction(passcode: string): Promise<ActionState> 
       accessToken: access_token,
       refreshToken: refresh_token,
       accessMaxAge: expires_in,
-      // The API gives no refresh lifetime — see REFRESH_MAX_AGE.
+      // The refresh token never expires; only the cookie ceiling applies.
       refreshMaxAge: REFRESH_MAX_AGE,
     });
     // Kept for the passcode lock screen, which needs it to unlock. This is the

@@ -302,12 +302,20 @@ export type MeResponse = z.infer<typeof meResponseSchema>;
 /**
  * How long to keep the refresh cookie.
  *
- * ⚠️ ASSUMPTION — the API returns `expires_in` for the access token only and
- * says nothing about the refresh token's lifetime. 30 days is a guess. Both
- * ways of being wrong degrade safely: too long and a refresh simply fails and
- * sends the admin to /login; too short and they sign in again sooner.
+ * CONFIRMED: the refresh token does not expire. It is single-use — every
+ * refresh returns a replacement — but the chain itself has no time limit, and
+ * the API returns `expires_in` for the ACCESS token only.
+ *
+ * So the cookie should outlive nothing but the browser's own ceiling: 400 days
+ * is the maximum a cookie may declare (browsers clamp anything longer), and
+ * anything shorter would sign the admin out while their token was still
+ * perfectly valid — which is what the previous 30-day guess did.
+ *
+ * A session therefore ends in exactly three ways: an explicit sign-out, a
+ * replayed refresh token (reuse detection kills the whole family — see
+ * AUTH_PATHS.refresh), or the browser dropping the cookie.
  */
-export const REFRESH_MAX_AGE = 60 * 60 * 24 * 30;
+export const REFRESH_MAX_AGE = 60 * 60 * 24 * 400;
 
 /* ─────────────────── ⏳ awaiting real endpoints ─────────────────── */
 
