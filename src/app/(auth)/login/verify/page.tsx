@@ -3,12 +3,15 @@ import { Icon } from '@/components/ui/Icon';
 import { VerifyStep } from '@/features/auth/components/LoginSteps';
 import { ResendTimer } from '@/features/auth/components/ResendTimer';
 import { readLoginFlow } from '@/lib/auth/login-flow';
+import { redirectIfAuthenticated } from '@/lib/auth/guards';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
 
 /** Login — WhatsApp verification code (6 digits). */
 export default async function VerifyPage() {
+    // Already signed in — never show a sign-in step.
+    await redirectIfAuthenticated();
     const flow = await readLoginFlow();
     if (!flow.challengeToken) redirect('/login');
 

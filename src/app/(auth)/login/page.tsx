@@ -1,4 +1,7 @@
 import { IdentifyStep } from '@/features/auth/components/LoginSteps';
+import { PasscodeGate } from '@/features/auth/components/PasscodeGate';
+import { redirectIfAuthenticated } from '@/lib/auth/guards';
+import { getPrivateCode } from '@/lib/auth/cookies';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -11,7 +14,16 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * Vertical split (top 2 : keyboard 3) places the field just above the keyboard,
  * matching the XD; gaps 12 (title→subtitle) and 88 (subtitle→field) are spec.
  */
-export default function LoginPage() {
+export default async function LoginPage() {
+    // Already signed in — nothing to do here.
+    await redirectIfAuthenticated();
+
+    // Signed in on this device before, so the private code is already known:
+    // go straight to the passcode, which is the only other half /v1/auth/login
+    // needs. First-time admins have no saved code and start at step 1.
+    const privateCode = await getPrivateCode();
+    if (privateCode) return <PasscodeGate mode="login" />;
+
     return (
         <main className="flex h-full flex-col items-center">
             {/* White content area — content anchored to its bottom (just above keyboard). */}

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { requireSession } from "@/lib/auth/session";
 import { AddActionProvider } from "@/features/shell/add-action";
-import { PasscodeGate } from "@/features/auth/components/PasscodeGate";
+import { IdleLock } from "@/features/auth/components/IdleLock";
 import { Sidebar } from "@/features/shell/components/Sidebar";
 import { Navbar } from "@/features/shell/components/Navbar";
 
@@ -11,16 +11,17 @@ import { Navbar } from "@/features/shell/components/Navbar";
  * scaled width, content fills the rest) so it fits every canvas with NO x/y
  * scroll — the shape is held by the scaling engine, not a fixed 1366×1024 box.
  *
- * `requireSession()` is the authoritative auth gate (backend `/auth/me`).
- * <PasscodeGate> adds the UX lock: a fresh page load bounces to the passcode
- * screen even when the session cookie is still alive.
+ * `requireSession()` is the authoritative auth gate (backend `/v1/me`).
+ * <IdleLock> adds the UX lock: after 5 minutes without interaction it covers
+ * the shell with the passcode gate. It does NOT sign anyone out — the session
+ * stays live and the lock is dismissed by re-entering the passcode.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  await requireSession();
+  const session = await requireSession();
 
   return (
     <AddActionProvider>
-      <PasscodeGate />
+      <IdleLock name={session.name} role={session.role} />
       <div className="flex h-full w-full overflow-hidden">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">

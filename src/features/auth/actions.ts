@@ -157,6 +157,16 @@ export async function passwordAction(password: string): Promise<ActionState> {
   redirect("/login/verify");
 }
 
+/**
+ * Abandon a half-finished sign-in and start over.
+ *
+ * Used by <ResetOnReload> on the steps BEFORE an OTP has been sent. Refreshing
+ * mid-flow should not leave a stale private code sitting in a cookie.
+ */
+export async function resetLoginFlowAction(): Promise<void> {
+  await clearLoginFlow();
+}
+
 /** Resend the WhatsApp code (verify screen). Needs a live challenge. */
 export async function resendOtpAction(): Promise<ActionState> {
   const flow = await readLoginFlow();
@@ -375,6 +385,62 @@ export async function passcodeUnlockAction(
 
   await clearLoginFlow();
   redirect(next);
+}
+
+/**
+ * Unlock the idle lock on a live session. Verifies the passcode and STAYS PUT —
+ * no redirect, so the admin lands back on whatever page they had open.
+ *
+ * ⚠️ It signs in again under the hood. There is no endpoint that checks a
+ * passcode against an existing session, so the only way to verify one is
+ * POST /v1/auth/login, which issues a fresh token pair. The session therefore
+ * continues uninterrupted but ROTATES on every unlock. A dedicated
+ * verify-pass-code endpoint would make this a read-only check.
+ */
+export async function verifyPasscodeAction(
+  passcode: string,
+): Promise<ActionState> {
+  const parsed = passcodeSchema.safeParse({ passcode });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message };
+  }
+
+  // Saved at sign-in; /v1/auth/login needs it alongside the passcode.
+  const privateCode = await getPrivateCode();
+  if (!privateCode) {
+    return { ok: false, error: "Sign in again to unlock" };
+  }
+
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.login, {
+      private_code: privateCode,
+      secret: parsed.data.passcode,
+      device_label: DEVICE_LABEL,
+    } satisfies LoginRequest);
+
+    const result = loginResponseSchema.parse(raw);
+    if (result.stage !== STAGE_COMPLETED) {
+      return { ok: false, error: `Unsupported sign-in stage "${result.stage}"` };
+    }
+
+    const { access_token, refresh_token, expires_in, user } = result.tokens;
+    await setAuthCookies({
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      accessMaxAge: expires_in,
+      refreshMaxAge: REFRESH_MAX_AGE,
+    });
+    if (user.private_code) {
+      await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
+    }
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return { ok: false, error: message(error, "Invalid passcode") };
+  }
+
+  return { ok: true };
 }
 
 export async function logoutAction() {

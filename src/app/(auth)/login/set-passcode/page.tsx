@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { SetPasscodeFlow } from '@/features/auth/components/SetPasscodeFlow';
 import { readLoginFlow } from '@/lib/auth/login-flow';
+import { redirectIfAuthenticated } from '@/lib/auth/guards';
 import { STAGE_PASS_CODE_REQUIRED } from '@/lib/auth/endpoints';
 
 // XD px -> scaling rem.
@@ -22,6 +23,8 @@ function roleLabel(role?: string) {
  * `setupToken` that this backend does not issue.)
  */
 export default async function SetPasscodePage() {
+    // Already signed in — never show a sign-in step.
+    await redirectIfAuthenticated();
     const flow = await readLoginFlow();
     if (flow.stage !== STAGE_PASS_CODE_REQUIRED || !flow.challengeToken) {
         redirect('/login');
