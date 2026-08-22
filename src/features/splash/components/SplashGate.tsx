@@ -102,7 +102,7 @@ export function SplashGate() {
               className="fz-14 text-black font-normal"
               style={{ marginTop: rem(12), lineHeight: rem(20) }}
             >
-              Management
+              Ramaaz Root
             </span>
           </div>
         </div>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+  <g id="Group_16293" data-name="Group 16293" transform="translate(-102.05 -40.05)">
+    <path id="Line_962" data-name="Line 962" d="M22.729,1.818H.909A.909.909,0,1,1,.909,0H22.729a.909.909,0,1,1,0,1.818Z" transform="translate(103.336 40.05) rotate(45)" fill="#ff2e2e"/>
+    <path id="Line_963" data-name="Line 963" d="M22.729,1.818H.909A.909.909,0,0,1,.909,0H22.729a.909.909,0,1,1,0,1.818Z" transform="translate(120.05 41.335) rotate(135)" fill="#ff2e2e"/>
+  </g>
+</svg>

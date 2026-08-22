@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Management",
+    "appName": "Ramaaz Root",
     "language": "Language",
     "logout": "Logout"
   },
@@ -13,5 +13,55 @@
     "super_admin": "Super Admin",
     "country_manager": "Country Manager",
     "agent": "Agent"
+  },
+  "shell": {
+    "nav": {
+      "systems": "Systems",
+      "rocket": "System Projects",
+      "translate": "System Languages",
+      "currencies": "Currencies",
+      "countries": "Countries",
+      "database": "Database",
+      "hierarchy": "Hierarchy",
+      "search": "Search",
+      "close": "Close",
+      "add": "Add"
+    },
+    "side": {
+      "avatar": "Profile",
+      "dashboard": "Dashboard",
+      "chat": "Chat",
+      "settings": "Settings",
+      "systems": "Systems"
+    }
+  },
+  "system": {
+    "title": "System Projects",
+    "empty": "No system projects yet."
+  },
+  "language": {
+    "title": "System Languages",
+    "empty": "No system languages yet."
+  },
+  "region": {
+    "title": "System Geographic Regions",
+    "empty": "No Have Added Any Countries",
+    "emptyAdmin": "No Have Added Any Administrative Divisions",
+    "tabs": {
+      "countries": "Countries",
+      "admin": "Administrative Divisions"
+    },
+    "addTitle": "Add Countries",
+    "level": "Level {n}"
+  },
+  "currency": {
+    "title": "System Currencies",
+    "empty": "No system currencies yet.",
+    "filter": {
+      "cash": "Cash",
+      "crypto": "Crypto",
+      "gold": "Gold",
+      "silver": "Silver"
+    }
   }
 }

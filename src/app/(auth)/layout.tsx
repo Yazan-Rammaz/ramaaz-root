@@ -11,14 +11,13 @@ import { Icon } from "@/components/ui/Icon";
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="relative h-screen overflow-hidden">
-      <div className="absolute top-30 start-30 flex flex-col gap-4">
+      <div className="absolute top-30 start-30">
         <Icon
           name="auth/rdb"
           width={72}
           height={52}
           alt="Ramaaz Digital Banking"
         />
-        <span className="fz-12 text-ink font-bold">Management</span>
       </div>
 
       {children}

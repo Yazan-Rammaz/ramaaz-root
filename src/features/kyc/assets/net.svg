@@ -1,0 +1,33 @@
+<svg width="400" height="500" viewBox="0 0 400 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g id="biometric-poly-mesh" stroke="silver" stroke-width="1" fill="silver">
+    
+    <path d="M200 50L280 80L340 180L320 300L200 450L80 300L60 180L120 80L200 50Z" fill="none" stroke-opacity="0.6"/>
+    
+    <path d="M200 100L250 120L300 200L280 280L200 380L120 280L100 200L150 120L200 100Z" fill="none" stroke-opacity="0.4"/>
+    <path d="M200 160L230 180L250 220L230 270L200 310L170 270L150 220L170 180L200 160Z" fill="none" stroke-opacity="0.3"/>
+
+    <line x1="200" y1="50" x2="200" y2="450" stroke-opacity="0.3"/>
+    <line x1="60" y1="180" x2="340" y2="180" stroke-opacity="0.3"/>
+    <line x1="120" y1="80" x2="280" y2="280" stroke-opacity="0.2"/>
+    <line x1="280" y1="80" x2="120" y2="280" stroke-opacity="0.2"/>
+    <line x1="80" y1="300" x2="320" y2="300" stroke-opacity="0.2"/>
+
+    <circle cx="200" cy="50" r="3"/>
+    <circle cx="280" cy="80" r="3"/>
+    <circle cx="340" cy="180" r="3"/>
+    <circle cx="320" cy="300" r="3"/>
+    <circle cx="200" cy="450" r="3"/>
+    <circle cx="80" cy="300" r="3"/>
+    <circle cx="60" cy="180" r="3"/>
+    <circle cx="120" cy="80" r="3"/>
+
+    <circle cx="250" cy="120" r="2.5" fill-opacity="0.7"/>
+    <circle cx="300" cy="200" r="2.5" fill-opacity="0.7"/>
+    <circle cx="280" cy="280" r="2.5" fill-opacity="0.7"/>
+    <circle cx="120" cy="280" r="2.5" fill-opacity="0.7"/>
+    <circle cx="100" cy="200" r="2.5" fill-opacity="0.7"/>
+    <circle cx="150" cy="120" r="2.5" fill-opacity="0.7"/>
+
+    <circle cx="200" cy="220" r="4" fill-opacity="0.9"/>
+  </g>
+</svg>

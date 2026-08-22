@@ -4,38 +4,26 @@ import { z } from "zod";
  * Validation schemas are shared by the client form and the server action — one
  * definition, validated on both sides. This is the project's single validation
  * pattern: every feature exports its zod schemas here and reuses them.
+ *
+ * Login flow (matches the XD screens): private code → password →
+ * WhatsApp OTP → set passcode (first login) / passcode unlock (returning).
  */
-export const loginSchema = z.object({
-  email: z.string().email("Enter a valid email"),
-  password: z.string().min(8, "At least 8 characters"),
+export const privateCodeSchema = z.object({
+  code: z.string().min(7, "Enter your private code").max(32),
 });
-export type LoginInput = z.infer<typeof loginSchema>;
+export type PrivateCodeInput = z.infer<typeof privateCodeSchema>;
 
-/**
- * Registration is IDENTICAL for every role. The backend assigns/approves the
- * role — the form never picks it. Keep these fields in lockstep with the NestJS
- * `register` DTO.
- */
-export const registerSchema = z
-  .object({
-    name: z.string().min(2, "Too short").max(80),
-    email: z.string().email("Enter a valid email"),
-    phone: z.string().min(6, "Enter a valid phone").max(20),
-    countryCode: z
-      .string()
-      .length(2, "Use a 2-letter country code")
-      .transform((v) => v.toUpperCase()),
-    password: z
-      .string()
-      .min(8, "At least 8 characters")
-      .max(128)
-      .regex(/[a-z]/, "Add a lowercase letter")
-      .regex(/[A-Z]/, "Add an uppercase letter")
-      .regex(/[0-9]/, "Add a number"),
-    confirmPassword: z.string(),
-  })
-  .refine((d) => d.password === d.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  });
-export type RegisterInput = z.infer<typeof registerSchema>;
+export const passwordSchema = z.object({
+  password: z.string().min(8, "At least 8 characters").max(128),
+});
+export type PasswordInput = z.infer<typeof passwordSchema>;
+
+export const otpSchema = z.object({
+  code: z.string().regex(/^[0-9]{6}$/, "Enter the 6-digit code"),
+});
+export type OtpInput = z.infer<typeof otpSchema>;
+
+export const passcodeSchema = z.object({
+  passcode: z.string().regex(/^[0-9]{6}$/, "Enter a 6-digit passcode"),
+});
+export type PasscodeInput = z.infer<typeof passcodeSchema>;

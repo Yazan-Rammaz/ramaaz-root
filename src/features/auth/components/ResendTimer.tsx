@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
+import { resendOtpAction } from "../actions";
 
 /**
  * Resend countdown for the verification screen. Counts down from `startSeconds`;
@@ -23,9 +24,11 @@ export function ResendTimer({ startSeconds = 120 }: { startSeconds?: number }) {
     return () => clearInterval(id);
   }, []);
 
-  function resend() {
-    // TODO: re-request the WhatsApp code via a Server Action once auth is wired.
+  async function resend() {
+    // Optimistically restart the countdown; a failed resend just lets the
+    // button come back after the timer (throttled to 2/min server-side).
     setRemaining(startSeconds);
+    await resendOtpAction();
   }
 
   if (remaining <= 0) {

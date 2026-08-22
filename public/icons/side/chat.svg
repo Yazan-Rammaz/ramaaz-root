@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="26" height="26" viewBox="0 0 26 26">
+  <defs>
+    <clipPath id="clip-path">
+      <rect id="Rectangle_4536" data-name="Rectangle 4536" width="26" height="26" transform="translate(-0.069)" fill="none"/>
+    </clipPath>
+  </defs>
+  <g id="Mask_Group_217" data-name="Mask Group 217" transform="translate(0.069)" clip-path="url(#clip-path)">
+    <g id="Bubble_Message" data-name="Bubble Message" transform="translate(-0.021 1.34)">
+      <path id="Path_19247" data-name="Path 19247" d="M23.838,20.029c1.932-2.631,1.6-7.471-1.877-10.136A7.879,7.879,0,0,0,9.268,16.02c0,6.506,7.286,9.241,11.121,7.116a.455.455,0,0,1,.472.009,7.666,7.666,0,0,0,3.87.832.211.211,0,0,0,.157-.361,3.652,3.652,0,0,1-1.05-3.588Z" transform="translate(0.937 -0.705)" fill="#1d1d1d"/>
+      <path id="Path_19248" data-name="Path 19248" d="M23.936,10.264A11.542,11.542,0,0,0,12.963,2.436,11.468,11.468,0,0,0,1.4,13.852a9.2,9.2,0,0,0,1.688,5.891c.37.5.458,3.376-1.544,5.281a.314.314,0,0,0,.231.532,11.316,11.316,0,0,0,5.7-1.225.668.668,0,0,1,.694-.014,9.09,9.09,0,0,0,4.8.953,11.79,11.79,0,0,0,1.865-.148,8.652,8.652,0,0,1-4.145-7.37,8.8,8.8,0,0,1,13.252-7.486Z" transform="translate(-1.403 -2.435)" fill="#1d1d1d"/>
+    </g>
+  </g>
+</svg>

@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "Yönetimi",
+    "appName": "Ramaaz Root",
     "language": "Dil",
     "logout": "Çıkış yap"
   },
@@ -13,5 +13,55 @@
     "super_admin": "Süper Yönetici",
     "country_manager": "Ülke Yöneticisi",
     "agent": "Temsilci"
+  },
+  "shell": {
+    "nav": {
+      "systems": "Sistemler",
+      "rocket": "Sistem Projeleri",
+      "translate": "Sistem Dilleri",
+      "currencies": "Para Birimleri",
+      "countries": "Ülkeler",
+      "database": "Veritabanı",
+      "hierarchy": "Hiyerarşi",
+      "search": "Ara",
+      "close": "Kapat",
+      "add": "Ekle"
+    },
+    "side": {
+      "avatar": "Profil",
+      "dashboard": "Panel",
+      "chat": "Sohbet",
+      "settings": "Ayarlar",
+      "systems": "Sistemler"
+    }
+  },
+  "system": {
+    "title": "Sistem Projeleri",
+    "empty": "Henüz sistem projesi yok."
+  },
+  "language": {
+    "title": "Sistem Dilleri",
+    "empty": "Henüz sistem dili yok."
+  },
+  "region": {
+    "title": "Sistem Coğrafi Bölgeleri",
+    "empty": "Henüz Ülke Eklenmedi",
+    "emptyAdmin": "Henüz İdari Bölüm Eklenmedi",
+    "tabs": {
+      "countries": "Ülkeler",
+      "admin": "İdari Bölümler"
+    },
+    "addTitle": "Ülke Ekle",
+    "level": "Seviye {n}"
+  },
+  "currency": {
+    "title": "Sistem Para Birimleri",
+    "empty": "Henüz sistem para birimi yok.",
+    "filter": {
+      "cash": "Nakit",
+      "crypto": "Kripto",
+      "gold": "Altın",
+      "silver": "Gümüş"
+    }
   }
 }

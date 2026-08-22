@@ -1,16 +1,21 @@
-import { AuthCodeField } from "@/features/auth/components/AuthCodeField";
+import { redirect } from "next/navigation";
+import { PasswordStep } from "@/features/auth/components/LoginSteps";
+import { readLoginFlow } from "@/lib/auth/login-flow";
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
 
-// TODO: comes from the private-code step (NestJS) once auth is wired.
-const USER_NAME = "Mohamad Katmawi";
-
 /**
- * Login — step 2: enter password. Identical layout to the private-code step,
- * with the resolved user's name under the subtitle. Arrow → dashboard.
+ * Login — step 2: enter password. Identical layout to the private-code step.
+ *
+ * The name line is blank until sign-in resolves: `/v1/registration` is the
+ * first call, and it needs the password this screen is still collecting, so
+ * nothing about the admin is known yet. The guard is the carried private code.
  */
-export default function PasswordPage() {
+export default async function PasswordPage() {
+  const flow = await readLoginFlow();
+  if (!flow.privateCode) redirect("/login");
+
   return (
     <main className="flex h-full flex-col items-center">
       <div
@@ -18,7 +23,7 @@ export default function PasswordPage() {
         style={{ flexGrow: 2 }}
       >
         <h1 className="fz-30 text-ink w-full px-20 leading-none font-bold">
-          Login Management !
+          Login !
         </h1>
         <p
           className="fz-16 text-ink w-full px-20 leading-none font-normal"
@@ -30,16 +35,11 @@ export default function PasswordPage() {
           className="fz-14 text-ink/55 w-full px-20 leading-none font-normal"
           style={{ marginTop: rem(8) }}
         >
-          {USER_NAME}
+          {flow.name}
         </p>
 
         <div style={{ marginTop: rem(88) }}>
-          <AuthCodeField
-            placeholder="Enter Your Password"
-            ariaLabel="Enter Your Password"
-            revealArrowAt={1}
-            nextHref="/login/verify"
-          />
+          <PasswordStep />
         </div>
       </div>
 

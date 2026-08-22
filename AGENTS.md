@@ -56,7 +56,19 @@ sample").
 ## 2. Talking to the API — BFF only
 
 - The browser **never** calls NestJS and **never** holds a token.
-- Server-only `src/lib/api/server.ts` (`api.get/post/...`) is the single client.
+- Server-only `src/lib/api/server.ts` (`api.get/post/...`) is the single client
+  for the **root backend** (auth, the systems registry). Its base URL is
+  `NEST_API_URL`; the local `root-backend` service was deleted and the remote
+  replacement isn't wired yet, so that var is unset and calls fail with one
+  clear `BackendNotConfiguredError` rather than crashing a render.
+- **Auth paths live in one table** — `src/lib/auth/endpoints.ts` (`AUTH_PATHS`),
+  used by `features/auth/actions.ts`, `lib/auth/session.ts` and `middleware.ts`.
+  Never hardcode an `/auth/*` path at a call site; add it there. The current
+  entries are the deleted backend's and are UNVERIFIED against the remote one.
+- **Project data** (regions, currencies, languages, …) lives in the SELECTED
+  system's own backend: `src/lib/api/backend.ts` (`backendFetch.get/post/...`)
+  resolves the `rdb_sys` cookie against the registry and routes to that
+  system's `baseUrl`. Selecting happens on /systems (`selectSystem` action).
 - Mutations from the browser → **Server Actions** (`features/*/actions.ts`).
 - Data for Server Components → a feature **api module** (`features/*/api.ts`).
 - UI components calling `fetch` directly is a lint error.
@@ -108,8 +120,6 @@ Start a new feature with `npm run gen` — never hand-roll the structure.
 | `npm run dev`       | Local dev (Cloudflare bindings via OpenNext) |
 | `npm run lint`      | ESLint (layering + fetch ban)                |
 | `npm run typecheck` | `tsc --noEmit`                               |
-| `npm run test`      | Vitest unit/component                        |
-| `npm run e2e`       | Playwright (scaling + flows)                 |
 | `npm run gen`       | Scaffold a new feature slice                 |
 | `npm run preview`   | Build + run on Cloudflare Workers locally    |
 | `npm run deploy`    | Build + deploy to Cloudflare                 |
@@ -165,8 +175,10 @@ Three languages, **one way**: `next-intl` with a **cookie-based** locale (no
 
 ## 10. Session pickup — where we left off (as of 2026-06-17)
 
-The scaffold is complete and verified: `tsc`, `eslint`, `vitest` (7 tests) and
-`next build` all pass. Initial commit is on `main`. Remote `origin` is set to
+The scaffold is complete and verified: `tsc`, `eslint` and `next build` all
+pass. **This project has no automated tests** — no unit, component or e2e
+suite, and none should be added. Verify changes by running the app.
+Initial commit is on `main`. Remote `origin` is set to
 `https://github.com/Yazan-Rammaz/management.git` but **nothing is pushed yet**
 (by the owner's request).
 

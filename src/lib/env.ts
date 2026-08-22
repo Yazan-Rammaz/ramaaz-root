@@ -15,8 +15,27 @@ import { z } from "zod";
  * read and only throw when not in the build phase.
  */
 const schema = z.object({
-  /** Base URL of the NestJS API the BFF proxies to (server-side only). */
-  NEST_API_URL: z.string().url(),
+  /**
+   * Base URL of the backend the BFF proxies to (server-side only).
+   *
+   * OPTIONAL, deliberately: the local `root-backend` has been deleted and the
+   * remote backend's URL is not known yet. Unset means "no backend wired" —
+   * `lib/api/server.ts` turns that into one clear `BackendNotConfiguredError`
+   * instead of a crash, so every screen still renders for review. Set it and
+   * the whole BFF works again with no other change.
+   */
+  NEST_API_URL: z
+    .string()
+    .url()
+    // `.url()` alone is not enough on its own: Zod 4 accepts "localhost:9999"
+    // and "ftp://host" as valid URLs, and both produce broken fetches. A base
+    // URL we can concatenate a path onto must be http(s).
+    .refine((u) => /^https?:\/\//i.test(u), {
+      message: "must start with http:// or https://",
+    })
+    // Paths all begin with "/", so a trailing slash yields "host//auth/me".
+    .transform((u) => u.replace(/\/+$/, ""))
+    .optional(),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
@@ -39,10 +58,10 @@ function load(): Env {
   if (parsed.success) {
     cached = parsed.data;
   } else if (isBuildPhase) {
-    // Don't break the build over env that only exists at runtime. Any real use
-    // of this placeholder at request time would re-validate and throw.
+    // Don't break the build over env that only exists at runtime. Leaving the
+    // URL unset is the honest value here — a request-time read re-validates.
     cached = {
-      NEST_API_URL: "https://placeholder.invalid",
+      NEST_API_URL: undefined,
       NODE_ENV: "production",
     };
   } else {

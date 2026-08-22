@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* =============================================================================
    RDB Management — Design System
@@ -34,56 +34,83 @@
 
 /* Mobile canvas — reference 430px, HARD LOCK at 400px */
 html {
-  font-size: clamp(14.88px, calc(100vw / 26.875), 16px);
-  /* App shell: the document itself never scrolls. Screens are full-viewport;
+    font-size: clamp(14.88px, calc(100vw / 26.875), 16px);
+    height: 100%;
+    /* App shell: the document itself never scrolls. Screens are full-viewport;
      any scrollable page must use an internal overflow-auto region. */
-  overflow: hidden;
+    overflow: hidden;
 }
 
 /* Tablet canvas — reference 834px (iPad portrait) */
 @media (min-width: 600px) {
-  html {
-    font-size: clamp(11.5px, calc(100vw / 52.125), 16px);
-  }
+    html {
+        font-size: clamp(11.5px, calc(100vw / 52.125), 16px);
+    }
 }
 
 /* Laptop canvas — reference 1366px */
 @media (min-width: 1024px) {
-  html {
-    font-size: clamp(12px, calc(100vw / 85.375), 16px);
-  }
+    html {
+        font-size: clamp(12px, calc(100vw / 85.375), 16px);
+    }
 }
 
-/* Hard floor for the mobile lock: 26.875rem == 400px at the locked 14.88px.
-   Below 400px the viewport scrolls horizontally instead of distorting. */
+/* App shell = a FIXED, non-scrollable box pinned to the viewport.
+   This is what keeps the mobile soft keyboard from shoving the page upward:
+   iOS Safari ignores `overflow:hidden` AND the `interactive-widget` viewport
+   hint, and will scroll the whole window to reveal a focused input ("jump to
+   top"). A position:fixed body has nothing to scroll, so the layout stays put
+   and the keyboard just overlays the reserved space at the bottom of the auth
+   screens. (`interactiveWidget: "overlays-content"` in layout.tsx handles the
+   browsers that DO support the hint, e.g. Chrome Android.)
+
+   Hard floor for the mobile lock: 26.875rem == 400px at the locked 14.88px;
+   below 400px the content is clipped rather than distorted. */
 body {
-  min-width: 26.875rem;
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    min-width: 26.875rem;
+}
+
+/* Scrolling still works, the bar itself is just never drawn — the OS default
+   bar (and even the thin variant) read as visual clutter inside a drawer.
+   scrollbar-gutter stays reserved even though nothing renders into it, so
+   content crossing the scroll threshold still never shifts width. */
+.thin-scroll {
+    scrollbar-width: none;
+    scrollbar-gutter: stable;
+}
+.thin-scroll::-webkit-scrollbar {
+    display: none;
 }
 
 /* =============================================================================
    Design tokens
    ========================================================================== */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+    --background: #ffffff;
+    --foreground: #171717;
 }
 
 @theme inline {
-  /* 1 spacing unit = 1px at the 16px base. This is what makes `w-300` == 300px
+    /* 1 spacing unit = 1px at the 16px base. This is what makes `w-300` == 300px
      at the reference width while still scaling with the root font-size. */
-  --spacing: 0.0625rem;
+    --spacing: 0.0625rem;
 
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
 
-  /* Brand palette (from XD). `primary` = action blue; `line` = hairline border;
+    /* Brand palette (from XD). `primary` = action blue; `line` = hairline border;
      `ink` = primary text; `muted` = placeholder/disabled text. */
-  --color-primary: #3066cc;
-  --color-line: #707070;
-  --color-ink: #1d1d1d;
-  --color-muted: #c3c3c3;
+    --color-primary: #3066cc;
+    --color-line: #c3c3c3;
+    --color-ink: #1d1d1d;
+    --color-muted: #c3c3c3;
+    /* Near-white fill for boxes/cards/strips (XD #fcfcfc). */
+    --color-surface: #fcfcfc;
 
-  --font-sans: var(--font-app-sans);
+    --font-sans: var(--font-app-sans);
 }
 
 /* =============================================================================
@@ -96,117 +123,142 @@ body {
    Usage:
      - single edge:  class="hairline-b" (or -t / -s / -e)
      - full box:     class="hairline"  + (for rounded) style --hairline-radius
-     - color:        style --hairline-color (defaults to --color-line #707070)
+     - color:        style --hairline-color (defaults to --color-line #C3C3C3)
    ========================================================================== */
 .hairline,
 .hairline-t,
 .hairline-b,
 .hairline-s,
 .hairline-e {
-  position: relative;
+    position: relative;
 }
 .hairline::after,
 .hairline-t::after,
 .hairline-b::after,
 .hairline-s::after,
 .hairline-e::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
+    content: '';
+    position: absolute;
+    pointer-events: none;
 }
-/* Full (optionally rounded) box. Style defaults to solid; set --hairline-style
-   to "dashed" for dashed outlines (e.g. inputs). */
+/* Full (optionally rounded) box — solid only. Dashed outlines can't be done
+   here (CSS can't set dash/gap length, and the 0.5 scale distorts them); use the
+   <DashedFrame> primitive for those instead. */
 .hairline::after {
-  top: 0;
-  left: 0;
-  width: 200%;
-  height: 200%;
-  border-width: 1px;
-  border-style: var(--hairline-style, solid);
-  border-color: var(--hairline-color, var(--color-line));
-  border-radius: calc(var(--hairline-radius, 0px) * 2);
-  transform: scale(0.5);
-  transform-origin: top left;
+    top: 0;
+    left: 0;
+    width: 200%;
+    height: 200%;
+    border-width: 1px;
+    border-style: var(--hairline-style, solid);
+    border-color: var(--hairline-color, var(--color-line));
+    border-radius: calc(var(--hairline-radius, 0px) * 2);
+    transform: scale(0.5);
+    transform-origin: top left;
 }
 /* Single edges (scale only the relevant axis). */
 .hairline-t::after,
 .hairline-b::after {
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--hairline-color, var(--color-line));
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--hairline-color, var(--color-line));
 }
 .hairline-t::after {
-  top: 0;
-  transform: scaleY(0.5);
-  transform-origin: top;
+    top: 0;
+    transform: scaleY(0.5);
+    transform-origin: top;
 }
 .hairline-b::after {
-  bottom: 0;
-  transform: scaleY(0.5);
-  transform-origin: bottom;
+    bottom: 0;
+    transform: scaleY(0.5);
+    transform-origin: bottom;
 }
 .hairline-s::after,
 .hairline-e::after {
-  inset-block: 0;
-  width: 1px;
-  background: var(--hairline-color, var(--color-line));
+    inset-block: 0;
+    width: 1px;
+    /* background: var(--hairline-color, var(--color-line)); */
 }
 .hairline-s::after {
-  inset-inline-start: 0;
-  transform: scaleX(0.5);
-  transform-origin: left;
+    inset-inline-start: 0;
+    transform: scaleX(0.5);
+    transform-origin: left;
 }
 .hairline-e::after {
-  inset-inline-end: 0;
-  transform: scaleX(0.5);
-  transform-origin: right;
+    inset-inline-end: 0;
+    transform: scaleX(0.5);
+    transform-origin: right;
 }
 
 /* Blinking underscore caret for the private-code field. Overlaid at the caret
    position (absolute, so it never pushes content); the input's own caret is
    hidden with `caret-transparent`. */
 @keyframes caret-blink {
-  0%,
-  49% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
+    0%,
+    49% {
+        opacity: 1;
+    }
+    50%,
+    100% {
+        opacity: 0;
+    }
 }
 .caret-blink {
-  animation: caret-blink 1.06s steps(1, end) infinite;
+    animation: caret-blink 1.06s steps(1, end) infinite;
+}
+
+/* AI "generating" shimmer — a soft blue-tinted sweep across placeholder boxes
+   while the mock enrichment runs (Add-Country drawer). */
+@keyframes ai-shimmer {
+    100% {
+        background-position: -200% 0;
+    }
+}
+.ai-shimmer {
+    background-image: linear-gradient(
+        100deg,
+        #fcfcfc 20%,
+        rgba(48, 102, 204, 0.14) 42%,
+        rgba(48, 102, 204, 0.14) 58%,
+        #fcfcfc 80%
+    );
+    background-size: 200% 100%;
+    animation: ai-shimmer 1.15s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .ai-shimmer {
+        animation: none;
+    }
 }
 
 /* Font size in XD pixels: `fz-18` -> 18px@reference, auto-scaling. */
 @utility fz-* {
-  font-size: calc(--value(integer) * 0.0625rem);
+    font-size: calc(--value(integer) * 0.0625rem);
 }
 
 /* Border radius in XD pixels: `rad-12` -> 12px@reference, auto-scaling. */
 @utility rad-* {
-  border-radius: calc(--value(integer) * 0.0625rem);
+    border-radius: calc(--value(integer) * 0.0625rem);
 }
 
 /* =============================================================================
    Base element styles
    ========================================================================== */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
 /* Honor the OS "reduce motion" preference everywhere (iOS-style animations off). */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
 }

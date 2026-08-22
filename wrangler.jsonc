@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
-  "name": "management",
+  "name": "root-dashboard",
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -10,6 +10,15 @@
   },
   "vars": {
     "NODE_ENV": "production",
-    "NEST_API_URL": "https://yourdomain.com"
+    // The backend base URL is a public hostname, not a credential — it is
+    // already committed in .dev.vars.example — so it lives here rather than as
+    // a secret. A `vars` entry would in any case shadow a secret of the same
+    // name, which is how the old placeholder ("https://yourdomain.com") could
+    // have silently overridden a correctly-set secret.
+    //
+    // DEV_RESET_KEY and REGISTRATION_TOKEN are deliberately ABSENT: they are
+    // local-development-only, and the reset endpoint they unlock deletes the
+    // root admin.
+    "NEST_API_URL": "https://staging-backend.ramaaz.store"
   }
 }

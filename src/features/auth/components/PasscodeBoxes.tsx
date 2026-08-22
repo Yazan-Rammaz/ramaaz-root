@@ -40,6 +40,11 @@ export function PasscodeBoxes({
     const [value, setValue] = useState('');
     const [focused, setFocused] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
+    // Completion must fire exactly ONCE per fill. Extra keystrokes while the
+    // handler is in flight used to re-trigger onComplete with the same value —
+    // duplicate requests that burned the backend's 5/min throttle. The parent
+    // clears the boxes by remounting (key bump), which resets this too.
+    const completedRef = useRef(false);
     const router = useRouter();
 
     useEffect(() => {
@@ -47,9 +52,11 @@ export function PasscodeBoxes({
     }, []);
 
     function onChange(e: React.ChangeEvent<HTMLInputElement>) {
+        if (completedRef.current) return;
         const next = e.target.value.replace(/\D/g, '').slice(0, length);
         setValue(next);
         if (next.length === length) {
+            completedRef.current = true;
             if (onComplete) onComplete(next);
             else if (nextHref) router.push(nextHref);
         }
