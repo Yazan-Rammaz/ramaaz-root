@@ -187,6 +187,22 @@ export async function middleware(req: NextRequest) {
                 ...opts,
                 maxAge: refreshed.refreshMaxAge,
             });
+        } else {
+            // The refresh failed: the token is expired, already spent, or the
+            // backend ended the session because a spent one was replayed.
+            //
+            // Clear it. Leaving a dead refresh token in the browser is worse
+            // than having none — it survives for REFRESH_MAX_AGE, so EVERY
+            // later request retries a refresh that cannot succeed, and each
+            // retry trips reuse detection again. The visible symptom is a
+            // browser that still holds rdb_rt yet is bounced to /login on
+            // every page, with no way out but clearing cookies by hand.
+            //
+            // rdb_pc is deliberately kept: the private code is not a session,
+            // and holding it lets the admin unlock with just their passcode
+            // instead of retyping it.
+            res.cookies.delete(ACCESS);
+            res.cookies.delete(REFRESH);
         }
     }
 
