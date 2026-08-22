@@ -3,7 +3,6 @@ import { Quicksand } from 'next/font/google';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale } from 'next-intl/server';
 import { localeDirection } from '@/lib/i18n/config';
-import { SplashGate } from '@/features/splash/components/SplashGate';
 import './globals.css';
 
 // Project typeface. Quicksand covers Latin; Arabic falls back to the system
@@ -51,8 +50,6 @@ export default async function RootLayout({
         >
             <body className="bg-background text-foreground flex min-h-full flex-col">
                 <NextIntlClientProvider>{children}</NextIntlClientProvider>
-                {/* Splash overlay on every full page load / refresh (see SplashGate). */}
-                <SplashGate />
             </body>
         </html>
     );
