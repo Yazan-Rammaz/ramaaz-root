@@ -8,8 +8,7 @@ import { createKycService } from '@/features/kyc/services';
 import ExitConfirmDialog from '../ExitConfirmDialog';
 import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
 import shieldSvg from '@/features/kyc/assets/shield.svg';
-// TODO(kyc-port): rdb scaling system (xd-* utilities, Page, FlexibleSpace) — not copied
-// import FlexibleSpace from '@/scaling/FlexibleSpace';
+import { FlexSpace } from '@/components/ui/FlexSpace';
 
 export default function IDSummaryScreen() {
     const {
@@ -79,7 +78,7 @@ export default function IDSummaryScreen() {
         // }
     }, [incrementAttempt, goTo]);
     return (
-        <div className="flex flex-col h-full bg-white px-xd-20">
+        <div className="flex flex-col h-full bg-white px-20">
             <ExitConfirmDialog
                 open={showExitDialog}
                 onCancel={() => setShowExitDialog(false)}
@@ -87,7 +86,7 @@ export default function IDSummaryScreen() {
             />
 
             {/* Close button */}
-            <div className="flex absolute top-xd-50 right-xd-30 justify-end mb-2">
+            <div className="flex absolute top-50 end-30 justify-end mb-8">
                 <button
                     onClick={() => setShowExitDialog(true)}
                     className="text-red-400 hover:text-red-600"
@@ -103,28 +102,28 @@ export default function IDSummaryScreen() {
                 </button>
             </div>
 
-            <FlexibleSpace size={100} share={0.4} />
+            <FlexSpace size={100} share={0.4} />
             {/* Header */}
-            <h1 className="text-xd-30 font-bold text-center text-[#1D1D1D] mb-xd-5">
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
                 Identity Verification !
             </h1>
-            <div className="flex items-center justify-center gap-2 mb-xd-11">
+            <div className="flex items-center justify-center gap-8 mb-11">
                 <Image
                     src={liveDetectIdSvg}
                     alt="live detect ID"
-                    className="object-contain w-xd-20 h-xd-20"
+                    className="object-contain w-20 h-20"
                 />
-                <span className="text-xd-16 font-medium text-[#1D1D1D]">
+                <span className="fz-16 font-medium text-[#1D1D1D]">
                     Live Detection Your ID
                 </span>
             </div>
 
             {/* ID thumbnails */}
             {isPassport ? (
-                <div className="flex justify-center mb-4">
+                <div className="flex justify-center mb-16">
                     <div className="text-center">
-                        <p className="text-xd-12 text-[#8D8D8D] mb-xd-4">Passport</p>
-                        <div className="w-xd-193 h-xd-109 rounded-xd-15 overflow-hidden bg-gray-100 border border-gray-100">
+                        <p className="fz-12 text-[#8D8D8D] mb-4">Passport</p>
+                        <div className="w-193 h-109 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
                             {idDocument?.frontImageData ? (
                                 <img
                                     src={idDocument.frontImageData}
@@ -138,13 +137,13 @@ export default function IDSummaryScreen() {
                     </div>
                 </div>
             ) : (
-                <div className="mb-4">
-                    {/* <div className="flex mb-xd-4">
-                        <p className="text-xd-12 text-[#8D8D8D] flex-1 text-center">Front Side</p>
-                        <p className="text-xd-12 text-[#8D8D8D] flex-1 text-center">Back Side</p>
+                <div className="mb-16">
+                    {/* <div className="flex mb-4">
+                        <p className="fz-12 text-[#8D8D8D] flex-1 text-center">Front Side</p>
+                        <p className="fz-12 text-[#8D8D8D] flex-1 text-center">Back Side</p>
                     </div> */}
-                    <div className="flex gap-xd-5">
-                        <div className=" w-xd-193 h-xd-109 rounded-xd-15 overflow-hidden bg-gray-100 border border-gray-100">
+                    <div className="flex gap-5">
+                        <div className=" w-193 h-109 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
                             {idDocument?.frontImageData ? (
                                 <img
                                     src={idDocument.frontImageData}
@@ -155,7 +154,7 @@ export default function IDSummaryScreen() {
                                 <div className="w-full h-full bg-gray-200" />
                             )}
                         </div>
-                        <div className=" w-xd-193 h-xd-109 rounded-xd-15 overflow-hidden bg-gray-100 border border-gray-100">
+                        <div className=" w-193 h-109 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
                             {idDocument?.backImageData ? (
                                 <img
                                     src={idDocument.backImageData}
@@ -171,63 +170,63 @@ export default function IDSummaryScreen() {
             )}
 
             {/* Information Detected heading */}
-            <div className="flex justify-center items-center gap-2 mb-4">
+            <div className="flex justify-center items-center gap-8 mb-16">
                 <Image
                     src={liveDetectIdSvg}
                     alt="information detected"
-                    className="object-contain shrink-0 w-xd-20 h-xd-20"
+                    className="object-contain shrink-0 w-20 h-20"
                 />
-                <span className="text-xd-16 font-medium text-[#1D1D1D]">Information Detected</span>
+                <span className="fz-16 font-medium text-[#1D1D1D]">Information Detected</span>
             </div>
 
             {/* Fields */}
-            <div className="flex flex-col gap-xd-5 mb-4">
+            <div className="flex flex-col gap-5 mb-16">
                 {fields.map(({ label, value }) => (
                     <div
                         key={label}
-                        className="h-xd-55 w-xd-390 bg-[#FCFCFC] p-xd-10 rounded-xd-15"
+                        className="h-55 w-390 bg-[#FCFCFC] p-10 rad-15"
                     >
-                        <p className="text-xd-12 text-[#8D8D8D] pb-xd-3">{label}</p>
-                        <p className="text-xd-14 text-[#1D1D1D]">{value}</p>
+                        <p className="fz-12 text-[#8D8D8D] pb-3">{label}</p>
+                        <p className="fz-14 text-[#1D1D1D]">{value}</p>
                     </div>
                 ))}
             </div>
-            <FlexibleSpace size={90} share={0.7} />
+            <FlexSpace size={90} share={0.7} />
             <div className="mt-auto flex items-center flex-col justify-end">
                 {/* Privacy badge */}
-                <div className="flex items-center flex-col justify-center gap-2 mb-xd-12">
+                <div className="flex items-center flex-col justify-center gap-8 mb-12">
                     <Image
                         src={shieldSvg}
                         alt="shield"
-                        className="w-xd-15 h-xd-15 object-contain"
+                        className="w-15 h-15 object-contain"
                     />
-                    <span className="text-xd-12 text-[#388CFF]">
+                    <span className="fz-12 text-[#388CFF]">
                         Your Privacy Is Completely Safe
                     </span>
                 </div>
 
                 {/* Submission error */}
                 {submitError && (
-                    <p className="text-xd-12 text-[#E53E3E] text-center mb-3 px-2">{submitError}</p>
+                    <p className="fz-12 text-[#E53E3E] text-center mb-12 px-8">{submitError}</p>
                 )}
 
                 {/* CTAs */}
                 <button
                     onClick={handleSubmit}
                     disabled={submitting}
-                    className="mb-xd-30 w-xd-390 h-xd-60 py-4 rounded-xd-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] text-xd-16 font-medium disabled:opacity-50"
+                    className="mb-30 w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium disabled:opacity-50"
                 >
                     {'Correct, Next'}
                 </button>
                 <button
                     onClick={handleFailure}
                     disabled={submitting}
-                    className="w-full text-center text-sm text-[#388CFF] hover:underline mb-2 disabled:opacity-40"
+                    className="w-full text-center text-sm text-[#388CFF] hover:underline mb-8 disabled:opacity-40"
                 >
                     Incorrect, Try Again
                 </button>
             </div>
-            <FlexibleSpace size={35} share={0} />
+            <FlexSpace size={35} share={0} />
         </div>
     );
 }

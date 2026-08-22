@@ -3,18 +3,15 @@
 import React, { useEffect } from 'react';
 import Image from 'next/image';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
-// TODO(kyc-port): rdb AuthContext — updateUser/userData come from the dashboard session
-// import { useAuth } from '@/context/AuthContext';
+import { useKycSession } from '@/features/kyc/context/KycSessionContext';
 import { useRouter } from 'next/navigation';
-// TODO(kyc-port): rdb's api layer — use the dashboard's src/lib/api instead
-// import { api } from '@/api';
-// TODO(kyc-port): rdb auth types (KycStatusResponse, User)
-// import { KycVerificationStatus } from '@/core/types/auth';
+import { api } from '@/features/kyc/services/kycApi';
+import { KycVerificationStatus } from '@/features/kyc/types/verification';
 import verifiedBigSvg from '@/features/kyc/assets/verified-big.svg';
 
 export default function SuccessScreen() {
     const { markCompleted, idDocument } = useVerification();
-    const { userData, refreshUser, updateUser } = useAuth();
+    const { userData, refreshUser, updateUser } = useKycSession();
     const router = useRouter();
 
     // Show the verified person's name — `idDocument.name` (e.g. "DANI MANSOUR"),
@@ -105,26 +102,26 @@ export default function SuccessScreen() {
 
     return (
         <div
-            className="flex flex-col h-full bg-white items-center justify-center px-6 py-8 cursor-pointer"
+            className="flex flex-col h-full bg-white items-center justify-center px-24 py-32 cursor-pointer"
             onClick={() => router.push('/home')}
         >
-            <h1 className="text-xd-30 font-bold text-center text-[#1D1D1D]">
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D]">
                 Success Verification !
             </h1>
-            <p className="text-xd-16 font-medium text-center text-[#1D1D1D] mb-xd-33 mt-xd-11">
+            <p className="fz-16 font-medium text-center text-[#1D1D1D] mb-33 mt-11">
                 You Have Enjoy With Our Full Access
             </p>
 
             {/* Blue rosette verification badge */}
-            <div className="mb-xd-20">
+            <div className="mb-20">
                 <Image
                     src={verifiedBigSvg}
                     alt="verified"
-                    className="object-contain w-xd-150 h-xd-150"
+                    className="object-contain w-150 h-150"
                 />
             </div>
 
-            <p className="text-xd-18 font-medium text-[#1D1D1D]">{userName || 'RDB User'}</p>
+            <p className="fz-18 font-medium text-[#1D1D1D]">{userName || 'RDB User'}</p>
         </div>
     );
 }

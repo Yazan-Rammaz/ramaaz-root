@@ -1,36 +1,37 @@
-import type { ReactNode } from 'react';
-import { getTranslations } from 'next-intl/server';
-import { requireSession } from '@/lib/auth/session';
-import { logoutAction } from '@/features/auth/actions';
-import { Screen } from '@/components/ui/Screen';
-import { PasscodeGate } from '@/features/auth/components/PasscodeGate';
+import type { ReactNode } from "react";
+import { requireSession } from "@/lib/auth/session";
+import { AddActionProvider } from "@/features/shell/add-action";
+import { PasscodeGate } from "@/features/auth/components/PasscodeGate";
+import { Sidebar } from "@/features/shell/components/Sidebar";
+import { Navbar } from "@/features/shell/components/Navbar";
 
 /**
- * Authoritative auth gate for the whole protected area: `requireSession()` hits
- * NestJS `/auth/me`. If it fails, it redirects to /login before any child
- * renders. (The edge proxy only does silent refresh + headers.)
+ * The app shell for the whole protected area: fixed left rail + top navbar, with
+ * pages rendering in the fluid content region. Built as flex (rail = fixed
+ * scaled width, content fills the rest) so it fits every canvas with NO x/y
+ * scroll — the shape is held by the scaling engine, not a fixed 1366×1024 box.
+ *
+ * `requireSession()` is the authoritative auth gate (backend `/auth/me`).
+ * <PasscodeGate> adds the UX lock: a fresh page load bounces to the passcode
+ * screen even when the session cookie is still alive.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-    const user = await requireSession();
-    const t = await getTranslations('common');
-    const tRoles = await getTranslations('roles');
+  await requireSession();
 
-    return (
-        <Screen variant="bleed">
-            {/* Re-prompt the passcode on every fresh load (in-memory unlock flag). */}
-            <PasscodeGate />
-            <header className="border-foreground/10 flex h-64 items-center justify-between border-b px-24">
-                <span className="fz-18 font-semibold">{t('appName')}</span>
-                <div className="flex items-center gap-16">
-                    <span className="fz-14 opacity-70">{user.name}</span>
-                    <form action={logoutAction}>
-                        <button type="submit" className="fz-14 underline">
-                            {t('logout')}
-                        </button>
-                    </form>
-                </div>
-            </header>
-            <div className="px-24 py-24">{children}</div>
-        </Screen>
-    );
+  return (
+    <AddActionProvider>
+      <PasscodeGate />
+      <div className="flex h-full w-full overflow-hidden">
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Navbar />
+          {/* Page content opens here. Long pages scroll INSIDE this region only.
+              scrollbar-gutter reserves the scrollbar's width up front so a page
+              crossing the scroll threshold (e.g. AI content revealing) doesn't
+              shift everything horizontally when the bar appears. */}
+          <main className="thin-scroll relative min-h-0 flex-1 overflow-auto">{children}</main>
+        </div>
+      </div>
+    </AddActionProvider>
+  );
 }

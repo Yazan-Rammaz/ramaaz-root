@@ -1,2 +1,10 @@
 # Copy to .dev.vars and fill in. Documents required env for local dev.
-NEST_API_URL="http://localhost:3001"
+
+# Base URL of the remote backend (auth + the systems registry). Must include
+# the scheme — http:// or https://. Optional: leave it out and the dashboard
+# runs with no backend (screens render, data calls fail with one clear error).
+NEST_API_URL="https://staging-backend.ramaaz.store"
+
+# Sent as `token` in POST /v1/registration. Temporary: a dedicated endpoint
+# will issue this — see src/lib/auth/registration-token.ts.
+REGISTRATION_TOKEN=""

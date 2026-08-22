@@ -1,5 +1,25 @@
+/**
+ * KYC state of an admin account. rdb kept this in `@/core/types/auth`; here it
+ * belongs to the feature, because root identity has no KYC concept yet.
+ *
+ * The string VALUES are what the backend sends — confirm them against the real
+ * API before going live (SCENARIOS.md §"What I need from you").
+ */
+export enum KycVerificationStatus {
+    NOT_STARTED = 'not_started',
+    PENDING = 'pending',
+    VERIFIED = 'verified',
+    REJECTED = 'rejected',
+}
+
 export type VerificationStep =
     | 'intro'
+    /**
+     * The every-login gate: capture a live face and compare it against the
+     * reference photo the backend already holds. Distinct from 'face-match',
+     * which compares the live face against the photo on the scanned ID.
+     */
+    | 'face-reverify'
     | 'id-capture-front'
     | 'id-capture-back'
     | 'id-summary'

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useRouter } from 'next/navigation';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
@@ -17,8 +17,7 @@ import idFrontSvg from '@/features/kyc/assets/id-front.svg';
 import idBackSvg from '@/features/kyc/assets/id-back.svg';
 import shieldSvg from '@/features/kyc/assets/shield.svg';
 import ExitConfirmDialog from '../ExitConfirmDialog';
-// TODO(kyc-port): rdb scaling system (xd-* utilities, Page, FlexibleSpace) — not copied
-// import { FlexibleSpace } from '@/scaling';
+import { FlexSpace } from '@/components/ui/FlexSpace';
 import { idConfig, kycConfig } from '@/features/kyc/config/kycConfig';
 import { FaceProgressBar } from './AwsFaceLiveness';
 
@@ -809,7 +808,7 @@ export default function IDCaptureScreen() {
                 <img
                     src={debugPreview}
                     alt="Crop Preview"
-                    className="absolute bottom-4 right-4 w-32 h-20 object-contain border-2 border-red-500 z-90 bg-black"
+                    className="absolute bottom-16 end-16 w-128 h-80 object-contain border-2 border-red-500 z-90 bg-black"
                     onClick={() => {
                         const win = window.open();
                         if (win)
@@ -829,7 +828,7 @@ export default function IDCaptureScreen() {
             />
 
             {/* Close button */}
-            <div className="flex absolute top-xd-50 right-xd-30 justify-end mb-2">
+            <div className="flex absolute top-50 end-30 justify-end mb-8">
                 <button
                     onClick={() => setShowExitDialog(true)}
                     className="text-red-400 hover:text-red-600"
@@ -845,18 +844,18 @@ export default function IDCaptureScreen() {
                 </button>
             </div>
 
-            <FlexibleSpace size={100} share={0.3} />
+            <FlexSpace size={100} share={0.3} />
             {/* Header */}
-            <h1 className="text-xd-30 font-bold text-center text-[#1D1D1D] mb-xd-5">
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
                 Identity Verification !
             </h1>
-            <div className="flex items-center justify-center gap-2 mb-xd-11">
+            <div className="flex items-center justify-center gap-8 mb-11">
                 <Image
                     src={liveDetectIdSvg}
                     alt="live detect ID"
-                    className="object-contain w-xd-20 h-xd-20"
+                    className="object-contain w-20 h-20"
                 />
-                <span className="text-xd-16 font-medium text-[#1D1D1D]">
+                <span className="fz-16 font-medium text-[#1D1D1D]">
                     Live Detection Your ID
                 </span>
             </div>
@@ -864,7 +863,7 @@ export default function IDCaptureScreen() {
             {/* Camera viewfinder */}
             <div
                 ref={viewfinderRef}
-                className="relative w-xd-350 h-xd-400 mx-auto  rounded-xd-30 overflow-hidden bg-[#000000] mb-xd-10"
+                className="relative w-350 h-400 mx-auto  rad-30 overflow-hidden bg-[#000000] mb-10"
             >
                 <video
                     ref={videoRef}
@@ -902,12 +901,12 @@ export default function IDCaptureScreen() {
                     // Same mirror as the overlay above — these brackets are positioned
                     // from docCorners, which are raw-frame coordinates.
                     <div
-                        className="absolute inset-5 pointer-events-none"
+                        className="absolute inset-20 pointer-events-none"
                         style={{ transform: shouldMirror ? 'scaleX(-1)' : undefined }}
                     >
                         {/* Top-left */}
                         <div
-                            className="absolute top-0 left-0 w-xd-18 h-xd-18"
+                            className="absolute top-0 start-0 w-18 h-18"
                             style={{
                                 borderTop: `3px solid ${cornerColor}`,
                                 borderLeft: `3px solid ${cornerColor}`,
@@ -919,7 +918,7 @@ export default function IDCaptureScreen() {
                         />
                         {/* Top-right */}
                         <div
-                            className="absolute top-0 right-0 w-xd-18 h-xd-18"
+                            className="absolute top-0 end-0 w-18 h-18"
                             style={{
                                 borderTop: `3px solid ${cornerColor}`,
                                 borderRight: `3px solid ${cornerColor}`,
@@ -931,7 +930,7 @@ export default function IDCaptureScreen() {
                         />
                         {/* Bottom-left */}
                         <div
-                            className="absolute bottom-0 left-0 w-xd-18 h-xd-18"
+                            className="absolute bottom-0 start-0 w-18 h-18"
                             style={{
                                 borderBottom: `3px solid ${cornerColor}`,
                                 borderLeft: `3px solid ${cornerColor}`,
@@ -943,7 +942,7 @@ export default function IDCaptureScreen() {
                         />
                         {/* Bottom-right */}
                         <div
-                            className="absolute bottom-0 right-0 w-xd-18 h-xd-18"
+                            className="absolute bottom-0 end-0 w-18 h-18"
                             style={{
                                 borderBottom: `3px solid ${cornerColor}`,
                                 borderRight: `3px solid ${cornerColor}`,
@@ -968,7 +967,7 @@ export default function IDCaptureScreen() {
 
                             {/* Framer Motion laser scanner */}
                             <motion.div
-                                className="absolute left-0 right-0 pointer-events-none z-20"
+                                className="absolute start-0 end-0 pointer-events-none z-20"
                                 style={{
                                     height: '3px',
                                     background:
@@ -984,7 +983,7 @@ export default function IDCaptureScreen() {
 
                 {/* Stability progress bar — fills as the frame holds steady */}
                 {pollState === 'aligning' && checkResult?.pass && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.75 bg-black/20 overflow-hidden">
+                    <div className="absolute bottom-0 start-0 end-0 h-0.75 bg-black/20 overflow-hidden">
                         <div
                             className="h-full transition-all duration-150"
                             style={{
@@ -997,8 +996,8 @@ export default function IDCaptureScreen() {
 
                 {/* Status overlay inside the frame */}
                 {pollState !== 'idle' && pollState !== 'done' && (
-                    <div className="absolute bottom-4 left-4 right-4 text-center">
-                        <p className="text-xs text-white bg-black/50 rounded-lg px-3 py-2">
+                    <div className="absolute bottom-16 start-16 end-16 text-center">
+                        <p className="text-xs text-white bg-black/50 rounded-lg px-12 py-8">
                             {statusText}
                         </p>
                     </div>
@@ -1006,8 +1005,8 @@ export default function IDCaptureScreen() {
 
                 {/* Rejection hint — below the viewfinder, old style */}
                 {(captureHint || showFlipHint) && pollState === 'aligning' && (
-                    <div className="absolute -bottom-xd-1 left-0 right-0 px-xd-10">
-                        <p className="text-xs text-[#E53E3E] bg-red-50 border border-red-200 rounded-xd-12 px-3 py-2 text-center leading-snug">
+                    <div className="absolute -bottom-1 start-0 end-0 px-10">
+                        <p className="text-xs text-[#E53E3E] bg-red-50 border border-red-200 rad-12 px-12 py-8 text-center leading-snug">
                             {captureHint ?? 'Show the side of your ID with your photo'}
                         </p>
                     </div>
@@ -1016,9 +1015,9 @@ export default function IDCaptureScreen() {
 
             {/* Tabs */}
             {isPassport ? (
-                <div className="flex items-center justify-center mb-3">
+                <div className="flex items-center justify-center mb-12">
                     <div className="text-center">
-                        <div className="inline-flex items-center justify-center gap-1 pb-2">
+                        <div className="inline-flex items-center justify-center gap-4 pb-8">
                             <Image
                                 src={idFrontSvg}
                                 alt="passport"
@@ -1028,15 +1027,15 @@ export default function IDCaptureScreen() {
                             />
                             <span className="text-xs font-medium text-[#388CFF]">Passport</span>
                         </div>
-                        <div className="mx-auto w-xd-306">
+                        <div className="mx-auto w-306">
                             <FaceProgressBar pct={pollState === 'done' ? 100 : 0} tone="idle" />
                         </div>
                     </div>
                 </div>
             ) : (
-                <div className="flex items-center justify-center gap-xd-4 mb-3">
-                    <div className=" w-xd-153 text-center">
-                        <div className={`inline-flex items-center justify-center gap-1 pb-2`}>
+                <div className="flex items-center justify-center gap-4 mb-12">
+                    <div className=" w-153 text-center">
+                        <div className={`inline-flex items-center justify-center gap-4 pb-8`}>
                             <Image
                                 src={idFrontSvg}
                                 alt="front"
@@ -1056,15 +1055,15 @@ export default function IDCaptureScreen() {
                                 Front Side
                             </span>
                         </div>
-                        <div className="mx-auto w-xd-153">
+                        <div className="mx-auto w-153">
                             <FaceProgressBar
                                 pct={activeSide === 'front' ? 0 : 100}
                                 tone={activeSide === 'front' ? 'locked' : 'idle'}
                             />
                         </div>
                     </div>
-                    <div className=" w-xd-153 text-center">
-                        <div className={`inline-flex items-center justify-center gap-1 pb-2`}>
+                    <div className=" w-153 text-center">
+                        <div className={`inline-flex items-center justify-center gap-4 pb-8`}>
                             <Image
                                 src={idBackSvg}
                                 alt="back"
@@ -1084,7 +1083,7 @@ export default function IDCaptureScreen() {
                                 Back Side
                             </span>
                         </div>
-                        <div className="mx-auto w-xd-153">
+                        <div className="mx-auto w-153">
                             <FaceProgressBar
                                 pct={pollState === 'done' ? 100 : 0}
                                 tone={activeSide === 'back' ? 'idle' : 'locked'}
@@ -1097,8 +1096,8 @@ export default function IDCaptureScreen() {
             {/* Captured thumbnails */}
             {(frontImageData || backImageData) &&
                 (isPassport ? (
-                    <div className="flex justify-center mb-3">
-                        <div className="w-xd-306 h-xd-180 rounded-xd-15 overflow-hidden bg-gray-100 border border-gray-100">
+                    <div className="flex justify-center mb-12">
+                        <div className="w-306 h-180 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
                             {frontImageData ? (
                                 <img
                                     src={frontImageData}
@@ -1111,8 +1110,8 @@ export default function IDCaptureScreen() {
                         </div>
                     </div>
                 ) : (
-                    <div className="flex gap-2 mb-3">
-                        <div className="flex-1 w-xd-153 h-xd-96 rounded-xd-15 overflow-hidden bg-gray-100 border border-gray-100">
+                    <div className="flex gap-8 mb-12">
+                        <div className="flex-1 w-153 h-96 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
                             {frontImageData ? (
                                 <img
                                     src={frontImageData}
@@ -1123,7 +1122,7 @@ export default function IDCaptureScreen() {
                                 <div className="w-full h-full" />
                             )}
                         </div>
-                        <div className="flex-1 w-xd-153 h-xd-96 rounded-xd-15 overflow-hidden bg-gray-100 border border-gray-100">
+                        <div className="flex-1 w-153 h-96 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
                             {backImageData ? (
                                 <img
                                     src={backImageData}
@@ -1137,11 +1136,11 @@ export default function IDCaptureScreen() {
                     </div>
                 ))}
 
-            <FlexibleSpace size={160} share={0.6} />
+            <FlexSpace size={160} share={0.6} />
             {/* Camera error */}
             {cameraError && (
-                <div className="text-center mb-2">
-                    <p className="text-xs text-red-500 mb-1">{cameraError}</p>
+                <div className="text-center mb-8">
+                    <p className="text-xs text-red-500 mb-4">{cameraError}</p>
                     <button
                         onClick={startCamera}
                         className="text-xs text-[#388CFF] hover:underline"
@@ -1152,13 +1151,13 @@ export default function IDCaptureScreen() {
             )}
             <div className="mt-auto flex items-center flex-col justify-end">
                 {/* Privacy badge */}
-                <div className="flex items-center flex-col justify-center gap-2 mb-xd-12">
+                <div className="flex items-center flex-col justify-center gap-8 mb-12">
                     <Image
                         src={shieldSvg}
                         alt="shield"
-                        className="w-xd-15 h-xd-15 object-contain"
+                        className="w-15 h-15 object-contain"
                     />
-                    <span className="text-xd-12 text-[#388CFF]">
+                    <span className="fz-12 text-[#388CFF]">
                         Your Privacy Is Completely Safe
                     </span>
                 </div>
@@ -1167,14 +1166,14 @@ export default function IDCaptureScreen() {
                 {pollState === 'idle' && (
                     <button
                         onClick={handleCaptureClick}
-                        className="w-xd-390 h-xd-60 py-4 rounded-xd-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] text-xd-16 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         Start Live Detection Your ID
                     </button>
                 )}
             </div>
 
-            <FlexibleSpace size={35} share={0.1} />
+            <FlexSpace size={35} share={0.1} />
         </div>
     );
 }

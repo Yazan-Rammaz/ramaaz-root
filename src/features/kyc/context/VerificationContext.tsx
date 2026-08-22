@@ -34,8 +34,19 @@ const VerificationContext = createContext<VerificationContextType | undefined>(u
 
 const MAX_ATTEMPTS = 10;
 
-export function VerificationProvider({ children }: { children: React.ReactNode }) {
-    const [currentStep, setCurrentStep] = useState<VerificationStep>('intro');
+export function VerificationProvider({
+    children,
+    initialStep = 'intro',
+}: {
+    children: React.ReactNode;
+    /**
+     * Where the flow opens. Every-login sign-in starts at 'face-reverify';
+     * first-login enrolment starts at 'intro'. The caller decides, because only
+     * the server knows whether this admin is already enrolled.
+     */
+    initialStep?: VerificationStep;
+}) {
+    const [currentStep, setCurrentStep] = useState<VerificationStep>(initialStep);
     const [direction, setDirection] = useState<1 | -1>(1);
     const [completedSteps, setCompletedSteps] = useState<Set<VerificationStep>>(new Set());
     const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});

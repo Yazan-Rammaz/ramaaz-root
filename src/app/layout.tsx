@@ -15,7 +15,7 @@ const appSans = Quicksand({
 });
 
 export const metadata: Metadata = {
-    title: 'RDB Management',
+    title: 'Ramaaz Root',
     description: 'Agent bank & country manager administration',
 };
 

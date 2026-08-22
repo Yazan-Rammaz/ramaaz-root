@@ -11,10 +11,7 @@ import type {
     ReverifyResult,
 } from './kycService.interface';
 import type { LivenessResult, IDDocument, MatchResult } from '@/features/kyc/types/verification';
-// TODO(kyc-port): rdb's api layer — use the dashboard's src/lib/api instead
-// import { api } from '@/api';
-// TODO(kyc-port): rdb's api layer — use the dashboard's src/lib/api instead
-// import type { ApiResult } from '@/api';
+import { api, type ApiResult } from './kycApi';
 
 /**
  * IKycService over the HTTP API.

@@ -25,7 +25,6 @@ npm run dev                      # http://localhost:3000
 - **Roles** — same registration for all; NestJS owns authorization.
 - **iOS animations** — Motion presets, page transitions, shared-element cards.
 - **One way enforced** — import-layer + no-`fetch`-in-UI lint, feature generator.
-- **Tests** — Vitest (unit/component) + Playwright (scaling + flows), GitHub CI.
 
 ## Scripts
 
@@ -34,8 +33,6 @@ npm run dev                      # http://localhost:3000
 | `npm run dev`       | Local dev with Cloudflare bindings           |
 | `npm run lint`      | ESLint (layering + fetch ban)                |
 | `npm run typecheck` | `tsc --noEmit`                               |
-| `npm run test`      | Vitest                                       |
-| `npm run e2e`       | Playwright                                   |
 | `npm run gen`       | Scaffold a new feature slice                 |
 | `npm run preview`   | Build + run on Cloudflare Workers locally    |
 | `npm run deploy`    | Build + deploy to Cloudflare                 |

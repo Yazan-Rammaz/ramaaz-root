@@ -82,7 +82,11 @@ async function syncOpenCv() {
     }
 }
 
-const ok = syncMediapipe() && (await syncOpenCv());
+// Both, unconditionally — `a && await b` would skip the OpenCV download
+// whenever MediaPipe is missing, which is exactly the fresh-clone case.
+const mediapipeOk = syncMediapipe();
+const openCvOk = await syncOpenCv();
+const ok = mediapipeOk && openCvOk;
 // Do not fail the install: a developer who never touches KYC should not be
 // blocked by a flaky download. The warning above is the signal.
 if (!ok) console.warn('[sync-vendor] completed with errors (see above).');

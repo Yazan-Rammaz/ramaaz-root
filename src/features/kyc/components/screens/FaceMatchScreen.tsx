@@ -2,17 +2,15 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
-// TODO(kyc-port): rdb's api layer — use the dashboard's src/lib/api instead
-// import { api } from '@/api';
+import { api } from '@/features/kyc/services/kycApi';
 import { useRouter } from 'next/navigation';
 import { createKycService } from '@/features/kyc/services';
 import ExitConfirmDialog from '../ExitConfirmDialog';
 import faceDetectSvg from '@/features/kyc/assets/face-detect.svg';
 import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
-// TODO(kyc-port): rdb scaling system (xd-* utilities, Page, FlexibleSpace) — not copied
-// import { FlexibleSpace } from '@/scaling';
+import { FlexSpace } from '@/components/ui/FlexSpace';
 
 type MatchState = 'matching' | 'success' | 'review' | 'failed';
 
@@ -279,14 +277,14 @@ export default function FaceMatchScreen() {
     const idImage = idDocument?.frontImageData || idDocument?.idFaceImageData;
 
     return (
-        <div className="flex flex-col h-full bg-white px-xd-40">
+        <div className="flex flex-col h-full bg-white px-40">
             <ExitConfirmDialog
                 open={showExitDialog}
                 onCancel={() => setShowExitDialog(false)}
                 onConfirm={() => router.push('/home')}
             />
 
-            <div className="flex absolute top-xd-50 right-xd-30 justify-end mb-2">
+            <div className="flex absolute top-50 end-30 justify-end mb-8">
                 <button
                     onClick={() => setShowExitDialog(true)}
                     className="text-red-400 hover:text-red-600"
@@ -302,22 +300,22 @@ export default function FaceMatchScreen() {
                 </button>
             </div>
 
-            <FlexibleSpace size={100} share={0.3} />
+            <FlexSpace size={100} share={0.3} />
 
-            <h1 className="text-xd-30 font-bold text-center text-[#1D1D1D] mb-xd-5">
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
                 Identity Verification !
             </h1>
-            <div className="flex items-center justify-center gap-2 mb-xd-11">
-                <Image src={faceDetectSvg} alt="face" className="object-contain w-xd-20 h-xd-20" />
-                <Image src={liveDetectIdSvg} alt="id" className="object-contain w-xd-20 h-xd-20" />
-                <span className="text-xd-16 font-medium text-[#1D1D1D] whitespace-nowrap">
+            <div className="flex items-center justify-center gap-8 mb-11">
+                <Image src={faceDetectSvg} alt="face" className="object-contain w-20 h-20" />
+                <Image src={liveDetectIdSvg} alt="id" className="object-contain w-20 h-20" />
+                <span className="fz-16 font-medium text-[#1D1D1D] whitespace-nowrap">
                     {subtitle}
                 </span>
             </div>
 
             {/* Comparison stage: face (back) and ID (front, fading) on the same canvas */}
             <div
-                className="relative mx-auto overflow-hidden rounded-xd-30 transition-colors duration-500 w-xd-350 h-xd-400 bg-[#E9EEEE]"
+                className="relative mx-auto overflow-hidden rad-30 transition-colors duration-500 w-350 h-400 bg-[#E9EEEE]"
                 style={{ border: `2px solid ${borderColor}` }}
             >
                 {/* User face — always rendered */}
@@ -337,7 +335,7 @@ export default function FaceMatchScreen() {
                 {/* AI scanning line over the face — moves while matching */}
                 {matchState === 'matching' && (
                     <motion.div
-                        className="absolute left-0 right-0 pointer-events-none z-20"
+                        className="absolute start-0 end-0 pointer-events-none z-20"
                         style={{
                             height: '3px',
                             background:
@@ -352,7 +350,7 @@ export default function FaceMatchScreen() {
                 {/* ID image — crossfades over the face every cycle */}
                 {idImage && matchState === 'matching' && (
                     <motion.div
-                        className="absolute z-10 w-xd-280 h-xd-157 bottom-xd-11 left-xd-35"
+                        className="absolute z-10 w-280 h-157 bottom-11 start-35"
                         animate={{ opacity: [0.5, 1, 1, 0.5, 0.5] }}
                         transition={{
                             duration: 2,
@@ -443,7 +441,7 @@ export default function FaceMatchScreen() {
             </div>
 
             {matchState === 'review' && (
-                <div className="mt-5 mx-auto max-w-75 rounded-xl border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-4 py-3 text-center">
+                <div className="mt-20 mx-auto max-w-300 rounded-xl border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-16 py-12 text-center">
                     <p className="text-xs text-center font-medium text-[#92400E]">
                         Match accepted with low confidence — your verification will be reviewed by
                         our team. Continuing to the next step…
@@ -451,13 +449,13 @@ export default function FaceMatchScreen() {
                 </div>
             )}
             {matchState === 'failed' && (
-                <p className="text-xd-14 text-center text-[#1D1D1D] mt-xd-12 mb-5">
+                <p className="fz-14 text-center text-[#1D1D1D] mt-12 mb-20">
                     We noticed a discrepancy in the image and there is an issue with your
                     verification.
                 </p>
             )}
 
-            <FlexibleSpace size={150} share={0.6} />
+            <FlexSpace size={150} share={0.6} />
 
             {matchState === 'failed' && (
                 <div className="mt-auto flex items-center flex-col justify-end">
@@ -467,19 +465,19 @@ export default function FaceMatchScreen() {
                             resetSession();
                             goTo('intro', -1);
                         }}
-                        className="w-xd-390 h-xd-60 py-4 rounded-xd-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] text-xd-16 font-medium"
+                        className="w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium"
                     >
                         Try Again With The Correction
                     </button>
                     <button
                         onClick={() => runMatch()}
-                        className="text-xd-14 mt-xd-30 text-[#4D84FF] hover:underline"
+                        className="fz-14 mt-30 text-[#4D84FF] hover:underline"
                     >
                         Rematch
                     </button>
                 </div>
             )}
-            <FlexibleSpace size={35} share={0.1} />
+            <FlexSpace size={35} share={0.1} />
         </div>
     );
 }

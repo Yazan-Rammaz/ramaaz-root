@@ -15,7 +15,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useRouter } from 'next/navigation';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
@@ -24,8 +24,7 @@ import type { LivenessChallenge } from '@/features/kyc/services/kycService.inter
 import faceDetectSvg from '@/features/kyc/assets/face-detect.svg';
 import shieldSvg from '@/features/kyc/assets/shield.svg';
 import ExitConfirmDialog from '../ExitConfirmDialog';
-// TODO(kyc-port): rdb scaling system (xd-* utilities, Page, FlexibleSpace) — not copied
-// import FlexibleSpace from '@/scaling/FlexibleSpace';
+import { FlexSpace } from '@/components/ui/FlexSpace';
 import { faceConfig } from '@/features/kyc/config/kycConfig';
 
 // ─── Progress bar based on /assets/icons/verification/face-bar.svg ───────────
@@ -987,7 +986,7 @@ export default function AwsFaceLivenessScreen() {
 
     return (
         <div
-            className="flex flex-col h-full px-xd-40"
+            className="flex flex-col h-full px-40"
             style={{
                 backgroundColor: allDone ? '#E9EEEE' : '#FFFFFF',
                 transition: 'background-color 600ms ease',
@@ -1003,7 +1002,7 @@ export default function AwsFaceLivenessScreen() {
             />
 
             {/* Close button */}
-            <div className="flex absolute top-xd-50 right-xd-30 justify-end mb-2">
+            <div className="flex absolute top-50 end-30 justify-end mb-8">
                 <button
                     onClick={() => setShowExitDialog(true)}
                     className="text-red-400 hover:text-red-600"
@@ -1019,26 +1018,26 @@ export default function AwsFaceLivenessScreen() {
                 </button>
             </div>
 
-            <FlexibleSpace size={100} share={0.1} />
+            <FlexSpace size={100} share={0.1} />
 
             {/* Header */}
-            <h1 className="text-xd-30 font-bold text-center text-[#1D1D1D] mb-xd-5">
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
                 Identity Verification !
             </h1>
-            <div className="flex items-center justify-center gap-2 mb-xd-11">
+            <div className="flex items-center justify-center gap-8 mb-11">
                 <Image
                     src={faceDetectSvg}
                     alt="live detect ID"
-                    className="object-contain w-xd-20 h-xd-20"
+                    className="object-contain w-20 h-20"
                 />
-                <span className="text-xd-16 font-medium text-[#1D1D1D]">
+                <span className="fz-16 font-medium text-[#1D1D1D]">
                     {allDone ? 'Identity Verification !' : 'Live Face Detection'}
                 </span>
             </div>
 
             {/* Camera viewport — same dimensions as FaceDetectionScreen */}
             <div
-                className="relative mx-auto w-xd-350 h-xd-400 rounded-xd-30 overflow-hidden bg-[#000000] mb-xd-10"
+                className="relative mx-auto w-350 h-400 rad-30 overflow-hidden bg-[#000000] mb-10"
                 style={{
                     borderColor: allDone ? '#A3FF38' : '#388CFF',
                     borderWidth: allDone ? 2 : 1,
@@ -1081,9 +1080,9 @@ export default function AwsFaceLivenessScreen() {
                 )}
 
                 {/* Corner brackets */}
-                <div className="absolute inset-5 pointer-events-none">
+                <div className="absolute inset-20 pointer-events-none">
                     <div
-                        className="absolute top-0 left-0 w-xd-18 h-xd-18 transition-colors duration-500"
+                        className="absolute top-0 start-0 w-18 h-18 transition-colors duration-500"
                         style={{
                             borderTop: `3px solid ${bracketColor}`,
                             borderLeft: `3px solid ${bracketColor}`,
@@ -1091,7 +1090,7 @@ export default function AwsFaceLivenessScreen() {
                         }}
                     />
                     <div
-                        className="absolute top-0 right-0 w-xd-18 h-xd-18 transition-colors duration-500"
+                        className="absolute top-0 end-0 w-18 h-18 transition-colors duration-500"
                         style={{
                             borderTop: `3px solid ${bracketColor}`,
                             borderRight: `3px solid ${bracketColor}`,
@@ -1099,7 +1098,7 @@ export default function AwsFaceLivenessScreen() {
                         }}
                     />
                     <div
-                        className="absolute bottom-0 left-0 w-xd-18 h-xd-18 transition-colors duration-500"
+                        className="absolute bottom-0 start-0 w-18 h-18 transition-colors duration-500"
                         style={{
                             borderBottom: `3px solid ${bracketColor}`,
                             borderLeft: `3px solid ${bracketColor}`,
@@ -1107,7 +1106,7 @@ export default function AwsFaceLivenessScreen() {
                         }}
                     />
                     <div
-                        className="absolute bottom-0 right-0 w-xd-18 h-xd-18 transition-colors duration-500"
+                        className="absolute bottom-0 end-0 w-18 h-18 transition-colors duration-500"
                         style={{
                             borderBottom: `3px solid ${bracketColor}`,
                             borderRight: `3px solid ${bracketColor}`,
@@ -1135,7 +1134,7 @@ export default function AwsFaceLivenessScreen() {
                 {/* Post-flash scanning line — sweeps over the cropped face top↔bottom. */}
                 {postFlashSparkles && (
                     <motion.div
-                        className="absolute left-0 right-0 pointer-events-none"
+                        className="absolute start-0 end-0 pointer-events-none"
                         style={{
                             height: '3px',
                             background:
@@ -1150,7 +1149,7 @@ export default function AwsFaceLivenessScreen() {
                 {/* AI scan-line — moves vertically during detecting to feel "powered by AI" */}
                 {phase === 'detecting' && !flashing && (
                     <motion.div
-                        className="absolute left-0 right-0 h-px pointer-events-none"
+                        className="absolute start-0 end-0 h-px pointer-events-none"
                         style={{
                             background:
                                 'linear-gradient(90deg, transparent 0%, rgba(122,168,255,0.85) 50%, transparent 100%)',
@@ -1191,7 +1190,7 @@ export default function AwsFaceLivenessScreen() {
 
                 {/* Pre-camera "Begin" overlay — black scrim with AI dashed oval and tips */}
                 {(phase === 'init' || phase === 'ready' || phase === 'failed') && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-xd-8 px-xd-20 bg-black/85">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 px-20 bg-black/85">
                         <motion.svg
                             width="120"
                             height="155"
@@ -1220,15 +1219,15 @@ export default function AwsFaceLivenessScreen() {
                             />
                         </motion.svg>
                         {phase === 'init' ? (
-                            <p className="text-white/90 text-xd-12 text-center">
+                            <p className="text-white/90 fz-12 text-center">
                                 Preparing AI session…
                             </p>
                         ) : phase === 'failed' ? (
-                            <p className="text-[#FF5F61] text-xd-12 text-center leading-snug">
+                            <p className="text-[#FF5F61] fz-12 text-center leading-snug">
                                 {instruction}
                             </p>
                         ) : (
-                            <p className="text-white/90 text-xd-12 text-center leading-snug">
+                            <p className="text-white/90 fz-12 text-center leading-snug">
                                 Tap <span className="text-[#FFD700] font-semibold">Begin</span> to
                                 start the AI liveness check
                             </p>
@@ -1239,7 +1238,7 @@ export default function AwsFaceLivenessScreen() {
 
             {/* Instruction message — sits below the camera frame */}
             {phase === 'detecting' && !allDone && (
-                <div className="mx-auto w-xd-330 mt-xd-12 min-h-xd-40 flex items-center justify-center">
+                <div className="mx-auto w-330 mt-12 min-h-40 flex items-center justify-center">
                     <AnimatePresence mode="wait">
                         <motion.p
                             key={instruction}
@@ -1247,7 +1246,7 @@ export default function AwsFaceLivenessScreen() {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -4 }}
                             transition={{ duration: 0.2 }}
-                            className={`text-xd-14 text-center leading-snug font-medium whitespace-pre-line ${
+                            className={`fz-14 text-center leading-snug font-medium whitespace-pre-line ${
                                 tone === 'red'
                                     ? 'text-[#E53E3E]'
                                     : tone === 'locked'
@@ -1263,14 +1262,14 @@ export default function AwsFaceLivenessScreen() {
 
             {/* Progress bar — only during the active challenge */}
             {phase === 'detecting' && !allDone && (
-                <div className="mx-auto w-xd-330 mt-xd-10">
+                <div className="mx-auto w-330 mt-10">
                     <FaceProgressBar pct={progressPct} tone={tone} />
                 </div>
             )}
 
             {cameraError && (
-                <div className="text-center mt-4">
-                    <p className="text-xs text-red-500 mb-1">{cameraError}</p>
+                <div className="text-center mt-16">
+                    <p className="text-xs text-red-500 mb-4">{cameraError}</p>
                     <button
                         onClick={startCamera}
                         className="text-xs text-[#388CFF] hover:underline"
@@ -1280,17 +1279,17 @@ export default function AwsFaceLivenessScreen() {
                 </div>
             )}
 
-            <FlexibleSpace size={200} share={0.8} />
+            <FlexSpace size={200} share={0.8} />
 
             {/* Bottom section — privacy badge + Begin button (only on ready) */}
             <div className="mt-auto flex items-center flex-col justify-end">
-                <div className="flex items-center flex-col justify-center gap-2 mb-xd-12">
+                <div className="flex items-center flex-col justify-center gap-8 mb-12">
                     <Image
                         src={shieldSvg}
                         alt="shield"
-                        className="w-xd-15 h-xd-15 object-contain"
+                        className="w-15 h-15 object-contain"
                     />
-                    <span className="text-xd-12 text-[#388CFF]">
+                    <span className="fz-12 text-[#388CFF]">
                         Your Privacy Is Completely Safe
                     </span>
                 </div>
@@ -1299,13 +1298,13 @@ export default function AwsFaceLivenessScreen() {
                     <motion.button
                         onClick={handleBegin}
                         whileTap={{ scale: 0.97 }}
-                        className="w-xd-390 h-xd-60 py-4 rounded-xd-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] text-xd-16 font-medium"
+                        className="w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium"
                     >
                         {phase === 'failed' ? 'Restart AI Face Check' : 'Begin AI Face Check'}
                     </motion.button>
                 )}
 
-                <FlexibleSpace size={35} share={0.1} />
+                <FlexSpace size={35} share={0.1} />
             </div>
         </div>
     );

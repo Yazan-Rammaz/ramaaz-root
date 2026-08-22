@@ -8,11 +8,11 @@ import { getSession } from "@/lib/auth/session";
  * reaches the client. The splash calls this on mount, concurrently with its
  * minimum-display timer. Any failure (e.g. backend unreachable) → login.
  */
-export async function resolveEntry(): Promise<"/login/passcode" | "/login"> {
+export async function resolveEntry(): Promise<"/dashboard" | "/login/passcode" | "/login"> {
   try {
     const session = await getSession();
-    // Authenticated → ask for the passcode (re-lock on every entry); otherwise
-    // start the full login flow.
+    // Authenticated users re-prove the passcode on every fresh load; the
+    // client-side lock (lock-state.ts) is what <PasscodeGate> checks after.
     return session ? "/login/passcode" : "/login";
   } catch {
     return "/login";

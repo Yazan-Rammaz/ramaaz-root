@@ -19,9 +19,19 @@ type Props = {
   ariaLabel: string;
   /** Min length before the submit arrow appears / submit is allowed. */
   revealArrowAt: number;
-  /** Where the arrow (and Enter) navigates. */
-  nextHref: string;
+  /** Where the arrow (and Enter) navigates (when there's no onSubmit). */
+  nextHref?: string;
+  /** Called with the value on submit — overrides nextHref navigation. */
+  onSubmit?: (value: string) => void | Promise<void>;
   maxLength?: number;
+  /** Mask the typed value (password step). */
+  secret?: boolean;
+  /**
+   * Starting value. Used by the temporary dev autofill; since it arrives
+   * asynchronously, the caller remounts this component with a `key` so the
+   * value lands as initial state instead of via a state-setting effect.
+   */
+  defaultValue?: string;
 };
 
 export function AuthCodeField({
@@ -29,10 +39,14 @@ export function AuthCodeField({
   ariaLabel,
   revealArrowAt,
   nextHref,
+  onSubmit,
   maxLength,
+  secret = false,
+  defaultValue = "",
 }: Props) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(defaultValue);
   const [focused, setFocused] = useState(false);
+  const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -42,10 +56,20 @@ export function AuthCodeField({
   }, []);
 
   const typing = value.length > 0;
-  const canSubmit = value.length >= revealArrowAt;
+  const canSubmit = value.length >= revealArrowAt && !busy;
 
-  function submit() {
-    if (canSubmit) router.push(nextHref);
+  async function submit() {
+    if (!canSubmit) return;
+    if (onSubmit) {
+      setBusy(true);
+      try {
+        await onSubmit(value);
+      } finally {
+        setBusy(false);
+      }
+    } else if (nextHref) {
+      router.push(nextHref);
+    }
   }
 
   return (
@@ -81,6 +105,7 @@ export function AuthCodeField({
         }}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        type={secret ? "password" : "text"}
         autoComplete="off"
         maxLength={maxLength}
         className={`caret-transparent fz-16 text-ink placeholder:text-muted absolute inset-0 h-full w-full bg-transparent ps-24 font-normal outline-none ${canSubmit ? "pe-56" : "pe-24"}`}
@@ -93,7 +118,7 @@ export function AuthCodeField({
           className="pointer-events-none absolute inset-0 flex items-center px-24"
         >
           <span className="fz-16 invisible font-normal whitespace-pre">
-            {value}
+            {secret ? "•".repeat(value.length) : value}
           </span>
           <span className="caret-blink fz-16 text-ink font-normal">_</span>
         </div>
