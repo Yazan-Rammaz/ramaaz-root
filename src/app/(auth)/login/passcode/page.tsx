@@ -51,16 +51,17 @@ export default async function EnterPasscodePage() {
             {/* Avatar 200×200, radius 15, with the XD background blur. */}
 
             <div className="h-45/100 flex items-end justify-center">
-                <div className="bg-muted/40 relative h-200 w-200 overflow-hidden rad-15">
-                    {/* No photo for this admin yet, so fall back to the default
-                        avatar glyph rather than an empty blurred plate. When a
-                        real photo exists it renders here instead — the KYC
-                        reference image is the natural source. */}
+                {/* One plate only. The background and the rad-15 corners come
+                    from this box; avatar.svg is a transparent glyph, so there
+                    is no second background of a different colour or radius
+                    showing through at the corners. Swap the glyph for the real
+                    photo when one exists — the KYC reference image. */}
+                <div className="bg-muted/40 h-200 w-200 overflow-hidden rad-15">
                     <Icon
                         name="side/avatar"
                         width={200}
                         height={200}
-                        className="absolute inset-0 h-full w-full object-cover"
+                        className="h-full w-full object-cover"
                     />
                 </div>
             </div>

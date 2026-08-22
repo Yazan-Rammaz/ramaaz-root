@@ -14,14 +14,19 @@ export function Sidebar() {
 
   return (
     <aside className="hairline-e flex h-full w-74 shrink-0 flex-col items-center py-16">
-      {/* User avatar (replace side/avatar.svg with the real image later). */}
-      <Icon
-        name="side/avatar"
-        width={50}
-        height={50}
-        alt={t("side.avatar")}
-        className="rad-12 object-cover"
-      />
+      {/* User avatar (drop the real image in place of the glyph later).
+          The plate — background + radius — belongs to this wrapper, not to
+          avatar.svg, so the two can never disagree about colour or corner
+          rounding at different sizes. */}
+      <div className="bg-muted/40 rad-12 h-50 w-50 shrink-0 overflow-hidden">
+        <Icon
+          name="side/avatar"
+          width={50}
+          height={50}
+          alt={t("side.avatar")}
+          className="h-full w-full object-cover"
+        />
+      </div>
 
       {/* Top: current page + empty page slots. */}
       <div className="mt-16 flex flex-col items-center gap-8">
