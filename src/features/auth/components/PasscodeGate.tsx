@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { PasscodeBoxes } from "./PasscodeBoxes";
-import { passcodeUnlockAction, verifyPasscodeAction } from "../actions";
+import {
+  forgetDeviceAction,
+  passcodeUnlockAction,
+  verifyPasscodeAction,
+} from "../actions";
 import { setDocumentUnlocked } from "../lock-flag";
 import { useCodeFeedback } from "../use-code-feedback";
 
@@ -161,6 +165,22 @@ export function PasscodeGate({
             style={{ marginTop: rem(24) }}
           >
             Sign out instead
+          </button>
+        ) : null}
+
+        {/* Sign-in mode: the way back to the private-code field. /login jumps
+            straight here whenever a code is remembered, so without this a stale
+            one — the admin was removed, or somebody else needs to sign in — is
+            a dead end that only clearing cookies escapes. */}
+        {mode === "login" ? (
+          <button
+            type="button"
+            onClick={() => void forgetDeviceAction()}
+            disabled={busy}
+            className="fz-12 text-primary font-medium disabled:opacity-50"
+            style={{ marginTop: rem(24) }}
+          >
+            Use a different private code
           </button>
         ) : null}
       </div>

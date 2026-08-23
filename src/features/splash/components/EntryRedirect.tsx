@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { resolveEntry } from "../actions";
-import { SPLASH_FILL_MS } from "../timing";
+import { SPLASH_FILL_MS, isSplashPlaying } from "../timing";
 
 /**
  * The "/" entry has no content of its own — it decides where to send the user.
@@ -35,7 +35,11 @@ export function EntryRedirect() {
       }
       if (!active) return;
 
-      const remaining = Math.max(0, SPLASH_FILL_MS - performance.now());
+      // Checked AFTER the await: effects run child-first, so the splash in the
+      // layout has claimed the flag by now. Skipped loads must not sit blank.
+      const remaining = isSplashPlaying()
+        ? Math.max(0, SPLASH_FILL_MS - performance.now())
+        : 0;
       if (remaining > 0) {
         await new Promise((resolve) => setTimeout(resolve, remaining));
       }

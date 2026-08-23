@@ -21,6 +21,15 @@ const REFRESH = "rdb_rt";
  * client JS — and cleared with them on sign-out.
  */
 const PRIVATE_CODE = "rdb_pc";
+/**
+ * Display-only identity for the returning-user passcode screen: who this
+ * device signed in as last time.
+ *
+ * Nothing about the admin is knowable before sign-in — /v1/auth/login is the
+ * first call and it needs the passcode this screen is collecting — so without
+ * remembering it the screen greets a blank space. Carries no credential.
+ */
+const IDENTITY = "rdb_who";
 
 const base = {
   httpOnly: true,
@@ -51,11 +60,45 @@ export async function getPrivateCode() {
   return (await cookies()).get(PRIVATE_CODE)?.value ?? null;
 }
 
+export type RememberedIdentity = { name: string; role: string };
+
+export async function setIdentityCookie(
+  identity: RememberedIdentity,
+  maxAge: number,
+) {
+  (await cookies()).set(IDENTITY, JSON.stringify(identity), { ...base, maxAge });
+}
+
+export async function getIdentity(): Promise<RememberedIdentity | null> {
+  const raw = (await cookies()).get(IDENTITY)?.value;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as RememberedIdentity;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Forget which admin this device belongs to, without touching the session.
+ *
+ * The escape hatch behind "Use a different code": /login goes straight to the
+ * passcode whenever a private code is remembered, so a stale one (the admin
+ * was deleted, or somebody else needs to sign in) left no way back to the
+ * private-code field except clearing cookies by hand.
+ */
+export async function clearRememberedIdentity() {
+  const store = await cookies();
+  store.delete(PRIVATE_CODE);
+  store.delete(IDENTITY);
+}
+
 export async function clearAuthCookies() {
   const store = await cookies();
   store.delete(ACCESS);
   store.delete(REFRESH);
   store.delete(PRIVATE_CODE);
+  store.delete(IDENTITY);
 }
 
 export async function getAccessToken() {

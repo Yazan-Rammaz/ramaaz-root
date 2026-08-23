@@ -8,6 +8,8 @@ import {
   clearAuthCookies,
   setPrivateCodeCookie,
   getPrivateCode,
+  setIdentityCookie,
+  clearRememberedIdentity,
 } from "@/lib/auth/cookies";
 import {
   readLoginFlow,
@@ -284,6 +286,11 @@ export async function setPasscodeAction(passcode: string): Promise<ActionState> 
     // only moment it is available in full — /v1/me returns it empty.
     if (user.private_code) {
       await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
+      // Display only, so the passcode screen can greet them next time.
+      await setIdentityCookie(
+        { name: user.full_name, role: user.is_root ? "super_admin" : "agent" },
+        REFRESH_MAX_AGE,
+      );
     }
 
     // The identity step is not optional decoration: the backend states whether
@@ -350,6 +357,11 @@ export async function passcodeUnlockAction(
     // screen must keep working on the next reload.
     if (user.private_code) {
       await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
+      // Display only, so the passcode screen can greet them next time.
+      await setIdentityCookie(
+        { name: user.full_name, role: user.is_root ? "super_admin" : "agent" },
+        REFRESH_MAX_AGE,
+      );
     }
 
     // Same gate as first-time setup: the backend decides whether identity
@@ -432,6 +444,11 @@ export async function verifyPasscodeAction(
     });
     if (user.private_code) {
       await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
+      // Display only, so the passcode screen can greet them next time.
+      await setIdentityCookie(
+        { name: user.full_name, role: user.is_root ? "super_admin" : "agent" },
+        REFRESH_MAX_AGE,
+      );
     }
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -441,6 +458,19 @@ export async function verifyPasscodeAction(
   }
 
   return { ok: true };
+}
+
+/**
+ * "Use a different code" — forget this device's remembered admin and go back to
+ * the private-code field.
+ *
+ * Without it a stale rdb_pc was a dead end: /login jumps straight to the
+ * passcode whenever one is remembered, so if that admin no longer exists the
+ * only way out was clearing cookies by hand. The session is untouched.
+ */
+export async function forgetDeviceAction(): Promise<void> {
+  await clearRememberedIdentity();
+  redirect("/login");
 }
 
 export async function logoutAction() {

@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
-import { SPLASH_FILL_MS as FILL_MS, SPLASH_SLIDE_MS as SLIDE_MS } from "../timing";
+import {
+    SPLASH_FILL_MS as FILL_MS,
+    SPLASH_SLIDE_MS as SLIDE_MS,
+    setSplashPlaying,
+} from "../timing";
 
 /**
  * Splash overlay. Server-rendered (visible on first paint) on EVERY full
@@ -14,31 +18,45 @@ import { SPLASH_FILL_MS as FILL_MS, SPLASH_SLIDE_MS as SLIDE_MS } from "../timin
  */
 
 /**
- * Has the splash already played in THIS document?
+ * Should the splash play right now?
  *
- * It lives in the root layout so a refresh of any page shows it. But the root
- * layout also REMOUNTS whenever the router cache is invalidated — which every
- * Server Action that writes a cookie does, and the login flow writes one at
- * each step. Without this guard it replayed its 4.5s animation after every
- * step, which looked exactly like the page reloading.
+ * The rule is: FIRST OPEN in this tab, or a browser RELOAD. Nothing else —
+ * not a client-side navigation, not the passcode lock, and not the full page
+ * loads that Server-Action redirects turn out to trigger.
  *
- * `window` separates the two cases precisely: it survives remounts inside a
- * document and is wiped by a real page load, which is the moment the splash
- * SHOULD play. sessionStorage would be wrong — it outlives a refresh and would
- * suppress the splash when it ought to run.
+ * Two signals are needed because neither alone is enough:
+ *
+ *   - `sessionStorage` marks that this tab has already seen it. It survives
+ *     page loads, so a redirect mid-flow no longer replays the animation. A
+ *     window flag could not do this: a full load wipes it, which is precisely
+ *     the case being suppressed.
+ *   - Navigation Timing says HOW the document was entered. A reload must play
+ *     again even though the tab has seen it, so `reload` overrides the marker.
+ *
+ * Closing the tab clears sessionStorage, so the next open counts as first.
  */
-const PLAYED = "__rdbSplashPlayed" as const;
+const SEEN_KEY = "rdb_splash_seen";
 
-type SplashWindow = Window & { [PLAYED]?: boolean };
-
-function hasPlayed(): boolean {
+function shouldPlay(): boolean {
   if (typeof window === "undefined") return false;
-  return (window as SplashWindow)[PLAYED] === true;
+  try {
+    const [entry] = performance.getEntriesByType(
+      "navigation",
+    ) as PerformanceNavigationTiming[];
+    if (entry?.type === "reload") return true;
+    return sessionStorage.getItem(SEEN_KEY) !== "1";
+  } catch {
+    // Storage unavailable (private mode) — better to show it than to break.
+    return true;
+  }
 }
 
-function markPlayed(): void {
-  if (typeof window === "undefined") return;
-  (window as SplashWindow)[PLAYED] = true;
+function markSeen(): void {
+  try {
+    sessionStorage.setItem(SEEN_KEY, "1");
+  } catch {
+    /* nothing to do */
+  }
 }
 
 // iOS navigation easing (matches presets.ts `iosEase`).
@@ -49,32 +67,52 @@ const rem = (px: number) => `${px * 0.0625}rem`;
 
 export function SplashGate() {
   const [filled, setFilled] = useState(false);
-  // A remount inside the same document resolves straight to "gone". On a real
-  // page load the flag is unset, so server and client both start at "show" and
-  // hydration agrees.
-  const [phase, setPhase] = useState<"show" | "hide" | "gone">(() =>
-    hasPlayed() ? "gone" : "show",
+  // Starts "pending" — renders nothing — because the decision depends on
+  // sessionStorage and Navigation Timing, neither of which exists on the
+  // server. Deciding here rather than in the initial state keeps server and
+  // client markup identical, so there is no hydration mismatch; the cost is
+  // that the splash appears one frame after mount instead of in the SSR HTML.
+  const [phase, setPhase] = useState<"pending" | "show" | "hide" | "gone">(
+    "pending",
   );
 
   useEffect(() => {
-    if (phase === "gone") return;
-    // Claimed on mount, not when the animation ends: an invalidation part-way
-    // through would otherwise remount and restart it.
-    markPlayed();
+    let fillRaf = 0;
+    let toHide: ReturnType<typeof setTimeout>;
+    let toGone: ReturnType<typeof setTimeout>;
 
-    // Start the bar fill after first paint so the transition runs.
-    const raf = requestAnimationFrame(() => setFilled(true));
-    // Bar completes -> slide out -> unmount.
-    const toHide = setTimeout(() => setPhase("hide"), FILL_MS);
-    const toGone = setTimeout(() => setPhase("gone"), FILL_MS + SLIDE_MS);
+    // The whole decision runs inside a frame callback rather than the effect
+    // body: setting state synchronously there triggers a cascading render (and
+    // the project's react-hooks rules reject it). A frame's delay is invisible.
+    const decideRaf = requestAnimationFrame(() => {
+      if (!shouldPlay()) {
+        setSplashPlaying(false);
+        setPhase("gone");
+        return;
+      }
+      markSeen();
+      setSplashPlaying(true);
+      setPhase("show");
+
+      // One more frame so the bar paints at 0% before transitioning to 100%.
+      fillRaf = requestAnimationFrame(() => setFilled(true));
+      // Bar completes -> slide out -> unmount.
+      toHide = setTimeout(() => setPhase("hide"), FILL_MS);
+      toGone = setTimeout(() => {
+        setSplashPlaying(false);
+        setPhase("gone");
+      }, FILL_MS + SLIDE_MS);
+    });
+
     return () => {
-      cancelAnimationFrame(raf);
+      cancelAnimationFrame(decideRaf);
+      if (fillRaf) cancelAnimationFrame(fillRaf);
       clearTimeout(toHide);
       clearTimeout(toGone);
     };
   }, []);
 
-  if (phase === "gone") return null;
+  if (phase === "gone" || phase === "pending") return null;
 
   return (
     // Outer clips the slide so it can never create a scrollbar.

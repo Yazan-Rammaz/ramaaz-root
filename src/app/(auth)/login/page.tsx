@@ -1,7 +1,7 @@
 import { IdentifyStep } from '@/features/auth/components/LoginSteps';
 import { PasscodeGate } from '@/features/auth/components/PasscodeGate';
 import { redirectIfAuthenticated } from '@/lib/auth/guards';
-import { getPrivateCode } from '@/lib/auth/cookies';
+import { getPrivateCode, getIdentity } from '@/lib/auth/cookies';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -22,7 +22,13 @@ export default async function LoginPage() {
     // go straight to the passcode, which is the only other half /v1/auth/login
     // needs. First-time admins have no saved code and start at step 1.
     const privateCode = await getPrivateCode();
-    if (privateCode) return <PasscodeGate mode="login" />;
+    if (privateCode) {
+        // Name/role are remembered from the last sign-in purely to greet them:
+        // nothing about the admin is knowable before /v1/auth/login runs, and
+        // that call needs the passcode this screen is collecting.
+        const who = await getIdentity();
+        return <PasscodeGate mode="login" name={who?.name} role={who?.role} />;
+    }
 
     return (
         <main className="flex h-full flex-col items-center">
