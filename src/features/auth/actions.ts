@@ -464,7 +464,7 @@ export async function verifyPasscodeAction(
  * "Use a different code" — forget this device's remembered admin and go back to
  * the private-code field.
  *
- * Without it a stale rdb_pc was a dead end: /login jumps straight to the
+ * Without it a stale root_pc was a dead end: /login jumps straight to the
  * passcode whenever one is remembered, so if that admin no longer exists the
  * only way out was clearing cookies by hand. The session is untouched.
  */

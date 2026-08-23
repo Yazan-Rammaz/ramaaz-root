@@ -16,7 +16,7 @@ export type Locale = (typeof locales)[number];
 export const defaultLocale: Locale = "en";
 
 /** Cookie that carries the chosen language across requests (set by the switcher). */
-export const LOCALE_COOKIE = "rdb_lang";
+export const LOCALE_COOKIE = "root_lang";
 
 /** One year — the user's language is a sticky preference. */
 export const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;

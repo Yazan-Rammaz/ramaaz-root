@@ -148,7 +148,7 @@ status on `/auth/me`, so the dashboard's own gate can check the same fact.
 
 **2. Where does `challengeId` come from?** It binds a face check to one login
 attempt. It should be issued with the passcode step's token and ride in the
-`rdb_login_flow` cookie, like `unlockToken` does now. Currently `"preview"`.
+`root_login_flow` cookie, like `unlockToken` does now. Currently `"preview"`.
 
 **3. What does the step token buy?** After the face check passes, something has
 to turn that token into a session. Today the passcode step still completes the

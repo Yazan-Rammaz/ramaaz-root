@@ -48,7 +48,7 @@ export async function redirectIfAuthenticated(): Promise<void> {
  * render may not mutate cookies — only Server Actions and Route Handlers may,
  * and calling clearLoginFlow() here threw a 500. Clearing is unnecessary
  * anyway: the cookie is httpOnly, expires in MAX_AGE, and the next attempt
- * overwrites it. /login reads `rdb_pc`, not the flow, so a stale entry cannot
+ * overwrites it. /login reads `root_pc`, not the flow, so a stale entry cannot
  * resurrect a half-finished sign-in.
  */
 export async function resetFlowOnFullLoad(): Promise<void> {

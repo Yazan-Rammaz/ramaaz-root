@@ -18,7 +18,7 @@ export const SPLASH_SLIDE_MS = 450; // iOS slide-out once the bar completes
  * back to "/" after signing out, for instance — and without this the entry
  * would sit on a blank screen for the full 4.5s with no splash covering it.
  */
-const PLAYING = "__rdbSplashPlaying" as const;
+const PLAYING = "__rootSplashPlaying" as const;
 
 type SplashWindow = Window & { [PLAYING]?: boolean };
 

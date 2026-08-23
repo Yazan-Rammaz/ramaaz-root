@@ -266,7 +266,7 @@ body {
 /* Wrong-passcode shake: 3 left-right cycles in 1s, matching the red border
    shown for the same duration before the boxes clear. Offsets are rem so they
    scale with the XD engine like everything else. */
-@keyframes rdb-shake {
+@keyframes root-shake {
     0%,
     100% {
         transform: translateX(0);
@@ -289,7 +289,7 @@ body {
 }
 
 .animate-shake {
-    animation: rdb-shake 1s ease-in-out;
+    animation: root-shake 1s ease-in-out;
 }
 
 @media (prefers-reduced-motion: reduce) {

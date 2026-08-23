@@ -1,11 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE, matchLocale } from '@/lib/i18n/config';
-import {
-    AUTH_PATHS,
-    REFRESH_MAX_AGE,
-    refreshResponseSchema,
-    type AuthTokens,
-} from '@/lib/auth/endpoints';
+import { refreshTokens } from '@/lib/auth/refresh';
 
 /**
  *
@@ -19,8 +14,8 @@ import {
  *     auth gate is still `requireSession()` in the protected layout.
  */
 
-const ACCESS = 'rdb_at';
-const REFRESH = 'rdb_rt';
+const ACCESS = 'root_at';
+const REFRESH = 'root_rt';
 
 // Edge runtime may not expose a global `process`; read it defensively.
 const globalEnv =
@@ -74,40 +69,11 @@ async function tryRefresh(req: NextRequest) {
     const base = process.env.NEST_API_URL || globalEnv.NEST_API_URL;
     if (!base) return null;
 
-    try {
-        // The refresh token goes in the BODY, not an Authorization header.
-        //
-        // ⚠️ It is single-use and rotates. Replaying a spent one answers
-        // TOKEN_REUSED and the backend ends the entire session — it treats a
-        // replay as theft. So: never retry this call with the same token, and
-        // on any failure fall through to a normal sign-in rather than trying
-        // again.
-        const res = await fetch(`${base}${AUTH_PATHS.refresh}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-            },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-        if (!res.ok) return null;
-
-        // Tokens come back at the TOP level here, unlike /registration/pass-code
-        // which nests them under `tokens`. Parsed rather than cast: a silent
-        // shape change would otherwise write `undefined` into the auth cookies
-        // and log everyone out with no clue why.
-        const parsed = refreshResponseSchema.safeParse(await res.json());
-        if (!parsed.success) return null;
-
-        return {
-            accessToken: parsed.data.access_token,
-            refreshToken: parsed.data.refresh_token,
-            accessMaxAge: parsed.data.expires_in,
-            refreshMaxAge: REFRESH_MAX_AGE,
-        } satisfies AuthTokens;
-    } catch {
-        return null;
-    }
+    // Single-flight: refresh tokens rotate and are single-use, and replaying a
+    // spent one destroys the whole session. Two tabs idle past the access
+    // token's 15 minutes will both arrive holding the same cookie, so the
+    // exchange is deduplicated per token — see lib/auth/refresh.ts.
+    return refreshTokens(base, refreshToken);
 }
 
 export async function middleware(req: NextRequest) {
@@ -152,16 +118,13 @@ export async function middleware(req: NextRequest) {
     // invalidated the legitimately rotated one that replaced it. So two
     // concurrent refreshes do not merely lose a request, they log the admin out.
     //
-    // Prefetches are the worst offender: Next fires a burst of them in parallel
-    // on hover/viewport, so an expired access cookie could trigger several
-    // refreshes at once. Their responses are discarded anyway, so skipping them
-    // removes the main source of concurrency at no cost — the real navigation
-    // that follows refreshes normally.
-    //
-    // NOT a complete fix: two genuine navigations (two tabs) can still race.
-    // Closing that needs single-flight coordination in shared storage (KV or a
-    // Durable Object), which is a deliberate piece of infrastructure rather
-    // than something to bolt on here.
+    // Two defences:
+    //   - prefetches never refresh. Next fires bursts of them on hover and
+    //     viewport entry, and their responses are discarded anyway, so skipping
+    //     them removes the largest source of concurrency at no cost.
+    //   - the exchange itself is single-flight per token (lib/auth/refresh.ts),
+    //     which covers what remains: two tabs, both idle past the access
+    //     token's 15 minutes, both arriving with the same refresh cookie.
     const isPrefetch =
         req.headers.get('next-router-prefetch') === '1' ||
         req.headers.get('purpose') === 'prefetch' ||
@@ -195,10 +158,10 @@ export async function middleware(req: NextRequest) {
             // than having none — it survives for REFRESH_MAX_AGE, so EVERY
             // later request retries a refresh that cannot succeed, and each
             // retry trips reuse detection again. The visible symptom is a
-            // browser that still holds rdb_rt yet is bounced to /login on
+            // browser that still holds root_rt yet is bounced to /login on
             // every page, with no way out but clearing cookies by hand.
             //
-            // rdb_pc is deliberately kept: the private code is not a session,
+            // root_pc is deliberately kept: the private code is not a session,
             // and holding it lets the admin unlock with just their passcode
             // instead of retyping it.
             res.cookies.delete(ACCESS);

@@ -88,7 +88,7 @@ dashboard background.
 | `api.profile.update()` | `components/screens/SuccessScreen.tsx:62` |
 
 **Correction to the original note here, which said to repoint at
-`lib/api/backend.ts`.** `backendFetch` resolves the `rdb_sys` cookie against the
+`lib/api/backend.ts`.** `backendFetch` resolves the `root_sys` cookie against the
 systems registry and calls *the selected system's* `baseUrl`. KYC is not a
 registry system — it is one fixed service (`ramaaz-kyc.…workers.dev`, what rdb
 sets as `NEXT_PUBLIC_API_BASE_URL`). Routing it through `backendFetch` would make

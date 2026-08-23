@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
  * ── Where it comes from ─────────────────────────────────────────────────────
  * Two sources, in order:
  *
- *   1. The `rdb_dev_token` cookie, set by /api/dev/reset when the temporary
+ *   1. The `root_dev_token` cookie, set by /api/dev/reset when the temporary
  *      autofill mints a fresh admin. Always the newest token.
  *   2. `REGISTRATION_TOKEN` in .env.local, refreshed by `npm run dev:reset`.
  *
@@ -50,7 +50,7 @@ export class RegistrationTokenUnavailableError extends Error {
  *
  * httpOnly — the browser never needs to read it.
  */
-export const DEV_TOKEN_COOKIE = "rdb_dev_token";
+export const DEV_TOKEN_COOKIE = "root_dev_token";
 
 export async function getRegistrationToken(): Promise<string> {
   const fromCookie = (await cookies()).get(DEV_TOKEN_COOKIE)?.value;

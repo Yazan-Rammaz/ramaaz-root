@@ -16,7 +16,7 @@
  * `window` rather than module scope so a module duplicated across chunks
  * cannot end up with two disagreeing copies.
  */
-const FLAG = "__rdbDocUnlocked" as const;
+const FLAG = "__rootDocUnlocked" as const;
 
 type LockWindow = Window & { [FLAG]?: boolean };
 
@@ -39,7 +39,7 @@ export function setDocumentUnlocked(value: boolean): void {
  * boolean. Locking this way shows the passcode gate with NO splash: nothing
  * reloads, the document is the same one, only the overlay appears.
  */
-export const LOCK_EVENT = "rdb:lock";
+export const LOCK_EVENT = "root:lock";
 
 export function requestLock(): void {
   if (typeof window === "undefined") return;

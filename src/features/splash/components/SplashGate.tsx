@@ -35,7 +35,7 @@ import {
  *
  * Closing the tab clears sessionStorage, so the next open counts as first.
  */
-const SEEN_KEY = "rdb_splash_seen";
+const SEEN_KEY = "root_splash_seen";
 
 function shouldPlay(): boolean {
   if (typeof window === "undefined") return false;

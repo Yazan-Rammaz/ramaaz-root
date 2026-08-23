@@ -8,7 +8,7 @@ import { api, ApiError } from "./server";
  *
  * The root dashboard manages several company projects; each row in the systems
  * registry carries the base URL of that project's backend. The user picks a
- * system on /systems (stored in the httpOnly `rdb_sys` cookie), and every
+ * system on /systems (stored in the httpOnly `root_sys` cookie), and every
  * project-data page (regions, currencies, languages, …) reads and mutates
  * through `backendFetch` — same verbs as `api`, but routed to the SELECTED
  * system's backend instead of the root backend.
@@ -22,7 +22,7 @@ import { api, ApiError } from "./server";
  * api.ts, browser mutations go through Server Actions.
  */
 
-const SELECTED_SYSTEM = "rdb_sys";
+const SELECTED_SYSTEM = "root_sys";
 
 /** What backendFetch needs from the registry — parsed defensively. */
 const registryEntrySchema = z.object({

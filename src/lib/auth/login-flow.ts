@@ -8,7 +8,7 @@ import { isProd } from "@/lib/env";
  * for the screens — rides in ONE httpOnly cookie between steps, so nothing
  * about the flow ever reaches client JS. Cleared the moment a session exists.
  */
-const COOKIE = "rdb_login_flow";
+const COOKIE = "root_login_flow";
 const MAX_AGE = 600; // seconds — matches the backend's step-token lifetimes
 
 export type LoginFlowState = {

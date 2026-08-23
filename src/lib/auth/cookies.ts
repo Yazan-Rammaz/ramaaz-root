@@ -7,8 +7,8 @@ import { isProd } from "@/lib/env";
  * BFF security model (immune to XSS token theft). Only Server Actions, Route
  * Handlers and middleware may touch these.
  */
-const ACCESS = "rdb_at";
-const REFRESH = "rdb_rt";
+const ACCESS = "root_at";
+const REFRESH = "root_rt";
 /**
  * The signed-in admin's private code.
  *
@@ -20,7 +20,7 @@ const REFRESH = "rdb_rt";
  * Same protection as the tokens beside it — httpOnly, so it never reaches
  * client JS — and cleared with them on sign-out.
  */
-const PRIVATE_CODE = "rdb_pc";
+const PRIVATE_CODE = "root_pc";
 /**
  * Display-only identity for the returning-user passcode screen: who this
  * device signed in as last time.
@@ -29,7 +29,7 @@ const PRIVATE_CODE = "rdb_pc";
  * first call and it needs the passcode this screen is collecting — so without
  * remembering it the screen greets a blank space. Carries no credential.
  */
-const IDENTITY = "rdb_who";
+const IDENTITY = "root_who";
 
 const base = {
   httpOnly: true,

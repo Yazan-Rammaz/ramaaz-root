@@ -5,7 +5,7 @@
  * resend tells the code input to drop its stale "wrong code" message through a
  * window event rather than threading state up through the page for one string.
  */
-export const OTP_RESENT_EVENT = "rdb:otp-resent";
+export const OTP_RESENT_EVENT = "root:otp-resent";
 
 export function announceOtpResent(): void {
   if (typeof window === "undefined") return;
