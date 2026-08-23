@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PasscodeBoxes } from "./PasscodeBoxes";
 import { setPasscodeAction } from "../actions";
+import { setDocumentUnlocked } from "../lock-flag";
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -45,6 +46,8 @@ export function SetPasscodeFlow() {
       return;
     }
     setSuccess(true);
+    // The passcode was just chosen — the dashboard must not demand it again.
+    setDocumentUnlocked(true);
     // Success redirects to the dashboard inside the action (303, the promise
     // settles with no value) — only a failure carries a result to show.
     const result = await setPasscodeAction(value);

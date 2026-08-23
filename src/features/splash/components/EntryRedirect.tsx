@@ -3,25 +3,45 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { resolveEntry } from "../actions";
+import { SPLASH_FILL_MS } from "../timing";
 
 /**
  * The "/" entry has no content of its own — it decides where to send the user.
- * Runs the auth check (server action) and replaces the URL with /dashboard or
- * /login. The <SplashGate> on this same route covers the hop, so the user
- * only ever sees the splash until it fades onto the destination.
+ * Runs the auth check (server action) and replaces the URL with wherever they
+ * belong: /login when signed out, otherwise the dashboard, which opens behind
+ * the passcode gate.
+ *
+ * It waits for the splash's progress bar to finish before navigating. The auth
+ * check resolves in a few hundred milliseconds, so without the wait the splash
+ * would be cut off part-filled.
+ *
+ * The delay is measured from `performance.now()` — time since the document
+ * loaded — rather than from mount, so it absorbs however long the check took,
+ * and collapses to zero when "/" is reached later by client-side navigation,
+ * where no splash is playing.
  */
 export function EntryRedirect() {
   const router = useRouter();
 
   useEffect(() => {
     let active = true;
-    resolveEntry()
-      .then((target) => {
-        if (active) router.replace(target);
-      })
-      .catch(() => {
-        if (active) router.replace("/login");
-      });
+
+    void (async () => {
+      let target = "/login";
+      try {
+        target = await resolveEntry();
+      } catch {
+        // Backend unreachable — sign-in is the safe destination.
+      }
+      if (!active) return;
+
+      const remaining = Math.max(0, SPLASH_FILL_MS - performance.now());
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      if (active) router.replace(target);
+    })();
+
     return () => {
       active = false;
     };

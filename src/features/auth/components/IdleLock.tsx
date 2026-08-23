@@ -3,19 +3,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PasscodeGate } from "./PasscodeGate";
 import { logoutAction } from "../actions";
+import { isDocumentUnlocked, setDocumentUnlocked, LOCK_EVENT } from "../lock-flag";
 
 /**
- * Locks the protected area after a period of inactivity, and covers it with the
- * passcode gate until the admin proves they are still there.
+ * Keeps the protected area behind the passcode gate.
+ *
+ * It locks in two situations:
+ *   - on every fresh page load, so arriving authenticated still means proving
+ *     it is you before anything on the dashboard can be read, and
+ *   - after 5 minutes without interaction, for the unattended screen.
+ *
+ * Idle is measured from the last interaction rather than from sign-in, so
+ * someone working continuously is never interrupted.
  *
  * ── What this is and is not ─────────────────────────────────────────────────
- * It is a UX lock, for the case of walking away from an unattended screen. It
- * is NOT a security boundary: the session cookie stays valid throughout (that
- * is the point — locking must not sign anyone out), so anyone with devtools
- * and this browser could dismiss it. Every real rule stays server-side.
- *
- * Idle is measured from the last interaction, not from sign-in, so someone
- * working continuously is never interrupted.
+ * A UX lock. NOT a security boundary: the session cookie stays valid
+ * throughout — that is the point, locking must not sign anyone out — so
+ * anyone with devtools and this browser could dismiss it. Every real rule
+ * stays server-side.
  */
 const IDLE_MS = 5 * 60 * 1000;
 
@@ -29,12 +34,17 @@ const ACTIVITY = [
 ] as const;
 
 export function IdleLock({ name, role }: { name?: string; role?: string }) {
-  const [locked, setLocked] = useState(false);
+  // Locked until proven otherwise. Server-renders `true`, and a genuine page
+  // load has the flag unset, so hydration agrees.
+  const [locked, setLocked] = useState(() => !isDocumentUnlocked());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const arm = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setLocked(true), IDLE_MS);
+    timer.current = setTimeout(() => {
+      setDocumentUnlocked(false);
+      setLocked(true);
+    }, IDLE_MS);
   }, []);
 
   useEffect(() => {
@@ -58,10 +68,15 @@ export function IdleLock({ name, role }: { name?: string; role?: string }) {
     };
     document.addEventListener("visibilitychange", onVisible);
 
+    // Manual lock from the navbar.
+    const onLockRequest = () => setLocked(true);
+    window.addEventListener(LOCK_EVENT, onLockRequest);
+
     return () => {
       if (timer.current) clearTimeout(timer.current);
       for (const evt of ACTIVITY) window.removeEventListener(evt, onActivity);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener(LOCK_EVENT, onLockRequest);
     };
   }, [locked, arm]);
 
@@ -72,7 +87,10 @@ export function IdleLock({ name, role }: { name?: string; role?: string }) {
       mode="lock"
       name={name}
       role={role}
-      onUnlocked={() => setLocked(false)}
+      onUnlocked={() => {
+        setDocumentUnlocked(true);
+        setLocked(false);
+      }}
       onSignOut={() => void logoutAction()}
     />
   );

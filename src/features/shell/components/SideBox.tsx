@@ -14,11 +14,14 @@ export function SideBox({
   label,
   indicator,
   empty,
+  onClick,
 }: {
   icon?: string;
   label?: string;
   indicator?: boolean;
   empty?: boolean;
+  /** Optional handler — slots without one are inert placeholders. */
+  onClick?: () => void;
 }) {
   return (
     <div className="relative">
@@ -26,6 +29,7 @@ export function SideBox({
         type="button"
         aria-label={label}
         disabled={empty}
+        onClick={onClick}
         className={cn(
           "hairline bg-background rad-12 flex h-50 w-50 items-center justify-center",
           empty && "cursor-default",

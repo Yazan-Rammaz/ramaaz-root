@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
 import { SideBox } from "./SideBox";
+import { logoutAction } from "@/features/auth/actions";
 
 /**
  * Left rail (74 XD px wide, full height). Avatar + page slots at the top, the
@@ -41,6 +42,13 @@ export function Sidebar() {
         <SideBox icon="side/chat" label={t("side.chat")} />
         <SideBox icon="side/settings" label={t("side.settings")} />
         <SideBox icon="side/systems" label={t("side.systems")} indicator />
+        {/* Sign out. The action revokes server-side, clears every auth cookie
+            and returns through "/", which re-checks and lands on /login. */}
+        <SideBox
+          icon="side/logout"
+          label={t("side.logout")}
+          onClick={() => void logoutAction()}
+        />
       </div>
     </aside>
   );

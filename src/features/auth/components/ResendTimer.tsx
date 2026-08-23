@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { resendOtpAction } from "../actions";
+import { announceOtpResent } from "../otp-events";
 
 /**
  * Resend countdown for the verification screen. Counts down from `startSeconds`;
@@ -29,6 +30,8 @@ export function ResendTimer({ startSeconds = 120 }: { startSeconds?: number }) {
     // button come back after the timer (throttled to 2/min server-side).
     setRemaining(startSeconds);
     await resendOtpAction();
+    // A new code is on its way — drop any "wrong code" message still showing.
+    announceOtpResent();
   }
 
   if (remaining <= 0) {

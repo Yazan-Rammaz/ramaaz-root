@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 import { PasswordStep } from "@/features/auth/components/LoginSteps";
 import { readLoginFlow } from "@/lib/auth/login-flow";
-import { redirectIfAuthenticated } from "@/lib/auth/guards";
-import { ResetOnReload } from "@/features/auth/components/ResetOnReload";
+import { redirectIfAuthenticated, resetFlowOnFullLoad } from "@/lib/auth/guards";
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -17,13 +16,13 @@ const rem = (px: number) => `${px * 0.0625}rem`;
 export default async function PasswordPage() {
   // Already signed in — never show a sign-in step.
   await redirectIfAuthenticated();
+  // A refresh at this step abandons the sign-in (no OTP sent yet).
+  await resetFlowOnFullLoad();
   const flow = await readLoginFlow();
   if (!flow.privateCode) redirect("/login");
 
   return (
     <main className="flex h-full flex-col items-center">
-      {/* Refresh here starts over — no OTP has been sent yet. */}
-      <ResetOnReload />
       <div
         className="flex flex-col items-center justify-end"
         style={{ flexGrow: 2 }}

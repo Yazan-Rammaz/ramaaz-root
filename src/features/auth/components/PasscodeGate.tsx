@@ -4,9 +4,20 @@ import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { PasscodeBoxes } from "./PasscodeBoxes";
 import { passcodeUnlockAction, verifyPasscodeAction } from "../actions";
+import { setDocumentUnlocked } from "../lock-flag";
+import { useCodeFeedback } from "../use-code-feedback";
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
+
+/** "super_admin" -> "SA". Initials only; the full role name is not shown. */
+function roleAbbr(role?: string): string {
+  return (role ?? "")
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join("");
+}
 
 /**
  * THE passcode screen — a gate, not a route.
@@ -40,13 +51,17 @@ export function PasscodeGate({
   /** Escape hatch for someone who cannot recall their passcode. */
   onSignOut?: () => void;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const [round, setRound] = useState(0);
+  const { phase, error, round, fail, succeed, clearError } = useCodeFeedback();
   const [busy, setBusy] = useState(false);
 
   async function submit(value: string) {
     setBusy(true);
     try {
+      // Claimed BEFORE the call: in login mode the action redirects and never
+      // returns, so there is no "after" in which to set it — and without it the
+      // dashboard would open locked and ask for the passcode just entered.
+      setDocumentUnlocked(true);
+
       const result =
         mode === "lock"
           ? await verifyPasscodeAction(value)
@@ -55,11 +70,15 @@ export function PasscodeGate({
             await passcodeUnlockAction(value);
 
       if (result?.error) {
-        setError(result.error);
-        setRound((r) => r + 1);
+        // Wrong passcode — the optimistic unlock above must be taken back, or
+        // the lock would dismiss itself on the next remount.
+        setDocumentUnlocked(false);
+        fail(result.error);
         return;
       }
-      if (mode === "lock") onUnlocked?.();
+      // Hold the green state briefly so the confirmation is seen. In login mode
+      // the action has already redirected, so only the lock reaches here.
+      if (mode === "lock") succeed(() => onUnlocked?.());
     } finally {
       setBusy(false);
     }
@@ -91,7 +110,7 @@ export function PasscodeGate({
             className="fz-18 text-ink leading-none font-bold"
             style={{ marginTop: rem(12) }}
           >
-            {role}
+            {roleAbbr(role)}
           </span>
         ) : null}
         {name ? (
@@ -116,19 +135,22 @@ export function PasscodeGate({
             length={6}
             variant="passcode"
             mask
+            success={phase === "success"}
+            error={phase === "error"}
+            onInput={clearError}
             onComplete={submit}
           />
         </div>
 
-        {error ? (
-          <span
-            role="alert"
-            className="fz-11 leading-none font-medium text-red-500"
-            style={{ marginTop: rem(16) }}
-          >
-            {error}
-          </span>
-        ) : null}
+        {/* Centred under the boxes. Reserves its height so the layout does not
+            jump when a message appears or clears. */}
+        <span
+          role="alert"
+          className="fz-11 min-h-16 text-center leading-none font-medium text-red-500"
+          style={{ marginTop: rem(16) }}
+        >
+          {error ?? ""}
+        </span>
 
         {mode === "lock" && onSignOut ? (
           <button

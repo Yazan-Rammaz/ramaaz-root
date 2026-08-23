@@ -262,3 +262,38 @@ body {
         scroll-behavior: auto !important;
     }
 }
+
+/* Wrong-passcode shake: 3 left-right cycles in 1s, matching the red border
+   shown for the same duration before the boxes clear. Offsets are rem so they
+   scale with the XD engine like everything else. */
+@keyframes rdb-shake {
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+    16.6% {
+        transform: translateX(-0.5rem);
+    }
+    33.3% {
+        transform: translateX(0.5rem);
+    }
+    50% {
+        transform: translateX(-0.5rem);
+    }
+    66.6% {
+        transform: translateX(0.5rem);
+    }
+    83.3% {
+        transform: translateX(-0.25rem);
+    }
+}
+
+.animate-shake {
+    animation: rdb-shake 1s ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-shake {
+        animation: none;
+    }
+}

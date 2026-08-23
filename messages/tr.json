@@ -1,67 +1,69 @@
 {
-  "common": {
-    "appName": "Ramaaz Root",
-    "language": "Dil",
-    "logout": "Çıkış yap"
-  },
-  "forbidden": {
-    "title": "403 — İzin yok",
-    "message": "Rolünüzün bu sayfaya erişimi yok.",
-    "backToDashboard": "Panoya dön"
-  },
-  "roles": {
-    "super_admin": "Süper Yönetici",
-    "country_manager": "Ülke Yöneticisi",
-    "agent": "Temsilci"
-  },
-  "shell": {
-    "nav": {
-      "systems": "Sistemler",
-      "rocket": "Sistem Projeleri",
-      "translate": "Sistem Dilleri",
-      "currencies": "Para Birimleri",
-      "countries": "Ülkeler",
-      "database": "Veritabanı",
-      "hierarchy": "Hiyerarşi",
-      "search": "Ara",
-      "close": "Kapat",
-      "add": "Ekle"
+    "common": {
+        "appName": "Ramaaz Root",
+        "language": "Dil",
+        "logout": "Çıkış yap"
     },
-    "side": {
-      "avatar": "Profil",
-      "dashboard": "Panel",
-      "chat": "Sohbet",
-      "settings": "Ayarlar",
-      "systems": "Sistemler"
-    }
-  },
-  "system": {
-    "title": "Sistem Projeleri",
-    "empty": "Henüz sistem projesi yok."
-  },
-  "language": {
-    "title": "Sistem Dilleri",
-    "empty": "Henüz sistem dili yok."
-  },
-  "region": {
-    "title": "Sistem Coğrafi Bölgeleri",
-    "empty": "Henüz Ülke Eklenmedi",
-    "emptyAdmin": "Henüz İdari Bölüm Eklenmedi",
-    "tabs": {
-      "countries": "Ülkeler",
-      "admin": "İdari Bölümler"
+    "forbidden": {
+        "title": "403 — İzin yok",
+        "message": "Rolünüzün bu sayfaya erişimi yok.",
+        "backToDashboard": "Panoya dön"
     },
-    "addTitle": "Ülke Ekle",
-    "level": "Seviye {n}"
-  },
-  "currency": {
-    "title": "Sistem Para Birimleri",
-    "empty": "Henüz sistem para birimi yok.",
-    "filter": {
-      "cash": "Nakit",
-      "crypto": "Kripto",
-      "gold": "Altın",
-      "silver": "Gümüş"
+    "roles": {
+        "super_admin": "Süper Yönetici",
+        "country_manager": "Ülke Yöneticisi",
+        "agent": "Temsilci"
+    },
+    "shell": {
+        "nav": {
+            "systems": "Sistemler",
+            "rocket": "Sistem Projeleri",
+            "translate": "Sistem Dilleri",
+            "currencies": "Para Birimleri",
+            "countries": "Ülkeler",
+            "database": "Veritabanı",
+            "hierarchy": "Hiyerarşi",
+            "search": "Ara",
+            "close": "Kapat",
+            "add": "Ekle",
+            "lock": "Kilitle"
+        },
+        "side": {
+            "avatar": "Profil",
+            "dashboard": "Panel",
+            "chat": "Sohbet",
+            "settings": "Ayarlar",
+            "systems": "Sistemler",
+            "logout": "Çıkış yap"
+        }
+    },
+    "system": {
+        "title": "Sistem Projeleri",
+        "empty": "Henüz sistem projesi yok."
+    },
+    "language": {
+        "title": "Sistem Dilleri",
+        "empty": "Henüz sistem dili yok."
+    },
+    "region": {
+        "title": "Sistem Coğrafi Bölgeleri",
+        "empty": "Henüz Ülke Eklenmedi",
+        "emptyAdmin": "Henüz İdari Bölüm Eklenmedi",
+        "tabs": {
+            "countries": "Ülkeler",
+            "admin": "İdari Bölümler"
+        },
+        "addTitle": "Ülke Ekle",
+        "level": "Seviye {n}"
+    },
+    "currency": {
+        "title": "Sistem Para Birimleri",
+        "empty": "Henüz sistem para birimi yok.",
+        "filter": {
+            "cash": "Nakit",
+            "crypto": "Kripto",
+            "gold": "Altın",
+            "silver": "Gümüş"
+        }
     }
-  }
 }

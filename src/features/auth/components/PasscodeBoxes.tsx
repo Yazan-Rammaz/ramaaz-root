@@ -27,6 +27,15 @@ type Props = {
     mask?: boolean;
     /** Show all filled boxes with a green (matched) border. */
     success?: boolean;
+    /**
+     * Wrong code: red border on every box plus a shake. The value is kept while
+     * this shows so the boxes stay full during the animation — the caller
+     * clears them afterwards by bumping `key`, which also refocuses the first
+     * box on the fresh mount.
+     */
+    error?: boolean;
+    /** Fired on every keystroke — lets the caller dismiss a stale error. */
+    onInput?: () => void;
 };
 
 export function PasscodeBoxes({
@@ -36,6 +45,8 @@ export function PasscodeBoxes({
     variant = 'otp',
     mask = false,
     success = false,
+    error = false,
+    onInput,
 }: Props) {
     const [value, setValue] = useState('');
     const [focused, setFocused] = useState(false);
@@ -54,6 +65,8 @@ export function PasscodeBoxes({
     function onChange(e: React.ChangeEvent<HTMLInputElement>) {
         if (completedRef.current) return;
         const next = e.target.value.replace(/\D/g, '').slice(0, length);
+        // Typing again dismisses a stale error message.
+        onInput?.();
         setValue(next);
         if (next.length === length) {
             completedRef.current = true;
@@ -70,7 +83,7 @@ export function PasscodeBoxes({
                 inputRef.current?.focus();
             }}
         >
-            <div className="flex gap-6">
+            <div className={`flex gap-6${error ? ' animate-shake' : ''}`}>
                 {Array.from({ length }).map((_, i) => {
                     const filled = i < value.length;
                     const isActive = focused && i === value.length;
@@ -78,7 +91,13 @@ export function PasscodeBoxes({
                     let stroke: string;
                     let fill: string;
                     let dashed: boolean;
-                    if (success && filled) {
+                    if (error) {
+                        // Every box, not just the filled ones — the whole entry
+                        // was rejected, not one digit.
+                        stroke = '#FF3B30';
+                        fill = '#FCFCFC';
+                        dashed = false;
+                    } else if (success && filled) {
                         stroke = '#34C759';
                         fill = '#FCFCFC';
                         dashed = false;

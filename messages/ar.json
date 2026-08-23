@@ -1,67 +1,69 @@
 {
-  "common": {
-    "appName": "Ramaaz Root",
-    "language": "اللغة",
-    "logout": "تسجيل الخروج"
-  },
-  "forbidden": {
-    "title": "٤٠٣ — غير مسموح",
-    "message": "صلاحيتك لا تتيح الوصول إلى هذه الصفحة.",
-    "backToDashboard": "العودة إلى لوحة التحكم"
-  },
-  "roles": {
-    "super_admin": "مدير عام",
-    "country_manager": "مدير دولة",
-    "agent": "وكيل"
-  },
-  "shell": {
-    "nav": {
-      "systems": "الأنظمة",
-      "rocket": "مشاريع الأنظمة",
-      "translate": "لغات النظام",
-      "currencies": "العملات",
-      "countries": "الدول",
-      "database": "قاعدة البيانات",
-      "hierarchy": "التسلسل",
-      "search": "بحث",
-      "close": "إغلاق",
-      "add": "إضافة"
+    "common": {
+        "appName": "Ramaaz Root",
+        "language": "اللغة",
+        "logout": "تسجيل الخروج"
     },
-    "side": {
-      "avatar": "الملف الشخصي",
-      "dashboard": "لوحة التحكم",
-      "chat": "المحادثة",
-      "settings": "الإعدادات",
-      "systems": "الأنظمة"
-    }
-  },
-  "system": {
-    "title": "مشاريع الأنظمة",
-    "empty": "لا توجد مشاريع أنظمة بعد."
-  },
-  "language": {
-    "title": "لغات النظام",
-    "empty": "لا توجد لغات نظام بعد."
-  },
-  "region": {
-    "title": "المناطق الجغرافية للنظام",
-    "empty": "لم تتم إضافة أي دول",
-    "emptyAdmin": "لم تتم إضافة أي تقسيمات إدارية",
-    "tabs": {
-      "countries": "الدول",
-      "admin": "التقسيمات الإدارية"
+    "forbidden": {
+        "title": "٤٠٣ — غير مسموح",
+        "message": "صلاحيتك لا تتيح الوصول إلى هذه الصفحة.",
+        "backToDashboard": "العودة إلى لوحة التحكم"
     },
-    "addTitle": "إضافة دول",
-    "level": "المستوى {n}"
-  },
-  "currency": {
-    "title": "عملات النظام",
-    "empty": "لا توجد عملات نظام بعد.",
-    "filter": {
-      "cash": "نقد",
-      "crypto": "عملات رقمية",
-      "gold": "ذهب",
-      "silver": "فضة"
+    "roles": {
+        "super_admin": "مدير عام",
+        "country_manager": "مدير دولة",
+        "agent": "وكيل"
+    },
+    "shell": {
+        "nav": {
+            "systems": "الأنظمة",
+            "rocket": "مشاريع الأنظمة",
+            "translate": "لغات النظام",
+            "currencies": "العملات",
+            "countries": "الدول",
+            "database": "قاعدة البيانات",
+            "hierarchy": "التسلسل",
+            "search": "بحث",
+            "close": "إغلاق",
+            "add": "إضافة",
+            "lock": "قفل"
+        },
+        "side": {
+            "avatar": "الملف الشخصي",
+            "dashboard": "لوحة التحكم",
+            "chat": "المحادثة",
+            "settings": "الإعدادات",
+            "systems": "الأنظمة",
+            "logout": "تسجيل الخروج"
+        }
+    },
+    "system": {
+        "title": "مشاريع الأنظمة",
+        "empty": "لا توجد مشاريع أنظمة بعد."
+    },
+    "language": {
+        "title": "لغات النظام",
+        "empty": "لا توجد لغات نظام بعد."
+    },
+    "region": {
+        "title": "المناطق الجغرافية للنظام",
+        "empty": "لم تتم إضافة أي دول",
+        "emptyAdmin": "لم تتم إضافة أي تقسيمات إدارية",
+        "tabs": {
+            "countries": "الدول",
+            "admin": "التقسيمات الإدارية"
+        },
+        "addTitle": "إضافة دول",
+        "level": "المستوى {n}"
+    },
+    "currency": {
+        "title": "عملات النظام",
+        "empty": "لا توجد عملات نظام بعد.",
+        "filter": {
+            "cash": "نقد",
+            "crypto": "عملات رقمية",
+            "gold": "ذهب",
+            "silver": "فضة"
+        }
     }
-  }
 }

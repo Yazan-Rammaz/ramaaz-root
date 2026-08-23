@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AuthCodeField } from './AuthCodeField';
 import { PasscodeBoxes } from './PasscodeBoxes';
+import { useCodeFeedback } from '../use-code-feedback';
+import { OTP_RESENT_EVENT } from '../otp-events';
 import { useDevCredentials } from '../dev/useDevCredentials';
 import { identifyAction, passwordAction, verifyOtpAction, type ActionState } from '../actions';
 
@@ -16,15 +18,18 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * what keeps every token inside httpOnly cookies.
  */
 
+/**
+ * Centred under the field it belongs to, with its height reserved so the
+ * layout does not jump as messages appear and clear.
+ */
 function ErrorText({ error }: { error?: string }) {
-    if (!error) return null;
     return (
         <p
             role="alert"
-            className="fz-12 w-full px-20 leading-none font-medium text-red-500"
+            className="fz-12 min-h-16 w-full px-20 text-center leading-none font-medium text-red-500"
             style={{ marginTop: rem(12) }}
         >
-            {error}
+            {error ?? ''}
         </p>
     );
 }
@@ -86,9 +91,16 @@ export function PasswordStep() {
  * passcode step always follows (set or enter) — that step does the unlocking.
  */
 export function VerifyStep({ length = 6 }: { length?: number }) {
-    const [state, setState] = useState<ActionState>({ ok: true });
-    // Bumping remounts <PasscodeBoxes>, clearing the boxes after a wrong code.
-    const [round, setRound] = useState(0);
+    const { phase, error, round, fail, clearError } = useCodeFeedback();
+
+    // A resent code makes the previous failure irrelevant. <ResendTimer> is a
+    // sibling in the page, so it announces on the window rather than the two
+    // being wired through a shared parent for one boolean.
+    useEffect(() => {
+        window.addEventListener(OTP_RESENT_EVENT, clearError);
+        return () => window.removeEventListener(OTP_RESENT_EVENT, clearError);
+    }, [clearError]);
+
     return (
         <div className="flex flex-col items-center">
             <PasscodeBoxes
@@ -96,15 +108,17 @@ export function VerifyStep({ length = 6 }: { length?: number }) {
                 // Box count comes from the backend's `code_length`, so a change there
                 // doesn't silently break the input.
                 length={length}
+                success={phase === 'success'}
+                error={phase === 'error'}
+                onInput={clearError}
                 onComplete={async (value) => {
+                    // A correct code redirects inside the action, so only a
+                    // failure comes back here.
                     const result = await verifyOtpAction(value);
-                    if (result?.error) {
-                        setState(result);
-                        setRound((r) => r + 1);
-                    }
+                    if (result?.error) fail(result.error);
                 }}
             />
-            <ErrorText error={state.error} />
+            <ErrorText error={error ?? undefined} />
         </div>
     );
 }

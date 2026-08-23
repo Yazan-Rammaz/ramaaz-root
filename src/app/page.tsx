@@ -1,5 +1,4 @@
 import { EntryRedirect } from "@/features/splash/components/EntryRedirect";
-import { SplashGate } from "@/features/splash/components/SplashGate";
 
 /**
  * Entry point ("/"). No content — it auth-checks and redirects to /dashboard or
@@ -14,7 +13,6 @@ import { SplashGate } from "@/features/splash/components/SplashGate";
 export default function RootPage() {
   return (
     <>
-      <SplashGate />
       <EntryRedirect />
     </>
   );

@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
 import { DashedFrame } from "@/components/ui/DashedFrame";
+import { requestLock } from "@/features/auth/lock-flag";
 import { useAddAction } from "../add-action";
 import { NAV_ITEMS } from "../nav-items";
 import { NavBox } from "./NavBox";
@@ -85,6 +86,19 @@ export function Navbar() {
           style={{ ...RADIUS, "--hairline-color": "var(--color-muted)" } as CSSProperties}
         >
           <Icon name="nav/search" size={26} mask />
+        </button>
+
+        {/* Lock — covers the shell with the passcode gate immediately, without
+            waiting out the 5-minute idle timer. No splash and no reload: the
+            document is unchanged, only the overlay appears. */}
+        <button
+          type="button"
+          onClick={requestLock}
+          aria-label={t("nav.lock")}
+          className="bg-surface hairline rad-12 flex h-50 w-50 shrink-0 items-center justify-center"
+          style={{ ...RADIUS, "--hairline-color": "var(--color-muted)" } as CSSProperties}
+        >
+          <Icon name="nav/lock" size={26} mask />
         </button>
       </div>
 
