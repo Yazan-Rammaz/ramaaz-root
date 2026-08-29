@@ -22,7 +22,22 @@ const globalEnv =
     (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
 const isProdEnv = process.env.NODE_ENV === 'production' || globalEnv.NODE_ENV === 'production';
 
-function buildCsp(nonce: string) {
+/**
+ * May this response be framed by our own origin?
+ *
+ * True for the design gallery in development and nothing else. The gallery
+ * frames each screen so it gets a viewport of exactly the XD canvas width —
+ * which is what makes one XD pixel equal one rendered pixel — and `DENY` blocks
+ * that even same-origin (`SAMEORIGIN` is the value that does not).
+ *
+ * Scoped twice over: development, AND a path that 404s in production anyway.
+ * Every other response keeps `DENY` / `frame-ancestors 'none'` byte for byte.
+ */
+function isFramable(req: NextRequest) {
+    return !isProdEnv && req.nextUrl.pathname.startsWith('/design');
+}
+
+function buildCsp(nonce: string, framable: boolean) {
     const dev = !isProdEnv;
     // React/Next dev mode uses eval() for Fast Refresh & callstack rebuilding,
     // and a websocket for HMR. Both are dev-only; production stays strict.
@@ -64,7 +79,7 @@ function buildCsp(nonce: string) {
         // and `strict-dynamic` makes script-src ignore scheme sources anyway.
         `worker-src 'self' blob:`,
         connectSrc,
-        `frame-ancestors 'none'`,
+        framable ? `frame-ancestors 'self'` : `frame-ancestors 'none'`,
         `base-uri 'self'`,
         `form-action 'self'`,
         `object-src 'none'`,
@@ -90,8 +105,8 @@ function buildCsp(nonce: string) {
     return directives.join('; ');
 }
 
-function applySecurityHeaders(res: NextResponse, nonce: string) {
-    res.headers.set('Content-Security-Policy', buildCsp(nonce));
+function applySecurityHeaders(res: NextResponse, nonce: string, framable = false) {
+    res.headers.set('Content-Security-Policy', buildCsp(nonce, framable));
     res.headers.set('x-nonce', nonce);
     // HSTS is PRODUCTION ONLY, for the same reason as
     // `upgrade-insecure-requests` above — and this one leaves a mark.
@@ -110,7 +125,10 @@ function applySecurityHeaders(res: NextResponse, nonce: string) {
         );
     }
     res.headers.set('X-Content-Type-Options', 'nosniff');
-    res.headers.set('X-Frame-Options', 'DENY');
+    // Paired with `frame-ancestors` above — older browsers read only this one,
+    // so relaxing one without the other leaves the frame blocked in whichever
+    // browser happens to trust the other header.
+    res.headers.set('X-Frame-Options', framable ? 'SAMEORIGIN' : 'DENY');
     res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.headers.set(
         'Permissions-Policy',
@@ -233,7 +251,7 @@ export async function middleware(req: NextRequest) {
         }
     }
 
-    return applySecurityHeaders(res, nonce);
+    return applySecurityHeaders(res, nonce, isFramable(req));
 }
 
 export const config = {

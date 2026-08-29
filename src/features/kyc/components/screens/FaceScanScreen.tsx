@@ -13,9 +13,10 @@ const rem = (px: number) => `${px * 0.0625}rem`;
 /**
  * Live face capture.
  *
- * XD: frame 350 x 400, radius 30, #000000, at y=302 on the 1024 canvas, centred
- * on x. Corner brackets 18 x 18 in #FFEB00. "Identity Verification !" (bold)
- * and "Live Face Detection" (medium) stack 12px apart above it, both #1D1D1D.
+ * XD: frame 350 x 400, radius 30, #000000, centred on BOTH axes. Corner brackets
+ * 18 x 18 in #FFEB00, 6 thick with an 8 radius on the elbow. "Identity
+ * Verification !" (bold) and "Live Face Detection" (medium) stack 12px apart
+ * above it, both #1D1D1D.
  *
  * ── The capture is automatic, and gated ─────────────────────────────────────
  * There is no shutter button, by design. `useFaceGate` samples the video and
@@ -58,18 +59,43 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  */
 
 /**
- * How long every gate check must hold continuously before the frame is taken.
+ * How long every gate check must hold continuously before the frame is taken —
+ * the window the green hairline fills across.
  *
- * Longer than the hook's 1.2s default, and deliberately: it gives the person
- * time to settle into the frame rather than being photographed the instant they
- * arrive in it, which is what made the capture feel like it fired at them. The
- * cost is that a blink-and-shift resets the hold, so it must not go much beyond
- * this — past about five seconds a normal person cannot hold it at all.
+ * Long enough that the person settles into the frame rather than being
+ * photographed the instant they arrive in it, short enough that a blink or a
+ * small shift does not keep resetting the hold. Past about five seconds a
+ * normal person cannot hold it at all.
  */
-const CAPTURE_HOLD_MS = 4500;
+const CAPTURE_HOLD_MS = 2000;
 
 /** How long the red frame holds before the camera reopens. */
 const FAILURE_HOLD_MS = 2000;
+
+/**
+ * Radius on the elbow of each corner bracket, in XD pixels.
+ *
+ * With 6-wide arms this leaves an inner radius of 2, which is what keeps the
+ * bend reading as a bend rather than a mitre. Raising it past the arm width
+ * would round the inside faster than the outside and the corner starts to look
+ * like a comma.
+ */
+const BRACKET_RADIUS = 8;
+
+/**
+ * The title block's height in XD pixels, and its distance from the frame.
+ *
+ * `HEADER_H` is arithmetic rather than a measurement, and can be: the heading is
+ * `h-38` and the caption row is a 20 icon beside `leading-none` text, both fixed,
+ * with a 12 gap between them. Neither grows if the text wraps in another locale
+ * — it would overflow instead — so the number holds for en/ar/tr alike.
+ *
+ * It is used twice: once as the real gap above the frame, and once as dead space
+ * mirrored below it, which is what lets `justify-center` centre the FRAME rather
+ * than the frame-plus-header. See the note at the frame.
+ */
+const HEADER_H = 38 + 12 + 20;
+const HEADER_GAP = 12;
 
 type Phase = 'scanning' | 'verifying' | 'passed' | 'failed';
 
@@ -180,18 +206,15 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
         shown === 'failed' ? '#FF3B30' : gateReady || shown === 'passed' ? '#34C759' : '#FFEB00';
 
     return (
-        <main className="flex h-full flex-col items-center">
+        <main className="flex h-full flex-col items-center justify-center">
             {/* Title block. 12px gaps, both #1D1D1D, sitting directly above the
-                frame — so the group is positioned from the frame's y=302. */}
-            <div
-                className="flex flex-col items-center"
-                style={{ marginTop: rem(302 - 12 - 20 - 12 - 38) }}
-            >
+                frame. */}
+            <div className="flex flex-col items-center">
                 <h1 className="fz-24 h-38 leading-none font-bold text-[#1D1D1D]">
                     {t('identityTitle')}
                 </h1>
 
-                <div className="flex items-center gap-6" style={{ marginTop: rem(12) }}>
+                <div className="flex items-center gap-6" style={{ marginTop: rem(HEADER_GAP) }}>
                     <Icon name="kyc/face_detect" width={20} height={20} alt="" />
                     <span className="fz-14 leading-none font-medium text-[#1D1D1D]">
                         {t('liveFaceDetection')}
@@ -201,10 +224,23 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
 
             {/* Camera frame — 350 x 400, radius 30, black. The border is always
                 present and only changes colour, so the verdict never nudges the
-                layout by two pixels. */}
+                layout by two pixels.
+
+                ── The FRAME is what is centred, not the group ─────────────────
+                `justify-center` would centre the title block and the frame
+                together, which puts the frame's middle below the page's by half
+                the header — the frame reads as sitting low, because it is. The
+                bottom margin is that header mirrored underneath: it makes the
+                flex line symmetrical about the frame, so centring the line
+                centres the frame. Nothing else moves — the header still sits its
+                12 above, and the 12 inside it is untouched. */}
             <div
                 className="relative h-400 w-350 overflow-hidden rad-30 border-2 bg-black transition-colors duration-300 motion-reduce:transition-none"
-                style={{ marginTop: rem(12), borderColor }}
+                style={{
+                    marginTop: rem(HEADER_GAP),
+                    marginBottom: rem(HEADER_H + HEADER_GAP),
+                    borderColor,
+                }}
             >
                 <video
                     ref={videoRef}
@@ -252,31 +288,44 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
 
                 {/* Corner brackets, 18 x 18. They pull inward and turn green as
                     the hold completes: the iOS Face ID tell that the device has
-                    locked on, rather than a spinner that means nothing. */}
+                    locked on, rather than a spinner that means nothing.
+
+                    The radius is the LOGICAL corner property rather than a
+                    utility class, because there isn't one to use: this project's
+                    radius utility is `rad-*`, which sets all four corners, and
+                    Tailwind's per-corner logical classes (`rounded-ss-*` and
+                    friends) don't read the XD spacing scale. Setting one corner
+                    matters — it is the elbow where the two borders actually
+                    meet, and rounding the other three tapers the open ends of
+                    each arm to a point. Logical means it mirrors in RTL on its
+                    own (AGENTS.md §9), so `start-start` follows `start-0`. */}
                 {(
                     [
-                        ['top-0 start-0', 'border-t-2 border-s-2', 'rounded-ts-8'],
-                        ['top-0 end-0', 'border-t-2 border-e-2', 'rounded-te-8'],
-                        ['bottom-0 start-0', 'border-b-2 border-s-2', 'rounded-bs-8'],
-                        ['bottom-0 end-0', 'border-b-2 border-e-2', 'rounded-be-8'],
+                        ['top-0 start-0', 'border-t-6 border-s-6', 'borderStartStartRadius'],
+                        ['top-0 end-0', 'border-t-6 border-e-6', 'borderStartEndRadius'],
+                        ['bottom-0 start-0', 'border-b-6 border-s-6', 'borderEndStartRadius'],
+                        ['bottom-0 end-0', 'border-b-6 border-e-6', 'borderEndEndRadius'],
                     ] as const
-                ).map(([pos, edges, round]) => (
-                    <span
-                        key={pos}
-                        aria-hidden
-                        className={cn(
-                            'absolute h-18 w-18 transition-all duration-500 ease-out motion-reduce:transition-none',
-                            pos,
-                            edges,
-                            round,
-                        )}
-                        style={{
-                            borderColor: bracketColor,
-                            margin: rem(active ? 34 : 22),
-                            opacity: active ? 1 : 0.85,
-                        }}
-                    />
-                ))}
+                ).map(([pos, edges, corner]) => {
+                    const style: React.CSSProperties = {
+                        borderColor: bracketColor,
+                        [corner]: rem(BRACKET_RADIUS),
+                        margin: rem(active ? 34 : 22),
+                        opacity: active ? 1 : 0.85,
+                    };
+                    return (
+                        <span
+                            key={pos}
+                            aria-hidden
+                            className={cn(
+                                'absolute h-18 w-18 transition-all duration-500 ease-out motion-reduce:transition-none',
+                                pos,
+                                edges,
+                            )}
+                            style={style}
+                        />
+                    );
+                })}
 
                 {/* Scanning sweep while searching. Stops the moment the gate
                     starts holding, so the animation always means "still

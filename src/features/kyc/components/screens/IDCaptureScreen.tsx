@@ -827,12 +827,35 @@ export default function IDCaptureScreen() {
                 }}
             />
 
-            <FlexSpace size={100} share={0.3} />
+            {/*
+              ── What gives on a short screen, and what must not ──────────────
+              Everything below the spacers carries `shrink-0`, and that is not
+              belt-and-braces: a flex item shrinks by DEFAULT, so on any viewport
+              shorter than the frame was drawn for, the browser took the
+              shortfall out of the tallest item — the 350 x 400 viewfinder. It
+              measured 387.5 tall at 932 and 246 in Safari at 745, i.e. the
+              camera window quietly changed aspect ratio and the card guide
+              stopped matching the card.
+
+              The viewfinder's SHAPE is the thing that cannot be approximate —
+              it is what the user aligns their ID against — but its size can
+              give, so on a short screen it scales down whole rather than
+              squashing (see `aspect-[350/400]` on it below).
+
+              The shortfall is split four ways, and the shares say which of them
+              the user should notice last. The big 160 under the tabs takes most
+              of it; the frame takes a fifth; the 100 above the title and the 35
+              under the button take almost none, because those two are what stop
+              the heading colliding with Safari's toolbar and the button sitting
+              flush on the bottom edge. Shares total 1: 0.15 + 0.55 + 0.10 on
+              the spacers, 0.20 on the frame.
+            */}
+            <FlexSpace size={100} share={0.15} />
             {/* Header */}
-            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
                 Identity Verification !
             </h1>
-            <div className="flex items-center justify-center gap-8 mb-11">
+            <div className="flex shrink-0 items-center justify-center gap-8 mb-11">
                 <Image
                     src={liveDetectIdSvg}
                     alt="live detect ID"
@@ -846,7 +869,21 @@ export default function IDCaptureScreen() {
             {/* Camera viewfinder */}
             <div
                 ref={viewfinderRef}
-                className="relative w-350 h-400 mx-auto  rad-30 overflow-hidden bg-[#000000] mb-10"
+                // 350 x 400 at full size, and SMALLER AT THE SAME SHAPE when
+                // there is not enough height — never squashed.
+                //
+                // The width is deliberately `auto`: with `aspect-[350/400]` and
+                // a definite height, the width is derived from the height, so
+                // the two always move together. Setting both (as `w-350 h-400`
+                // did) makes the ratio inert — the browser shrank the height
+                // alone and the frame became 350 x 246 in Safari, a different
+                // rectangle from the one the ID has to be aligned inside.
+                //
+                // It shrinks reluctantly: `flexShrink: 0.2` against the spacers'
+                // shares means the gaps give up most of any shortfall before the
+                // frame gives up any. See the note above the header.
+                className="relative aspect-[350/400] h-400 w-auto max-w-350 min-h-0 mx-auto rad-30 overflow-hidden bg-[#000000] mb-10"
+                style={{ flexShrink: 0.2 }}
             >
                 <video
                     ref={videoRef}
@@ -998,7 +1035,7 @@ export default function IDCaptureScreen() {
 
             {/* Tabs */}
             {isPassport ? (
-                <div className="flex items-center justify-center mb-12">
+                <div className="flex shrink-0 items-center justify-center mb-12">
                     <div className="text-center">
                         <div className="inline-flex items-center justify-center gap-4 pb-8">
                             <Image
@@ -1016,7 +1053,7 @@ export default function IDCaptureScreen() {
                     </div>
                 </div>
             ) : (
-                <div className="flex items-center justify-center gap-4 mb-12">
+                <div className="flex shrink-0 items-center justify-center gap-4 mb-12">
                     <div className=" w-153 text-center">
                         <div className={`inline-flex items-center justify-center gap-4 pb-8`}>
                             <Image
@@ -1076,50 +1113,87 @@ export default function IDCaptureScreen() {
                 </div>
             )}
 
-            {/* Captured thumbnails */}
-            {(frontImageData || backImageData) &&
-                (isPassport ? (
-                    <div className="flex justify-center mb-12">
-                        <div className="w-306 h-180 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
-                            {frontImageData ? (
-                                <img
-                                    src={frontImageData}
-                                    alt="Passport"
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                <div className="w-full h-full" />
-                            )}
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex gap-8 mb-12">
-                        <div className="flex-1 w-153 h-96 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
-                            {frontImageData ? (
-                                <img
-                                    src={frontImageData}
-                                    alt="Front"
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                <div className="w-full h-full" />
-                            )}
-                        </div>
-                        <div className="flex-1 w-153 h-96 rad-15 overflow-hidden bg-gray-100 border border-gray-100">
-                            {backImageData ? (
-                                <img
-                                    src={backImageData}
-                                    alt="Back"
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                <div className="w-full h-full" />
-                            )}
-                        </div>
-                    </div>
-                ))}
+            {/*
+              Captured thumbnails — ALWAYS rendered, empty until they are filled.
+              This used to mount only once a side had been captured, so the row
+              appeared out of nowhere and shoved everything below it down at the
+              exact moment the user was reading the result of their capture. The
+              slots are part of the design's vertical rhythm, not a reward for
+              finishing: they hold their space from the first paint and fill in
+              place, so taking the front picture changes one box and nothing
+              else on the screen moves.
 
-            <FlexSpace size={160} share={0.6} />
+              An unfilled slot is INVISIBLE — space, not an empty grey card. The
+              fill and the border arrive with the picture. A placeholder card
+              reads as a thing that failed to load, and on a screen whose whole
+              job is "photograph this", a grey rectangle where a photograph goes
+              is the worst possible thing to draw.
+            */}
+            {isPassport ? (
+                <div className="flex shrink-0 justify-center mb-12">
+                    <div
+                        className={`w-306 h-180 rad-15 overflow-hidden ${
+                            frontImageData ? 'bg-gray-100 border border-gray-100' : ''
+                        }`}
+                    >
+                        {frontImageData && (
+                            <img
+                                src={frontImageData}
+                                alt="Passport"
+                                className="w-full h-full object-cover"
+                            />
+                        )}
+                    </div>
+                </div>
+            ) : (
+                // gap-4, not gap-8, so this row is exactly as wide as the tab
+                // strip above it (153 + 4 + 153). The two are read as one
+                // column — a tab and the picture it produced — and 4px of
+                // disagreement between them is visible as a wobble.
+                <div className="flex shrink-0 gap-4 mb-12">
+                    <div
+                        className={`flex-1 w-153 h-96 rad-15 overflow-hidden ${
+                            frontImageData ? 'bg-gray-100 border border-gray-100' : ''
+                        }`}
+                    >
+                        {frontImageData && (
+                            <img
+                                src={frontImageData}
+                                alt="Front"
+                                className="w-full h-full object-cover"
+                            />
+                        )}
+                    </div>
+                    <div
+                        className={`flex-1 w-153 h-96 rad-15 overflow-hidden ${
+                            backImageData ? 'bg-gray-100 border border-gray-100' : ''
+                        }`}
+                    >
+                        {backImageData && (
+                            <img
+                                src={backImageData}
+                                alt="Back"
+                                className="w-full h-full object-cover"
+                            />
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/*
+              40, not the 160 this used to be. The thumbnail slots below the
+              tabs now hold their space from the first paint instead of
+              appearing on capture, and that added ~110 of permanent height —
+              which came straight out of the viewfinder, leaving it 303 x 347 on
+              the very canvas it is drawn 350 x 400 for. This gap gave that
+              height back.
+
+              It is only a MINIMUM: `mt-auto` on the block below still pushes the
+              badge and the button to the foot, so on a tall screen the leftover
+              space lands here anyway. What changed is that the space is now
+              slack the frame never has to pay for.
+            */}
+            <FlexSpace size={32} share={0.65} />
             {/* Camera error */}
             {cameraError && (
                 <div className="text-center mb-8">
@@ -1132,7 +1206,7 @@ export default function IDCaptureScreen() {
                     </button>
                 </div>
             )}
-            <div className="mt-auto flex items-center flex-col justify-end">
+            <div className="mt-auto flex shrink-0 items-center flex-col justify-end">
                 {/* Privacy badge */}
                 <div className="flex items-center flex-col justify-center gap-8 mb-12">
                     <Image
@@ -1156,7 +1230,9 @@ export default function IDCaptureScreen() {
                 )}
             </div>
 
-            <FlexSpace size={35} share={0.1} />
+            {/* 12 from the foot, STATIC. This screen ends on a button with no
+                text link under it, and the rule is the same 12 either way. */}
+            <FlexSpace size={12} share={0} />
         </div>
     );
 }

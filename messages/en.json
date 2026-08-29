@@ -31,7 +31,15 @@
         "deviceRetry": "Try Again",
         "deviceCancelled": "That was cancelled, or this device has no passkey for this link.",
         "deviceUnsupported": "This browser cannot use passkeys. Open the link in a current version of Chrome, Edge, Safari or Firefox.",
-        "deviceFailed": "Could not verify this device"
+        "deviceFailed": "Could not verify this device",
+        "introGreeting": "<person>{name}</person>, <hi>Welcome !</hi>",
+        "introWelcome": "Welcome !",
+        "introTitle": "Your First Login Root !",
+        "introBody": "You Are Required To Identity Verification & Read And Agree To The Agreement And Terms Of Use.",
+        "introConsent": "Consent Constitutes A Full And Binding Commitment, And Shall Be Considered A Formal Legal Contract In Accordance With The Applicable Laws And Provisions. If You Do Not Agree, Please Refrain From Proceeding And Click <strong>“Disagree”</strong>.",
+        "introTerms": "Terms Of Services",
+        "introStart": "Start Identity Verification",
+        "introDisagree": "Disagree"
     },
     "common": {
         "appName": "Ramaaz Root",

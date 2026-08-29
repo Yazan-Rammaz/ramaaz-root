@@ -31,7 +31,15 @@
         "deviceRetry": "Tekrar Dene",
         "deviceCancelled": "İşlem iptal edildi veya bu cihazda bu bağlantı için geçiş anahtarı yok.",
         "deviceUnsupported": "Bu tarayıcı geçiş anahtarlarını desteklemiyor. Bağlantıyı güncel bir Chrome, Edge, Safari veya Firefox ile açın.",
-        "deviceFailed": "Bu cihaz doğrulanamadı"
+        "deviceFailed": "Bu cihaz doğrulanamadı",
+        "introGreeting": "<person>{name}</person>, <hi>Hoş geldiniz !</hi>",
+        "introWelcome": "Hoş geldiniz !",
+        "introTitle": "Root İlk Girişiniz !",
+        "introBody": "Kimlik doğrulaması yapmanız ve sözleşmeyi ve kullanım şartlarını okuyup kabul etmeniz gerekmektedir.",
+        "introConsent": "Onay, tam ve bağlayıcı bir taahhüt oluşturur ve yürürlükteki kanun ve hükümler uyarınca resmî bir hukuki sözleşme sayılır. Kabul etmiyorsanız lütfen devam etmeyin ve <strong>“Kabul Etmiyorum”</strong> seçeneğine tıklayın.",
+        "introTerms": "Hizmet Şartları",
+        "introStart": "Kimlik Doğrulamayı Başlat",
+        "introDisagree": "Kabul Etmiyorum"
     },
     "common": {
         "appName": "Ramaaz Root",

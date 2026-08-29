@@ -357,19 +357,39 @@ export default function FaceMatchScreen({
     const idImage = idDocument?.frontImageData || idDocument?.idFaceImageData;
 
     return (
-        <div className="flex flex-col h-full bg-white px-40">
+        // `overflow-y-auto` is the last resort, the same one IDSummaryScreen
+        // has: if the elastic space runs out the screen scrolls rather than
+        // pushing Rematch off the bottom edge. At 932 there is slack, so nothing
+        // scrolls and the frame is untouched.
+        <div className="thin-scroll flex min-h-0 h-full flex-col overflow-y-auto bg-white px-40">
             <ExitConfirmDialog
                 open={showExitDialog}
                 onCancel={() => setShowExitDialog(false)}
                 onConfirm={() => router.push('/home')}
             />
 
-            <FlexSpace size={100} share={0.3} />
+            {/*
+              ── The comparison frame is rigid; the white space gives ─────────
+              350 x 400 on every viewport. Everything on this screen carries
+              `shrink-0` so a short screen cannot take its shortfall out of the
+              frame — a flex item shrinks by default, and the tallest item is
+              always the first thing the browser reaches for.
 
-            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
+              The margins are split rigid + elastic for the reason spelled out
+              in IDSummaryScreen: flexbox freezes whatever hits zero and re-splits
+              the remainder among the survivors, so the last spacer standing
+              absorbs everything and a margin meant to give a little collapses
+              entirely. 56 + 44 at the top, 24 + 11 at the foot — still the 100
+              and 35 the frame asks for. Shares total 1: 0.25 top, 0.65 on the
+              150 above the buttons, 0.10 at the foot.
+            */}
+            <FlexSpace size={56} share={0} />
+            <FlexSpace size={44} share={0.25} />
+
+            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
                 Identity Verification !
             </h1>
-            <div className="flex items-center justify-center gap-8 mb-11">
+            <div className="flex shrink-0 items-center justify-center gap-8 mb-11">
                 <Image src={faceDetectSvg} alt="face" className="object-contain w-20 h-20" />
                 <Image src={liveDetectIdSvg} alt="id" className="object-contain w-20 h-20" />
                 <span className="fz-16 font-medium text-[#1D1D1D] whitespace-nowrap">
@@ -379,7 +399,11 @@ export default function FaceMatchScreen({
 
             {/* Comparison stage: face (back) and ID (front, fading) on the same canvas */}
             <div
-                className="relative mx-auto overflow-hidden rad-30 transition-colors duration-500 w-350 h-400 bg-[#E9EEEE]"
+                // `shrink-0` holds this at exactly 350 x 400 everywhere. It is
+                // the whole point of the screen — the user is being shown the
+                // two images that were compared — so it is the one thing that
+                // must not be resized to make room.
+                className="relative mx-auto shrink-0 overflow-hidden rad-30 transition-colors duration-500 w-350 h-400 bg-[#E9EEEE]"
                 style={{ border: `2px solid ${borderColor}` }}
             >
                 {/* User face — always rendered */}
@@ -513,35 +537,41 @@ export default function FaceMatchScreen({
                 </div>
             )}
             {matchState === 'failed' && (
-                <p className="fz-14 text-center text-[#1D1D1D] mt-12 mb-20">
+                <p className="fz-14 shrink-0 text-center text-[#1D1D1D] mt-12 mb-20">
                     We noticed a discrepancy in the image and there is an issue with your
                     verification.
                 </p>
             )}
 
-            <FlexSpace size={150} share={0.6} />
+            <FlexSpace size={150} share={0.75} />
 
             {matchState === 'failed' && (
-                <div className="mt-auto flex items-center flex-col justify-end">
-                    <div className="flex-1" />
+                // The stray `flex-1` that used to open this block is gone: a
+                // growing spacer inside a `mt-auto` block fights the very
+                // alignment that block exists to do.
+                <div className="mt-auto flex shrink-0 items-center flex-col justify-end">
                     <button
                         onClick={() => {
                             resetSession();
                             goTo('intro', -1);
                         }}
-                        className="w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium"
+                        // mb-12 — the flow-wide gap between a button and the
+                        // text link under it. The pair is one control with a
+                        // secondary way out, not two sections.
+                        className="mb-12 w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium"
                     >
                         Try Again With The Correction
                     </button>
                     <button
                         onClick={() => runMatch()}
-                        className="fz-14 mt-30 text-[#4D84FF] hover:underline"
+                        className="fz-14 text-[#4D84FF] hover:underline"
                     >
                         Rematch
                     </button>
                 </div>
             )}
-            <FlexSpace size={35} share={0.1} />
+            {/* 12 from the foot, STATIC — the flow-wide rule. */}
+            <FlexSpace size={12} share={0} />
         </div>
     );
 }

@@ -1,15 +1,22 @@
 'use client';
 
-import Image from 'next/image';
+import { useTranslations } from 'next-intl';
+import { Icon } from '@/components/ui/Icon';
+import { DashedFrame } from '@/components/ui/DashedFrame';
+import { FlexSpace } from '@/components/ui/FlexSpace';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useKycSession } from '@/features/kyc/context/KycSessionContext';
-import infoSvg from '@/features/kyc/assets/shield.svg';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
 
 /**
  * Consent, and the first thing an administrator sees on a first login.
+ *
+ * XD (430 canvas): a 390 column. Photo 130 x 148 at y=288, then the greeting
+ * (16 medium), the heading (30 bold), the requirement line (14 medium / 18),
+ * the consent paragraph (12 regular), the terms link, the dashed 390 x 60
+ * button, and "Disagree" 127 up from the foot. Every gap is a <FlexSpace>.
  *
  * ── The photo is the one just captured ──────────────────────────────────────
  * Not the stored reference, and not a fresh capture: it is the frame from the
@@ -22,13 +29,24 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * cookie), and the administrator would have to capture their face twice — the
  * one thing this flow is built to avoid.
  *
+ * ── Which gaps give on a short screen ───────────────────────────────────────
+ * The frame's gaps add up to more than a short phone has, so three of them are
+ * elastic and the rest are rigid: the 288 above the photo takes half of any
+ * shortfall, the 127 at the foot takes a third, and the 50 above the button
+ * takes the rest. That order is deliberate — the block from the greeting to the
+ * consent paragraph is one piece of reading, and squeezing gaps inside it is
+ * what makes a legal notice look accidental. At or above the frame's height
+ * every number below is exactly what XD says.
+ *
  * ── Disagree and Terms are inert, by request ────────────────────────────────
- * Both are rendered because they are in the design, and both are disabled: the
- * terms document does not exist yet, and refusing consent mid-challenge has no
- * defined outcome. Shown-but-disabled is the honest state — a live control that
- * silently did nothing would be worse than one that plainly cannot be pressed.
+ * Both are rendered because they are in the design, and neither does anything:
+ * the terms document does not exist yet, and refusing consent mid-challenge has
+ * no defined outcome. They are drawn at the design's full strength rather than
+ * faded, so they LOOK live — `disabled` / `aria-disabled` keep assistive tech
+ * honest, but a sighted person gets no hint. Worth revisiting.
  */
 export default function IntroScreen() {
+    const t = useTranslations('auth');
     const { goTo, livenessResult } = useVerification();
     const { userData } = useKycSession();
 
@@ -43,101 +61,103 @@ export default function IntroScreen() {
     const photo = livenessResult?.faceImageData;
 
     return (
-        <div className="flex h-full flex-col items-center justify-center px-40">
-            <div className="flex w-346 flex-col items-start">
-                {/* The frame captured moments ago, in the face step. */}
-                {photo ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- a
-                    // data: URL held in memory; next/image would need a loader
-                    // and would gain nothing over a 115px square.
-                    <img
-                        src={photo}
-                        alt=""
-                        className="h-115 w-115 self-center rad-20 object-cover"
-                    />
-                ) : (
-                    <div className="h-115 w-115 self-center rad-20 bg-[#F2F2F2]" />
-                )}
+        <div className="mx-auto flex h-full w-390 flex-col">
+            <FlexSpace size={288} share={0.5} />
 
-                <p
-                    className="fz-16 self-center leading-none text-[#1D1D1D]"
-                    style={{ marginTop: rem(20) }}
-                >
-                    {fullName ? (
-                        <>
-                            <span className="font-normal text-[#707070]">{fullName}</span>
-                            <span className="font-medium">, Welcome !</span>
-                        </>
-                    ) : (
-                        <span className="font-medium">Welcome !</span>
-                    )}
-                </p>
+            {/* The frame captured moments ago, in the face step. */}
+            {photo ? (
+                // A data: URL held in memory; next/image would need a loader and
+                // would gain nothing over a 130 x 148 thumbnail.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photo} alt="" className="h-148 w-130 shrink-0 rad-20 object-cover" />
+            ) : (
+                <div className="h-148 w-130 shrink-0 rad-20 bg-[#F2F2F2]" />
+            )}
 
-                <h1
-                    className="fz-30 self-start leading-none font-bold text-[#1D1D1D]"
-                    style={{ marginTop: rem(24) }}
-                >
-                    Your First Login Root !
-                </h1>
+            <FlexSpace size={12} />
 
-                <p
-                    className="fz-14 leading-normal font-medium text-[#1D1D1D]"
-                    style={{ marginTop: rem(20) }}
-                >
-                    You Are Required To Identity Verification &amp; Read And Agree To The
-                    Agreement And Terms Of Use.
-                </p>
+            <p className="fz-16 leading-none text-[#1D1D1D]">
+                {fullName
+                    ? t.rich('introGreeting', {
+                          name: fullName,
+                          // The name is the one part of this line that is data,
+                          // so it carries the lighter weight the frame gives it.
+                          person: (chunks) => (
+                              <span className="font-normal text-[#707070]">{chunks}</span>
+                          ),
+                          hi: (chunks) => <span className="font-medium">{chunks}</span>,
+                      })
+                    : t('introWelcome')}
+            </p>
 
-                <p
-                    className="fz-12 leading-normal font-normal text-[#707070]"
-                    style={{ marginTop: rem(12) }}
-                >
-                    Consent Constitutes A Full And Binding Commitment, And Shall Be
-                    Considered A Formal Legal Contract In Accordance With The Applicable
-                    Laws And Provisions. If You Do Not Agree, Please Refrain From
-                    Proceeding And Click <span className="font-bold">&ldquo;Disagree&rdquo;</span>.
-                </p>
+            <FlexSpace size={12} />
 
-                {/* Inert — the terms document does not exist yet. */}
-                <div
-                    className="flex w-full flex-col items-center gap-6"
-                    style={{ marginTop: rem(40) }}
-                >
-                    <Image src={infoSvg} alt="" width={16} height={16} />
-                    <span
-                        aria-disabled
-                        className="fz-12 leading-none font-normal text-[#388CFF] opacity-60"
-                    >
-                        Terms Of Services
-                    </span>
-                </div>
+            <h1 className="fz-30 leading-none font-bold text-[#1D1D1D]">{t('introTitle')}</h1>
 
-                <button
-                    type="button"
-                    onClick={() => goTo('id-capture-front', 1)}
-                    className="hairline fz-16 h-56 w-full rad-28 leading-none font-normal text-[#707070] transition-colors hover:text-[#1D1D1D]"
-                    style={
-                        {
-                            marginTop: rem(48),
-                            '--hairline-radius': rem(28),
-                            '--hairline-color': '#C3C3C3',
-                            '--hairline-dash': '3 3',
-                        } as React.CSSProperties
-                    }
-                >
-                    Start Identity Verification
-                </button>
+            <FlexSpace size={12} />
 
-                {/* Inert — refusing consent mid-challenge has no defined outcome. */}
-                <button
-                    type="button"
-                    disabled
-                    className="fz-14 w-full cursor-not-allowed leading-none font-medium text-[#1D1D1D] opacity-40"
-                    style={{ marginTop: rem(24) }}
+            <p className="fz-14 font-medium text-[#1D1D1D]" style={{ lineHeight: rem(18) }}>
+                {t('introBody')}
+            </p>
+
+            <FlexSpace size={8} />
+
+            <p className="fz-12 font-normal text-[#707070]" style={{ lineHeight: rem(16) }}>
+                {t.rich('introConsent', {
+                    strong: (chunks) => (
+                        <span className="font-medium text-[#1D1D1D]">{chunks}</span>
+                    ),
+                })}
+            </p>
+
+            <FlexSpace size={45} />
+
+            {/* Inert — the terms document does not exist yet. */}
+            <div className="flex flex-col items-center">
+                <Icon name="kyc/terms" size={25} />
+                <span
+                    aria-disabled
+                    className="fz-14 font-normal text-[#388CFF]"
+                    style={{ marginTop: rem(8) }}
                 >
-                    Disagree
-                </button>
+                    {t('introTerms')}
+                </span>
             </div>
+
+            <FlexSpace size={50} share={0.17} />
+
+            <button
+                type="button"
+                onClick={() => goTo('id-capture-front', 1)}
+                // `relative` is what DashedFrame positions against. The fill and
+                // radius live here; the outline is drawn as an SVG stroke because
+                // a CSS dashed border cannot be given XD's dash and gap lengths —
+                // see DashedFrame.
+                className="fz-16 relative flex h-60 w-full shrink-0 items-center justify-center rad-20 bg-[#FAFAFA] font-normal text-[#3C3C3C]"
+                style={{ lineHeight: rem(20) }}
+            >
+                <DashedFrame radius={20} color="#5D5C5D" dash={3} gap={3} size={0.5} />
+                {t('introStart')}
+            </button>
+
+            {/* 12 between a button and the text link under it, everywhere. */}
+            <FlexSpace size={12} />
+
+            {/* Inert — refusing consent mid-challenge has no defined outcome. */}
+            <button
+                type="button"
+                disabled
+                className="fz-14 w-full shrink-0 cursor-not-allowed leading-none font-medium text-black"
+            >
+                {t('introDisagree')}
+            </button>
+
+            {/* 127 — this screen's own foot, and the exception to the flow's
+                12. It is the XD value: the intro is the only screen here that
+                is a page of reading rather than a control panel, and it is
+                deliberately bottom-heavy. Elastic, so a short viewport takes a
+                third of its shortfall from here. */}
+            <FlexSpace size={127} share={0.33} />
         </div>
     );
 }
