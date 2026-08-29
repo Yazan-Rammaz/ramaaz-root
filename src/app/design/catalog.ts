@@ -59,24 +59,38 @@ export const DEVICES: {
      */
     radius?: number;
     /**
-     * Draw this browser's UI around the frame. When set, `width x height` is
-     * the WEB CONTENT box and `screenHeight` is the whole phone, so the bars
-     * occupy exactly the difference — which is the point: you see how much of
-     * the screen the design does not get.
+     * Which browser's UI to draw around the frame. REQUIRED, and that is the
+     * point: `width x height` is always the WEB CONTENT box, never the panel,
+     * so no preset can offer a viewport a real browser would not give. The bars
+     * then occupy exactly `screenHeight` minus the content — you see how much
+     * of the screen the design does not get.
      */
-    browser?: 'safari' | 'chrome';
-    /** Full device height. Only meaningful alongside `browser`. */
-    screenHeight?: number;
+    browser: 'safari' | 'chrome';
+    /** Full device height — the panel, drawn around the content box. */
+    screenHeight: number;
     /** iOS status bar height — the strip the Dynamic Island sits in. */
-    statusBar?: number;
+    statusBar: number;
     /** Draw the Dynamic Island. Every device here has one; kept explicit. */
     island?: boolean;
     /** True when a number is a guess pending a reading from /design/metrics. */
     estimated?: boolean;
 }[] = [
-    { label: 'iPhone 16 Pro Max', width: 440, height: 956, ratio: 3, radius: 62, island: true },
+    // No bare "screen" presets here, deliberately. 440 x 956 is the PANEL, and a
+    // browser never hands a page that much: Safari keeps 160 of it for its own
+    // chrome. Reviewing at 956 gave the layout 160px it can never have — the ID
+    // capture frame stayed a luxurious 350 x 400 and its button rendered at
+    // y=944, which on the actual phone is 148px below the fold. Every number was
+    // right for a viewport that does not exist.
+    //
+    // Nothing catches that from inside the gallery either: in an iframe
+    // `100svh` is just the iframe's height, because there is no browser chrome
+    // in there to subtract. The frame believes whatever height it is given.
+    //
+    // A screen preset would only be honest for a home-screen/standalone app
+    // with no browser chrome, which this console is not. So the only presets
+    // offered are ones a real browser actually produces.
     {
-        label: '↳ Safari',
+        label: 'iPhone 16 Pro Max · Safari',
         width: 440,
         height: 796,
         ratio: 3,
@@ -87,7 +101,7 @@ export const DEVICES: {
         statusBar: 62,
     },
     {
-        label: '↳ Chrome',
+        label: 'iPhone 16 Pro Max · Chrome',
         width: 440,
         // 766, measured on the device — 30 less than Safari's 796. Chrome's bars
         // are not Safari's, which is exactly why this could not be guessed: a
@@ -101,9 +115,8 @@ export const DEVICES: {
         screenHeight: 956,
         statusBar: 62,
     },
-    { label: 'iPhone 15/14 Pro Max', width: 430, height: 932, ratio: 3, radius: 55, island: true },
     {
-        label: '↳ Safari',
+        label: 'iPhone 15/14 Pro Max · Safari',
         width: 430,
         height: 745,
         ratio: 3,
@@ -116,10 +129,6 @@ export const DEVICES: {
     },
 ];
 
-/** The device preset matching a viewport exactly, if there is one. */
-export function deviceFor(width: number, height: number) {
-    return DEVICES.find((d) => d.width === width && d.height === height);
-}
 
 /**
  * How many rendered pixels one XD pixel becomes at a given viewport width — the

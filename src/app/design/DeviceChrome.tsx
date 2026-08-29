@@ -219,22 +219,17 @@ function LensGlyph({ color = MUTED }: { color?: string }) {
 
 // ── Bars ────────────────────────────────────────────────────────────────────
 
-function StatusBar({
-    height,
-    island,
-    transparent,
-}: {
-    height: number;
-    island?: boolean;
-    transparent?: boolean;
-}) {
+function StatusBar({ height, island }: { height: number; island?: boolean }) {
     return (
         <div
             style={{
                 position: 'relative',
                 height,
                 flex: 'none',
-                background: transparent ? 'transparent' : 'inherit',
+                // Always the browser's own bar colour. There was a `transparent`
+                // mode for painting this over a full-screen page; it went with
+                // the screen presets.
+                background: 'inherit',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -561,30 +556,19 @@ export function DeviceChrome({
                 ...style,
             }}
         >
-            {device.browser ? (
-                <>
-                    <StatusBar height={statusBar} island={device.island} />
-                    {device.browser === 'chrome' && (
-                        <ChromeOmnibox height={chromeTopExtra} host={host} />
-                    )}
-                    {children}
-                    {device.browser === 'safari' ? (
-                        <SafariBottom height={bottom} host={host} />
-                    ) : (
-                        <ChromeBottom height={bottom} />
-                    )}
-                </>
+            {/* No branch for "no browser" any more. `browser` is required on
+                the type, because a preset without one offers the whole panel as
+                if it were the page — a viewport no browser ever hands over, and
+                the exact mistake that made this gallery disagree with a real
+                phone by 148 pixels. The presets that reached that branch are
+                gone, so the branch is too. */}
+            <StatusBar height={statusBar} island={device.island} />
+            {device.browser === 'chrome' && <ChromeOmnibox height={chromeTopExtra} host={host} />}
+            {children}
+            {device.browser === 'safari' ? (
+                <SafariBottom height={bottom} host={host} />
             ) : (
-                // No browser: the page owns the whole screen, so the status bar
-                // is painted OVER it rather than above it. That is the honest
-                // picture for a `viewport-fit=cover` page — the area is yours,
-                // and the Island still covers part of it.
-                <>
-                    {children}
-                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                        <StatusBar height={statusBar || 62} island={device.island} transparent />
-                    </div>
-                </>
+                <ChromeBottom height={bottom} />
             )}
         </div>
     );
