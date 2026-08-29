@@ -852,7 +852,7 @@ export default function IDCaptureScreen() {
             */}
             <FlexSpace size={100} share={0.15} />
             {/* Header */}
-            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
+            <h1 className="fz-30 leading-none font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
                 Identity Verification !
             </h1>
             <div className="flex shrink-0 items-center justify-center gap-8 mb-11">

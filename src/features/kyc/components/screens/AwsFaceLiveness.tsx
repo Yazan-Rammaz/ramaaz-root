@@ -1006,7 +1006,7 @@ export default function AwsFaceLivenessScreen() {
             <FlexSpace size={100} share={0.1} />
 
             {/* Header */}
-            <h1 className="fz-30 font-bold text-center text-[#1D1D1D] mb-5">
+            <h1 className="fz-30 leading-none font-bold text-center text-[#1D1D1D] mb-5">
                 Identity Verification !
             </h1>
             <div className="flex items-center justify-center gap-8 mb-11">
