@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ramaaz Root — documentation</title>
+<style>
+:root {
+  --ground:#F4F6F9; --surface:#FFFFFF; --sunk:#EAEEF4;
+  --ink:#141A22; --soft:#4C5766; --faint:#727E8E;
+  --rule:#D3DAE4; --rule-soft:#E4E9F0;
+  --accent:#2D53C4; --accent-bg:#E7ECFB;
+  --warn:#96550A; --warn-bg:#FBF1DE; --bad:#A81E14; --bad-bg:#FBE8E6; --ok:#0B6E58;
+  --sidebar:19rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#0D1117; --surface:#151B23; --sunk:#1D242E;
+    --ink:#E6EAF0; --soft:#A9B3C1; --faint:#7D8797;
+    --rule:#2A323D; --rule-soft:#222932;
+    --accent:#8CA8F6; --accent-bg:#1A2440;
+    --warn:#E0AE5E; --warn-bg:#33270F; --bad:#F58F86; --bad-bg:#351816; --ok:#5FCFAF;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#0D1117; --surface:#151B23; --sunk:#1D242E;
+  --ink:#E6EAF0; --soft:#A9B3C1; --faint:#7D8797;
+  --rule:#2A323D; --rule-soft:#222932;
+  --accent:#8CA8F6; --accent-bg:#1A2440;
+  --warn:#E0AE5E; --warn-bg:#33270F; --bad:#F58F86; --bad-bg:#351816; --ok:#5FCFAF;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:16px;line-height:1.65;overflow-x:hidden}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+/* navbar */
+.navbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:1rem;
+  height:3.5rem;padding:0 1.25rem;background:var(--surface);
+  border-bottom:1px solid var(--rule)}
+.brand{display:flex;align-items:baseline;gap:.5rem;font-weight:680;letter-spacing:-.01em}
+.brand .dot{width:.5rem;height:.5rem;border-radius:50%;background:var(--accent);
+  transform:translateY(-.1rem)}
+.brand small{font-weight:500;color:var(--faint);font-size:.8rem}
+.navbar .spacer{flex:1}
+.navbar button{background:var(--sunk);border:1px solid var(--rule);color:var(--soft);
+  border-radius:4px;padding:.3rem .6rem;font-size:.78rem;cursor:pointer;font-family:inherit}
+.navbar button:hover{color:var(--ink)}
+#menu{display:none}
+
+/* shell */
+.shell{display:flex;align-items:flex-start}
+.sidebar{position:sticky;top:3.5rem;flex:none;width:var(--sidebar);
+  height:calc(100vh - 3.5rem);overflow-y:auto;padding:1.5rem 1rem 3rem;
+  border-right:1px solid var(--rule);background:var(--surface)}
+.nav-group{margin-bottom:1.5rem}
+.nav-group h4{margin:0 0 .5rem;padding:0 .6rem;font-size:.68rem;font-weight:650;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--faint)}
+.nav-group ul{list-style:none;margin:0;padding:0}
+.nav-link{display:block;padding:.4rem .6rem;border-radius:5px;font-size:.9rem;
+  color:var(--soft);text-decoration:none}
+.nav-link:hover{background:var(--sunk);color:var(--ink)}
+.nav-link.active{background:var(--accent-bg);color:var(--accent);font-weight:600}
+
+main{flex:1;min-width:0;padding:2.5rem 2.5rem 5rem;max-width:60rem}
+.page-head{margin-bottom:2rem;padding-bottom:1.25rem;border-bottom:2px solid var(--ink)}
+.crumb{margin:0 0 .5rem;font-size:.7rem;font-weight:650;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint)}
+.page-head h1{margin:0;font-size:clamp(1.7rem,1.2rem+1.6vw,2.4rem);line-height:1.12;
+  letter-spacing:-.022em;text-wrap:balance}
+.src{margin:.75rem 0 0;font-size:.8rem;color:var(--faint)}
+
+/* on this page */
+.toc{margin:0 0 2rem;padding:1rem 1.15rem;background:var(--surface);
+  border:1px solid var(--rule);border-radius:4px}
+.toc p{margin:0 0 .5rem;font-size:.68rem;font-weight:650;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--faint)}
+.toc ul{list-style:none;margin:0;padding:0;display:grid;gap:.15rem}
+.toc a{color:var(--soft);text-decoration:none;font-size:.87rem}
+.toc a:hover{color:var(--accent);text-decoration:underline}
+.toc .lvl-3{padding-inline-start:1rem;font-size:.83rem}
+
+h2{margin:2.75rem 0 1rem;padding-bottom:.5rem;font-size:1.45rem;letter-spacing:-.017em;
+  line-height:1.25;border-bottom:1px solid var(--rule);text-wrap:balance;scroll-margin-top:4.5rem}
+h3{margin:2rem 0 .7rem;font-size:1.08rem;letter-spacing:-.008em;text-wrap:balance;scroll-margin-top:4.5rem}
+h4{margin:1.5rem 0 .5rem;font-size:.95rem;color:var(--soft);scroll-margin-top:4.5rem}
+p{margin:0 0 1rem;max-width:44rem}
+ul,ol{margin:0 0 1rem;padding-inline-start:1.35rem;max-width:44rem}
+li{margin-bottom:.4rem}
+li::marker{color:var(--faint)}
+a{color:var(--accent);text-underline-offset:2px}
+hr{margin:2.5rem 0;border:0;border-top:1px solid var(--rule)}
+strong{font-weight:670}
+
+:not(pre)>code{font-size:.855em;background:var(--sunk);border:1px solid var(--rule-soft);
+  border-radius:3px;padding:.06em .34em}
+pre{margin:0 0 1.4rem;padding:1rem 1.1rem;background:var(--surface);
+  border:1px solid var(--rule);border-radius:4px;overflow-x:auto;
+  font-size:.795rem;line-height:1.62;color:var(--soft)}
+pre code{background:none;border:0;padding:0}
+
+.scroll{overflow-x:auto;margin:0 0 1.4rem;border:1px solid var(--rule);
+  border-radius:4px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.875rem}
+th,td{text-align:start;padding:.62rem .8rem;border-bottom:1px solid var(--rule-soft);
+  vertical-align:top}
+thead th{font-size:.69rem;font-weight:650;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--faint);background:var(--sunk);border-bottom:1px solid var(--rule);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+
+blockquote{margin:0 0 1.4rem;padding:.9rem 1.1rem;background:var(--accent-bg);
+  border-inline-start:3px solid var(--accent);border-radius:0 4px 4px 0}
+blockquote>:last-child{margin-bottom:0}
+
+footer{border-top:1px solid var(--rule);padding:1.5rem 2.5rem 2.5rem;
+  color:var(--faint);font-size:.8rem;background:var(--surface)}
+footer p{max-width:none;margin:0}
+
+@media (max-width:60rem){
+  #menu{display:inline-block}
+  .sidebar{position:fixed;inset:3.5rem auto 0 0;z-index:20;transform:translateX(-100%);
+    transition:transform .2s ease}
+  .sidebar.open{transform:none}
+  main{padding:1.75rem 1.25rem 4rem}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <button id="menu" aria-label="Toggle navigation">☰</button>
+  <span class="brand"><span class="dot"></span>Ramaaz Root <small>documentation</small></span>
+  <span class="spacer"></span>
+  <button id="theme">Theme</button>
+</nav>
+
+<div class="shell">
+  <aside class="sidebar" id="sidebar"><div class="nav-group"><h4>Overview</h4><ul><li><a class="nav-link" data-page="home" href="#home">Documentation</a></li></ul></div><div class="nav-group"><h4>Login</h4><ul><li><a class="nav-link" data-page="login" href="#login">The sign-in flow</a></li><li><a class="nav-link" data-page="login-backend" href="#login-backend">What the backend must configure</a></li></ul></div><div class="nav-group"><h4>KYC integration</h4><ul><li><a class="nav-link" data-page="kyc" href="#kyc">Overview</a></li><li><a class="nav-link" data-page="kyc-backend" href="#kyc-backend">Root backend — what to build</a></li><li><a class="nav-link" data-page="kyc-contract" href="#kyc-contract">Worker contract</a></li><li><a class="nav-link" data-page="kyc-signed" href="#kyc-signed">Design — signed result</a></li></ul></div></aside>
+  <main id="main"><article class="page" id="page-home" hidden>
+  <header class="page-head">
+    <p class="crumb">Overview</p>
+    <h1>Ramaaz Root — documentation</h1>
+    
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#features">Features</a></li><li class="lvl-3"><a href="#loginlogin">[Login](login/)</a></li><li class="lvl-3"><a href="#kyc-integrationkyc">[KYC integration](kyc/)</a></li><li class="lvl-2"><a href="#how-to-read-these">How to read these</a></li></ul></nav>
+  <p>The Root console: a management dashboard sitting above the company's projects. These pages cover how it is built and what it expects from the services around it.</p>
+<p>Open <strong><code>index.html</code></strong> in a browser for the navigable version. Regenerate it with <code>node docs/build.mjs</code> after editing any page.</p>
+<hr>
+<h2 id="features">Features</h2>
+<h3 id="loginlogin"><a href="login/" target="_blank" rel="noreferrer">Login</a></h3>
+<p>The root sign-in flow, end to end — access link, private code, live face capture, and the stage machine that drives all of it. Start here: everything else in the console sits behind this.</p>
+<h3 id="kyc-integrationkyc"><a href="kyc/" target="_blank" rel="noreferrer">KYC integration</a></h3>
+<p>How face verification and ID enrolment work across three services: this dashboard, the <code>ramaaz-kyc</code> Worker, and the root backend. Contains the spec the backend developer is building against.</p>
+<hr>
+<h2 id="how-to-read-these">How to read these</h2>
+<p>Two audiences are mixed on purpose, and each page says which it is addressing. Broadly:</p>
+<ul><li><strong>Login</strong> is about this repository — screens, routes, and the client state machine.</li><li><strong>KYC integration</strong> is a contract between three parties, so it is written for whoever is implementing the other two.</li></ul>
+<p>Pages marked <strong>⚠️ TODO</strong> or <strong>OPEN</strong> are waiting on somebody outside this repo. Those are the ones worth checking first if something does not work.</p>
+</article>
+<article class="page" id="page-login" hidden>
+  <header class="page-head">
+    <p class="crumb">Login</p>
+    <h1>Login — the root sign-in flow</h1>
+    
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#1-what-the-administrator-receives">1. What the administrator receives</a></li><li class="lvl-2"><a href="#2-the-flow">2. The flow</a></li><li class="lvl-2"><a href="#3-the-rule-the-whole-client-follows">3. The rule the whole client follows</a></li><li class="lvl-3"><a href="#four-rules-that-hold-at-every-step">Four rules that hold at every step</a></li><li class="lvl-2"><a href="#4-the-screens">4. The screens</a></li><li class="lvl-3"><a href="#why-three-stages-share-loginidentity">Why three stages share `/login/identity`</a></li><li class="lvl-2"><a href="#5-the-face-capture">5. The face capture</a></li><li class="lvl-2"><a href="#6-security-model">6. Security model</a></li><li class="lvl-2"><a href="#7-where-the-code-is">7. Where the code is</a></li><li class="lvl-2"><a href="#8-not-built-yet">8. Not built yet</a></li></ul></nav>
+  <p>How an administrator gets into the Root console, end to end: what they receive, what each screen does, and which server call sits behind it.</p>
+<hr>
+<h2 id="1-what-the-administrator-receives">1. What the administrator receives</h2>
+<p>One WhatsApp message, carrying two things:</p>
+<pre><code>https://&lt;console&gt;/enter/nFTMkeEjZNmhBYp0Ams27q8Js8lFWXKbojzjeDHb-q0
+X1D3P12</code></pre>
+<p>The <strong>access link</strong> and the <strong>private code</strong>, together. There is nothing to request, no code to wait for, and no resend — which is why the private-code screen is a heading and a field and nothing else.</p>
+<p>The link is issued by another root administrator, or by <code>cmd/seed</code>. It is the only way in: a lost link has no self-service recovery, and only another root administrator can issue a new one.</p>
+<hr>
+<h2 id="2-the-flow">2. The flow</h2>
+<pre><code>/enter/{token}          validate the link server-side, nothing rendered
+      │
+      ▼
+   splash              progress bar fills
+      │
+      ▼
+/login                  PRIVATE_CODE_REQUIRED   — type the code from WhatsApp
+      │
+      ▼
+/login/identity         FACE_REQUIRED           — live face capture
+      │
+      ├─ first login ──► ID_DOCUMENT_REQUIRED / ID_INFO_REQUIRED
+      │                  intro → ID capture → summary → face match → success
+      │
+      ▼
+/login/device           DEVICE_REQUIRED         — passkey  (not built yet)
+      │
+      ▼
+  COMPLETED             tokens issued → /dashboard</code></pre>
+<p>Any refusal, at any point, lands on <strong><code>/no-access</code></strong>.</p>
+<hr>
+<h2 id="3-the-rule-the-whole-client-follows">3. The rule the whole client follows</h2>
+<p><strong>Branch on <code>stage</code>, never on a step counter.</strong></p>
+<p>Every response from the backend carries the stage it is now at. <code>applyStage()</code> (<code>src/lib/auth/challenge.ts</code>) is the single router: each step handler hands it the response and it decides where the browser goes. No step names its own successor.</p>
+<p>That is not tidiness. A check switched off in a deployment simply never reports its stage, and this walks past it. A client that hard-coded "password → OTP → PIN" is exactly what broke when the protocol changed underneath it.</p>
+<h3 id="four-rules-that-hold-at-every-step">Four rules that hold at every step</h3>
+<ol><li><strong>The challenge token rotates.</strong> Every response carries a new one; the previous is dead. Always store the one just returned.</li><li><strong>Order is enforced server-side.</strong> A step sent early answers <code>CHALLENGE_INVALID</code> — and that burns the challenge.</li><li><strong>The sequence expires</strong> (10 minutes) and tolerates <strong>5 failed attempts in total</strong>. Past either, it is over.</li><li><strong>One refusal message.</strong> Unknown link, revoked, expired, wrong country, suspended — the backend answers all of them identically, and so do we.</li></ol>
+<hr>
+<h2 id="4-the-screens">4. The screens</h2>
+<div class="scroll"><table><thead><tr><th>Route</th><th>Stage</th><th>What it does</th></tr></thead><tbody><tr><td><code>/enter/{token}</code></td><td>—</td><td>Route Handler. Posts the token to <code>/v1/auth/link</code>, opens the challenge, redirects. Renders nothing.</td></tr><tr><td><code>/login</code></td><td><code>PRIVATE_CODE_REQUIRED</code></td><td>The private code, in a text field. No client validation.</td></tr><tr><td><code>/login/identity</code></td><td><code>FACE_REQUIRED</code> + both ID stages</td><td>Face capture and, on a first login, ID enrolment.</td></tr><tr><td><code>/login/device</code></td><td><code>DEVICE_REQUIRED</code></td><td>Passkey enrolment. <strong>Not built.</strong></td></tr><tr><td><code>/no-access</code></td><td>—</td><td>Every refusal.</td></tr></tbody></table></div>
+<h3 id="why-three-stages-share-loginidentity">Why three stages share <code>/login/identity</code></h3>
+<p>The face captured at <code>FACE_REQUIRED</code> is <strong>reused</strong> when the ID is compared against it, so the administrator never captures their face twice.</p>
+<p>That frame is a ~300 KB data URL living in React state — far too large for a cookie, and biometric data we will not put in browser storage. It survives exactly as long as the React tree does. Separate URLs for those stages would unmount everything and drop it, and the only symptom would be a second capture nobody asked for.</p>
+<hr>
+<h2 id="5-the-face-capture">5. The face capture</h2>
+<p><code>/login/identity</code> opens with a black 350×400 frame and yellow corner brackets. There is no shutter button: capture is automatic once a <strong>local gate</strong> is satisfied.</p>
+<p><code>useFaceGate</code> (<code>src/features/kyc/hooks/useFaceGate.ts</code>) samples the video and requires five things to hold <strong>continuously for 1.2 seconds</strong>:</p>
+<ul><li>exactly one face present</li><li>close enough, but not cropped by the frame</li><li>facing the camera (yaw within ±18°)</li><li>brightness and sharpness in range</li><li>still</li></ul>
+<p><strong>Nothing is uploaded until all five pass.</strong> That is not polish: a dark or blurred frame comes back as a <em>failed</em> check, and the backend counts failures against a challenge that allows five in total. Sending an unusable frame spends somebody's attempt on our impatience.</p>
+<p>The hold is the whole interaction — brackets pull inward and turn green, a hairline fills across the frame's foot — so the capture is something the person watched happen rather than something that happened to them.</p>
+<p>The frontend keeps <strong>no attempt counter</strong>. The backend owns that and kills the session itself; two authorities disagreeing about tries remaining is worse than one.</p>
+<hr>
+<h2 id="6-security-model">6. Security model</h2>
+<ul><li><strong>The browser never holds a token.</strong> Every credential lives in an httpOnly cookie: <code>root_challenge</code> mid-sign-in, <code>root_at</code> / <code>root_rt</code> after.</li><li><strong>No mock data anywhere.</strong> A mock always says the ID is readable and the faces match, so it can prove the screens render but never the thing most likely to disappoint. A flow that passes against invented data is indistinguishable from one that works.</li><li><strong>The face image never reaches the auth backend.</strong> It goes to the KYC Worker; what reaches <code>/v1/auth/face</code> is a verdict. See <a href="#" data-xref="../kyc/">KYC integration</a>.</li><li><strong><code>/no-access</code> reveals nothing</strong> — not even that a sign-in exists here.</li></ul>
+<hr>
+<h2 id="7-where-the-code-is">7. Where the code is</h2>
+<div class="scroll"><table><thead><tr><th>Concern</th><th>File</th></tr></thead><tbody><tr><td>The wire contract — every path, stage and shape</td><td><code>src/lib/auth/endpoints.ts</code></td></tr><tr><td>The challenge cookie and <code>applyStage()</code></td><td><code>src/lib/auth/challenge.ts</code></td></tr><tr><td>Opening a link</td><td><code>src/lib/auth/link.ts</code></td></tr><tr><td>Step actions</td><td><code>src/features/auth/actions.ts</code></td></tr><tr><td>Error → message mapping</td><td><code>src/lib/auth/errors.ts</code></td></tr><tr><td>Face gate</td><td><code>src/features/kyc/hooks/useFaceGate.ts</code></td></tr><tr><td>Face capture screen</td><td><code>src/features/kyc/components/screens/FaceScanScreen.tsx</code></td></tr></tbody></table></div>
+<hr>
+<h2 id="8-not-built-yet">8. Not built yet</h2>
+<ul><li><strong><code>/login/device</code></strong> — the passkey step. <code>DEVICE_REQUIRED</code> currently routes to a page that does not exist.</li><li><strong>The idle lock.</strong> It used to unlock with the 6-digit passcode, which no longer exists. Its replacement is a face re-verify, which needs a session-authenticated face endpoint the backend does not expose.</li><li><strong>A verified end-to-end sign-in.</strong> <code>/v1/auth/link</code> returns 500 on a real link; see <a href="#" data-xref="../kyc/backend.md">KYC integration §7</a>.</li></ul>
+</article>
+<article class="page" id="page-login-backend" hidden>
+  <header class="page-head">
+    <p class="crumb">Login</p>
+    <h1>Login — what the backend must configure</h1>
+    
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#1-the-three-settings">1. The three settings</a></li><li class="lvl-2"><a href="#2-the-link-path-changed">2. The link path changed</a></li><li class="lvl-2"><a href="#3-rpid-must-not-carry-a-port">3. `rp.id` must not carry a port</a></li><li class="lvl-2"><a href="#4-pick-the-production-domain-before-the-first-real-enrolment">4. ⚠️ Pick the production domain before the first real enrolment</a></li><li class="lvl-2"><a href="#5-what-we-cannot-test-until-this-is-set">5. What we cannot test until this is set</a></li></ul></nav>
+  <p><strong>For the root backend developer.</strong> Everything here is configuration, not code: three settings and a path. All of it is needed before anyone can sign in, and two of them are expensive to change later.</p>
+<p>The endpoint contract itself is in <code>root-enrollment.md</code>. This is only the part that depends on <em>where the console is running</em>.</p>
+<hr>
+<h2 id="1-the-three-settings">1. The three settings</h2>
+<p>They look related and are not the same shape — one is a full URL, the other a bare domain. That is the easy mistake.</p>
+<div class="scroll"><table><thead><tr><th>Setting</th><th>Local dev</th><th>What it does</th></tr></thead><tbody><tr><td><code>PUBLIC_URL</code></td><td><code>http://localhost:3002</code></td><td>builds the access link. <strong>Takes the port.</strong></td></tr><tr><td><code>rp.id</code></td><td><code>localhost</code></td><td>WebAuthn relying party. <strong>Domain only — no scheme, no port.</strong></td></tr><tr><td><code>rp.name</code></td><td><code>Ramaaz Root</code></td><td>free text, shown in the passkey prompt</td></tr></tbody></table></div>
+<hr>
+<h2 id="2-the-link-path-changed">2. The link path changed</h2>
+<p>Mint links as:</p>
+<pre><code>{PUBLIC_URL}/enter/{token}</code></pre>
+<p><strong>Not</strong> <code>/dashboard/{token}</code>. The console serves the token route at <code>/enter</code>; <code>/dashboard</code> is the real dashboard and answers 404 for a token.</p>
+<p>The route handler posts the token to <code>/v1/auth/link</code> in the <strong>body</strong>, renders nothing, and redirects — so the token appears in the address bar for one request and never reaches a document, a referrer header or an RSC payload.</p>
+<hr>
+<h2 id="3-rpid-must-not-carry-a-port">3. <code>rp.id</code> must not carry a port</h2>
+<p><code>localhost:3002</code> is rejected by the browser, not by us:</p>
+<pre><code>SecurityError: The relying party ID is not a registrable domain
+suffix of, nor equal to the current domain.</code></pre>
+<p>Use <code>localhost</code>. The port is ignored when the browser matches <code>rp.id</code> against the page origin, and plain HTTP is fine there because browsers treat localhost as a secure context — WebAuthn works without TLS.</p>
+<p>In production <code>rp.id</code> must equal the console's domain, or <code>create()</code> throws the same error.</p>
+<hr>
+<h2 id="4-pick-the-production-domain-before-the-first-real-enrolment">4. ⚠️ Pick the production domain before the first real enrolment</h2>
+<p>A passkey is bound to the <code>rp.id</code> it was created under. One enrolled against <code>localhost</code> works <strong>only</strong> on localhost — it will not carry to staging or production.</p>
+<p>Harmless for test accounts. Expensive for real ones: a passkey that no longer matches cannot be recovered, and the only path back is another root administrator issuing a fresh link. Do that to every administrator at once and the console locks itself.</p>
+<p>So: <strong>enrol nobody real until the production domain is decided</strong>, and once it is, do not change it.</p>
+<p>Four things then have to agree on that one value:</p>
+<div class="scroll"><table><thead><tr><th>Where</th><th>What</th></tr></thead><tbody><tr><td><code>rp.id</code></td><td>must equal the browser's origin domain</td></tr><tr><td><code>PUBLIC_URL</code></td><td>mints the link the administrator opens</td></tr><tr><td>KYC Worker <code>TENANTS.root.origins</code></td><td>CORS</td></tr><tr><td>Cookie domain</td><td>only if sharing across subdomains is ever wanted</td></tr></tbody></table></div>
+<hr>
+<h2 id="5-what-we-cannot-test-until-this-is-set">5. What we cannot test until this is set</h2>
+<p>The passkey ceremony needs a real authenticator <strong>and</strong> a matching <code>rp.id</code>. Until both exist, <code>/login/device</code> renders and calls <code>/v1/auth/device/options</code>, but the browser refuses the ceremony — so neither a first-login enrolment nor a returning sign-in can be walked end to end.</p>
+<p>Everything before it — link, private code, face capture — is testable now.</p>
+</article>
+<article class="page" id="page-kyc" hidden>
+  <header class="page-head">
+    <p class="crumb">KYC integration</p>
+    <h1>KYC integration</h1>
+    
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#pages">Pages</a></li><li class="lvl-3"><a href="#root-backend-what-to-buildbackendmd">[Root backend — what to build](backend.md)</a></li><li class="lvl-3"><a href="#worker-contractworker-contractmd">[Worker contract](worker-contract.md)</a></li><li class="lvl-3"><a href="#design-note-signed-result-tokensigned-resultmd">[Design note — signed result token](signed-result.md)</a></li><li class="lvl-2"><a href="#the-short-version-if-you-read-nothing-else">The short version, if you read nothing else</a></li></ul></nav>
+  <p>Face verification and ID enrolment span three services. Nothing here works until all three agree, so these pages exist to make the seams explicit.</p>
+<pre><code>┌─────────┐   httpOnly cookie   ┌───────────┐   X-Step-Token   ┌────────────┐
+│ Browser │ ──────────────────► │ Dashboard │ ───────────────► │ ramaaz-kyc │
+└─────────┘    (same origin)    └───────────┘                  └─────┬──────┘
+                                                                     │
+                                          X-Internal-Secret          │
+                                          Bearer + X-KYC-Signature   │
+                                               ┌─────────────────────┘
+                                               ▼
+                                       ┌───────────────┐
+                                       │ Root backend  │  ← decides pass/fail
+                                       └───────────────┘</code></pre>
+<p><strong>The browser decides nothing, and the Worker decides nothing.</strong> The Worker measures — liveness 94.2, face match 91.7 — and reports those numbers over a signed server-to-server channel. The backend applies the thresholds and owns the verdict.</p>
+<p>That is not a preference. KYC sits on the login path: a pass/fail computed in the browser could be forged from devtools, and one computed in the Worker and relayed through the browser is no better.</p>
+<hr>
+<h2 id="pages">Pages</h2>
+<h3 id="root-backend-what-to-buildbackendmd"><a href="#" data-xref="backend.md">Root backend — what to build</a></h3>
+<p><strong>For the root backend developer.</strong> The four endpoints root's flow reaches, the three things that will silently break it, and the decisions still open. This is the page to send.</p>
+<h3 id="worker-contractworker-contractmd"><a href="#" data-xref="worker-contract.md">Worker contract</a></h3>
+<p><strong>The canonical contract</strong>, identical for every Ramaaz product. Auth model, HMAC rules, the full endpoint list, and how a new product is registered. Source of truth lives at <code>frontend/ramaaz-kyc/INTEGRATION.md</code>.</p>
+<h3 id="design-note-signed-result-tokensigned-resultmd"><a href="#" data-xref="signed-result.md">Design note — signed result token</a></h3>
+<p><strong>Proposed, not built.</strong> How to make <code>ramaaz-kyc</code> a genuinely isolated service that anything can integrate, by having it return a signed receipt instead of calling back into each consumer's backend. Recorded so the reasoning survives; the migration is deliberately deferred.</p>
+<hr>
+<h2 id="the-short-version-if-you-read-nothing-else">The short version, if you read nothing else</h2>
+<ul><li><strong>One contract for every product.</strong> Same paths, same shapes, same auth. Only the <em>order</em> a product calls them in may differ, and order lives in that product's backend because the Worker keeps no state.</li><li><strong>Three endpoints need nothing.</strong> <code>analyze-id</code>, <code>liveness</code> and <code>compare-face</code> require no auth, no backend and no credentials. A new product can build its entire capture UI against them before its backend exists.</li><li><strong>Two secrets, not one.</strong> <code>KYC_INTERNAL_SECRET</code> protects reads; <code>KYC_SHARED_SECRET</code> protects verdicts. If the second leaks, an attacker can forge a passing face check.</li><li><strong>The face image never reaches the auth backend.</strong> It goes to the Worker; the backend receives a verdict.</li></ul>
+</article>
+<article class="page" id="page-kyc-backend" hidden>
+  <header class="page-head">
+    <p class="crumb">KYC integration</p>
+    <h1>Root backend — what to build for KYC</h1>
+    
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#1-the-shape-of-it">1. The shape of it</a></li><li class="lvl-2"><a href="#2-the-flow">2. The flow</a></li><li class="lvl-3"><a href="#the-face-step-in-order">The face step, in order</a></li><li class="lvl-2"><a href="#3-what-you-must-implement">3. What you must implement</a></li><li class="lvl-3"><a href="#required">Required</a></li><li class="lvl-3"><a href="#only-if-root-later-uses-the-session-based-enrolment-routes">Only if root later uses the session-based enrolment routes</a></li><li class="lvl-2"><a href="#4-four-things-that-will-silently-break-this">4. Four things that will silently break this</a></li><li class="lvl-2"><a href="#5-who-stores-the-images">5. Who stores the images</a></li><li class="lvl-3"><a href="#todo-which-photo-becomes-the-reference">⚠️ TODO — which photo becomes the reference?</a></li><li class="lvl-2"><a href="#6-decisions">6. Decisions</a></li><li class="lvl-2"><a href="#7-the-two-secrets-we-have-to-agree-on-the-values">7. The two secrets — we have to agree on the values</a></li><li class="lvl-2"><a href="#8-known-already-being-fixed">8. Known, already being fixed</a></li><li class="lvl-2"><a href="#9-what-is-already-built-on-our-side">9. What is already built on our side</a></li></ul></nav>
+  <p><strong>For the root backend developer.</strong></p>
+<blockquote><p><strong>Read <code>ramaaz-kyc/INTEGRATION.md</code> first.</strong> That is the canonical contract — the auth model, the HMAC rules, the full endpoint list, and how a product is registered. It applies to every Ramaaz product identically.</p>
+<p>This file is only the <strong>root-specific</strong> part: which of those endpoints root's flow actually reaches, and the decisions still open.</p></blockquote>
+<p>Verified against the running systems on 2026-08-26.</p>
+<hr>
+<h2 id="1-the-shape-of-it">1. The shape of it</h2>
+<p>Three parties. The dashboard proxies to the <code>ramaaz-kyc</code> Worker; the Worker measures with AWS Rekognition and reports the numbers to <strong>you</strong>; you apply the thresholds and own the verdict. The browser never decides anything, and neither does the Worker.</p>
+<p>Root is registered in the Worker as tenant <code>root</code>, so the dashboard sends <code>X-Ramaaz-Tenant: root</code> and the Worker routes to your base URL with root's own signing secrets. Nothing about RDB is involved.</p>
+<p><strong>Root is a mid-login flow.</strong> There is no access token while KYC runs — the dashboard sends the challenge token as <code>X-Step-Token</code>, which the Worker forwards to you as <code>Authorization: Bearer</code>. Every consequence below follows from that.</p>
+<hr>
+<h2 id="2-the-flow">2. The flow</h2>
+<pre><code>liveness            → faceImageData                        (Worker only, no backend)
+reverify/verify     { challengeId, liveFaceImageData }      → YOU decide → stepToken
+analyze-id (front)  → idFaceImageData                       (Worker only, no backend)
+analyze-id (back)                                           (Worker only, no backend)
+compare-face        { the frame from step 1, idFaceImageData }   (Worker only, no backend)
+submit              full enrolment payload                  → YOU</code></pre>
+<p>Two things worth noting: the face captured in step 1 is <strong>reused</strong> in step 5, so the administrator never captures their face twice; and four of the six steps never reach you at all.</p>
+<h3 id="the-face-step-in-order">The face step, in order</h3>
+<p>This is the one that touches you most, and the order is why <code>validate</code> has to return the photo rather than the Worker fetching it later:</p>
+<pre><code>dashboard ──live frame──► ramaaz-kyc
+                              │
+   1.  POST /v1/kyc/reverify/{challengeId}/validate   X-Internal-Secret
+       → { valid, selfieImageUrl }
+   2.  GET  &lt;selfieImageUrl&gt;          plain fetch, NO Authorization header
+   3.  Rekognition CompareFaces       live frame ↔ the stored photo
+   4.  POST /v1/kyc/reverify/step/commit    Bearer + X-KYC-Signature
+       → { status, reason?, stepToken? }          ← YOUR decision
+                              │
+dashboard ◄──stepToken────────┘   posted to /v1/auth/face, stage advances</code></pre>
+<p>The Worker measures; you decide. Step 2 is a plain unauthenticated download, which is requirement A below.</p>
+<p>Before it captures anything, the dashboard runs its own gate — one face, centred, facing the camera, lit, sharp and still, held for over a second. So a frame only reaches step 1 when it is worth spending a Rekognition call and, more importantly, worth spending one of the challenge's five attempts.</p>
+<hr>
+<h2 id="3-what-you-must-implement">3. What you must implement</h2>
+<p>Four endpoints. Auth mechanisms and HMAC verification rules are in <code>INTEGRATION.md</code> §3.1 — they are not repeated here.</p>
+<p><strong>You do NOT need <code>/v1/countries</code>.</strong> The Worker sends the country as an ISO-3 code (<code>nationalityCountryIso3</code>, e.g. <code>SYR</code>) inside the submit payload; resolve that against your own tables. See <code>INTEGRATION.md</code> §3.3 for why the old name-lookup endpoint is deprecated.</p>
+<h3 id="required">Required</h3>
+<div class="scroll"><table><thead><tr><th>#</th><th>Method</th><th>Path</th><th>Auth</th><th>Notes</th></tr></thead><tbody><tr><td>1</td><td><code>POST</code></td><td><code>/v1/kyc/reverify/{challengeId}/validate</code></td><td><code>X-Internal-Secret</code></td><td>Body <code>{ userId }</code> → <code>{ valid, selfieImageUrl }</code></td></tr><tr><td>2</td><td><code>POST</code></td><td><code>/v1/kyc/reverify/step/commit</code></td><td>signed + bearer</td><td><code>{ challengeId, livenessConfidence, faceMatchScore, timestamp, nonce }</code> → <code>{ status, reason?, stepToken? }</code></td></tr><tr><td>3</td><td><code>POST</code></td><td><code>/v1/media/upload/direct</code></td><td>bearer</td><td>multipart <code>file</code> + <code>type</code> → <code>{ url }</code>. Called <strong>3×</strong> by submit</td></tr><tr><td>4</td><td><code>POST</code></td><td><code>/v1/kyc/submit</code></td><td>signed + bearer</td><td>The enrolment record — see the note on its selfie below</td></tr></tbody></table></div>
+<h3 id="only-if-root-later-uses-the-session-based-enrolment-routes">Only if root later uses the session-based enrolment routes</h3>
+<div class="scroll"><table><thead><tr><th>#</th><th>Method</th><th>Path</th><th>Auth</th></tr></thead><tbody><tr><td>5</td><td><code>GET</code></td><td><code>/v1/kyc/current</code></td><td>bearer</td></tr></tbody></table></div>
+<p>Root's flow does not call it — <strong>provided requirement A below is met.</strong></p>
+<hr>
+<h2 id="4-four-things-that-will-silently-break-this">4. Four things that will silently break this</h2>
+<p><strong>A. <code>validate</code> must return <code>selfieImageUrl</code>, and it must be plain-fetchable.</strong></p>
+<p>The Worker needs the enrolled reference photo to compare the live face against. It has two sources: <code>selfieImageUrl</code> from endpoint 1, or <code>GET /v1/kyc/current</code>. <strong>Mid-login the second one cannot work</strong> — the bearer is a challenge token, which will not pass a session guard, so <code>/v1/kyc/current</code> 401s and the Worker reports <code>NO_ENROLLED_SELFIE</code>.</p>
+<p>So endpoint 1 must return the URL, and it must be a <strong>public or presigned URL</strong> the Worker can fetch with no Authorization header. An API path behind your auth will fail.</p>
+<p><strong>B. The challenge token must be accepted on endpoint 3.</strong></p>
+<p><code>/v1/media/upload/direct</code> is called with <code>Authorization: Bearer &lt;challenge token&gt;</code> during <code>/v1/kyc/submit</code>, because that is the only credential that exists mid-login. If it requires a full session, enrolment fails at the upload step — after the face check has already passed, which is the worst place to fail.</p>
+<p><strong>C. The token must be a JWT.</strong> See §5.</p>
+<p><strong>D. The selfie in <code>/v1/kyc/submit</code> has already been checked twice.</strong></p>
+<p>It is the SAME frame from the face step — not a fresh capture. By the time it reaches you it has passed the dashboard's local gate and been matched against the stored photo by Rekognition. The ID enrolment then compares that same frame against the photo on the document, so all three images agree transitively.</p>
+<p>Two consequences: the administrator never captures their face twice, and you do not need to re-derive anything about that image — its provenance is the face step you already signed off.</p>
+<hr>
+<h2 id="5-who-stores-the-images">5. Who stores the images</h2>
+<p><strong>You do. The Worker stores nothing, ever.</strong></p>
+<p>It is stateless and shared between products, so storing biometrics would make it a data controller for users it has no relationship with — per-tenant buckets, retention rules, deletion-on-request, for products it knows nothing about.</p>
+<p>You receive the images on one endpoint and their URLs on another:</p>
+<div class="scroll"><table><thead><tr><th>Endpoint</th><th>Receives</th><th>Returns</th></tr></thead><tbody><tr><td><code>POST /v1/media/upload/direct</code></td><td><strong>raw bytes</strong> — multipart <code>file</code> + <code>type</code></td><td><code>{ url }</code></td></tr><tr><td><code>POST /v1/kyc/submit</code></td><td><strong>URLs only</strong>, no image data</td><td>the KYC record</td></tr></tbody></table></div>
+<p>The Worker calls upload three times — front, back, selfie — then puts the URLs it got back into the submit payload as <code>documentFrontImageUrl</code>, <code>documentBackImageUrl</code> and <code>selfieImageUrl</code>. <code>type</code> is <code>document</code> for the two ID sides and <code>image</code> for the selfie.</p>
+<p>This is not really a choice. On every LATER login the Worker asks <code>/v1/kyc/reverify/{id}/validate</code> and you answer with <code>selfieImageUrl</code> — the stored photo to compare the live face against. If the Worker had kept it, you would have nothing to hand back. Storage location is forced by requirement A.</p>
+<h3 id="todo-which-photo-becomes-the-reference">⚠️ TODO — which photo becomes the reference?</h3>
+<p>After enrolment there are two images of the same person: the one seeded at account creation, and the selfie captured during enrolment.</p>
+<p><strong>We suggest the enrolment selfie</strong> — it was captured live, quality-gated, and matched against both the seeded photo and the ID. But it is your call, and <code>validate</code> must return whichever you pick.</p>
+<hr>
+<h2 id="6-decisions">6. Decisions</h2>
+<p><strong>1. ⚠️ OPEN, AND YOURS TO MAKE — the challenge token must become a JWT.</strong></p>
+<p>The Worker identifies the user by decoding the bearer as a JWT and reading <code>sub</code> (<code>jwtSub()</code>, <code>routes/kyc.ts</code>). Root's challenge token is opaque — 43 base64url characters, no dots. Probed on the live Worker:</p>
+<pre><code>X-Step-Token: &lt;JWT with sub&gt;   → reached the backend call
+X-Step-Token: &lt;opaque token&gt;   → 401, rejected before the backend was contacted</code></pre>
+<p><strong>This is a backend-only change.</strong> You mint the token — <code>/v1/auth/link</code> returns <code>challenge_token</code> — so you are the only one who can change its format. Issue it as a signed JWT carrying at least <code>sub</code> (the administrator's user id) and <code>exp</code>.</p>
+<p>Nothing else moves: the dashboard treats the token as an opaque string, stores it and forwards it, and never parses it. The Worker already reads JWTs. It is already single-use and rotating, so signing costs nothing operationally.</p>
+<p><strong>This blocks everything else.</strong></p>
+<p><strong>2. ✅ SETTLED — a reference photo will be seeded before testing.</strong></p>
+<p>Requirement A depends on it: the face step compares the live face against this photo, and <code>validate</code> must return its URL.</p>
+<p><strong>3. ✅ SETTLED — everything is under <code>/v1</code>.</strong></p>
+<p>The tenant's <code>baseUrl</code> is now <code>https://staging-backend.ramaaz.store/v1</code>, so the paths in §3 land as <code>/v1/kyc/reverify/{id}/validate</code>, <code>/v1/kyc/reverify/step/commit</code>, <code>/v1/kyc/submit</code>, <code>/v1/media/upload/direct</code> and <code>/v1/countries?limit=100</code>. Config change already made on our side; build them under <code>/v1</code>.</p>
+<p><strong>4. ⚠️ TODO — issue a stable <code>challenge_id</code>.</strong></p>
+<p>Return a <code>challenge_id</code> alongside the stage, on the <code>/v1/auth/link</code> response and on every step after it. Same value for the whole login attempt.</p>
+<p>We pass it to the KYC Worker, which hands it back to you at <code>POST /v1/kyc/reverify/{challengeId}/validate</code> so you can confirm the face check belongs to an open attempt and return that user's <code>selfieImageUrl</code>.</p>
+<p><strong>It must be a separate value from <code>challenge_token</code>.</strong> The token rotates on every step by design — each response issues a new one and kills the old — so it cannot correlate anything. A lookup key has to be stable for the whole attempt. It is an identifier, not a credential, so it is fine in a request body and in logs.</p>
+<p>Until it exists the face check fails at the Worker with <code>422 challengeId is required</code>, before reaching you.</p>
+<p><strong>7. ✅ AGREED — collapse ID_DOCUMENT and ID_INFO into one stage.</strong></p>
+<p>One <code>/v1/kyc/submit</code>, one stage, one step token. Drop <code>ID_INFO_REQUIRED</code>.</p>
+<p>A stage exists to say "the server is blocked until you send something". There is no second user interaction here: the Worker OCRs the document, the summary screen shows the extracted fields, the person confirms them, and ONE submit carries images and fields together. Nothing is left for <code>ID_INFO</code> to gate — keeping it would mean the dashboard auto-posting a second token representing no user action at all.</p>
+<p>The original split came from <code>root-enrollment.md</code>, where both steps were stubs and the administrator was expected to TYPE their ID details. OCR removed that step, and that document already said those evidence shapes were "a suggestion, not a contract".</p>
+<p><strong>Do not let <code>/kyc/submit</code> advance the challenge itself.</strong> <code>/v1/auth/*</code> is the single door into the state machine; a second path mutating it means two authorities on flow position. It would also teach the Worker about auth stages, which is the coupling the signed-result design note argues for removing.</p>
+<p>Accepted consequence: you can no longer reject the DETAILS separately from the DOCUMENT. The summary screen already covers that with "Incorrect, Try Again", which is a client-side retry before submitting, not a stage.</p>
+<p>On our side this is one line — <code>STAGE_ROUTES</code> already routes both stages to the same screen. <strong>5. ✅ SETTLED — "is this a first login?" is the STAGE, not a flag.</strong></p>
+<p>Please do <strong>not</strong> add a <code>needsEnrollment</code> or <code>isFirstLogin</code> field. After the face check passes, the stage you return already carries it:</p>
+<div class="scroll"><table><thead><tr><th>You return</th><th>Means</th><th>We go to</th></tr></thead><tbody><tr><td><code>ID_DOCUMENT_REQUIRED</code></td><td>first login</td><td>ID enrolment</td></tr><tr><td><code>DEVICE_REQUIRED</code> / <code>COMPLETED</code></td><td>returning</td><td>passkey, then the dashboard</td></tr></tbody></table></div>
+<p>One state machine. A second source of truth about who is new is a bug waiting to happen, and this one is already correct.</p>
+<p><strong>6. How does the result satisfy <code>FACE_REQUIRED</code>?</strong></p>
+<p><code>step/commit</code> returns a <code>stepToken</code>. Our proposal: the dashboard posts it to your existing <code>POST /v1/auth/face</code> as <code>evidence: { step_token: "…" }</code>, you verify the token you just minted, and advance the stage. That keeps <code>/v1/auth/*</code> the single door into the challenge state machine.</p>
+<p>It also settles the open question about <code>evidence</code> field names, and has a consequence worth stating plainly: <strong>the face image never reaches you.</strong> It goes to the Worker. You never store or handle a biometric image on the auth path.</p>
+<hr>
+<h2 id="7-the-two-secrets-we-have-to-agree-on-the-values">7. The two secrets — we have to agree on the values</h2>
+<p>Nothing signs until these match on both sides. Either of us can generate them; they just have to be the same string, and they must be <strong>two different values</strong>:</p>
+<div class="scroll"><table><thead><tr><th>Secret</th><th>Protects</th><th>If it leaks</th></tr></thead><tbody><tr><td><code>KYC_INTERNAL_SECRET</code></td><td>the <code>validate</code> lookup (endpoint 1)</td><td>an attacker can probe challenge ids and read back <code>selfieImageUrl</code> — read-only, but biometric</td></tr><tr><td><code>KYC_SHARED_SECRET</code></td><td>the signed commits (endpoints 2 and 5)</td><td>an attacker can <strong>forge a passing face check</strong> — with any valid bearer, that is account takeover</td></tr></tbody></table></div>
+<p>That difference is why there are two. Collapsing them into one value means every routine read carries the key that can forge verdicts.</p>
+<p>Suggested: 32 random bytes, base64. Send them over something that is not chat — we set them on the Worker as <code>KYC_SHARED_SECRET_ROOT</code> and <code>KYC_INTERNAL_SECRET_ROOT</code>, scoped to root alone, so RDB can never mint a verdict root would honour.</p>
+<p>Until they are set, <code>GET /ready</code> on the Worker reports root as <code>"sharedSecret": false, "internalSecret": false</code> and every signed call answers</p>
+<ol><li>That endpoint is the fastest way to confirm the wiring.</li></ol>
+<hr>
+<h2 id="8-known-already-being-fixed">8. Known, already being fixed</h2>
+<p><code>POST /v1/auth/link</code> returns <strong>500</strong> for a real access link:</p>
+<pre><code>{"error":{"code":"INTERNAL_ERROR","message":"Something went wrong on our side...",
+          "correlation_id":"01M0Z0FHB6VAR1W29B220DSK6H"}}</code></pre>
+<p>Also <code>01M0Z0FJWZ3SPN0S0SDF01P1K4</code>. Same result with and without <code>device_label</code>, so it is not a request-shape problem. A spent token and pure garbage both answer a clean <code>401 UNAUTHENTICATED</code>, so the link record is <strong>found and then crashes</strong>.</p>
+<p>Nobody can sign in at all until this is fixed, KYC or otherwise — but it is already known and in progress, so it is recorded here only so the correlation ids are not lost.</p>
+<hr>
+<h2 id="9-what-is-already-built-on-our-side">9. What is already built on our side</h2>
+<p>The whole capture UI: document scanner (OpenCV), liveness (MediaPipe), face match, ID summary, re-verify. It typechecks and runs today against a mock service with every failure branch reproducible.</p>
+<p>The three analysis endpoints (<code>analyze-id</code>, <code>liveness</code>, <code>compare-face</code>) need no auth and no backend, so steps 1, 3, 4 and 5 of §2 can be built and tested against real AWS <strong>before you write anything</strong>. Only steps 2 and 6 wait on you.</p>
+</article>
+<article class="page" id="page-kyc-contract" hidden>
+  <header class="page-head">
+    <p class="crumb">KYC integration</p>
+    <h1>ramaaz-kyc — integration contract</h1>
+    <p class="src">Source of truth: <code>frontend/ramaaz-kyc/INTEGRATION.md</code></p>
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#1-what-this-worker-is">1. What this Worker is</a></li><li class="lvl-3"><a href="#the-one-rule">The one rule</a></li><li class="lvl-2"><a href="#2-frontend-integration">2. Frontend integration</a></li><li class="lvl-3"><a href="#21-never-call-this-worker-from-the-browser">2.1 Never call this Worker from the browser</a></li><li class="lvl-3"><a href="#22-on-cloudflare-you-must-use-a-service-binding">2.2 On Cloudflare you MUST use a service binding</a></li><li class="lvl-3"><a href="#23-headers-your-proxy-attaches">2.3 Headers your proxy attaches</a></li><li class="lvl-3"><a href="#24-what-you-can-use-immediately">2.4 What you can use immediately</a></li><li class="lvl-3"><a href="#25-ordering-the-worker-imposes-none">2.5 Ordering — the Worker imposes none</a></li><li class="lvl-2"><a href="#3-backend-contract">3. Backend contract</a></li><li class="lvl-3"><a href="#31-the-two-secrets-and-why-there-are-two">3.1 The two secrets, and why there are two</a></li><li class="lvl-3"><a href="#32-endpoints">3.2 Endpoints</a></li><li class="lvl-3"><a href="#33-country-read-the-iso-3-code-not-the-name">3.3 Country: read the ISO-3 code, not the name</a></li><li class="lvl-3"><a href="#34-the-detail-that-silently-breaks-everything">3.4 The detail that silently breaks everything</a></li><li class="lvl-2"><a href="#4-adding-a-product">4. Adding a product</a></li><li class="lvl-2"><a href="#5-wiring-up-checklist">5. Wiring-up checklist</a></li><li class="lvl-2"><a href="#6-known-issues">6. Known issues</a></li></ul></nav>
+  <p>How any Ramaaz product plugs into this Worker. One contract, one auth model, N products.</p>
+<p>Two audiences: <strong>§2 is for frontend teams</strong>, <strong>§3 is for backend teams</strong>. Read §1 first — it is the rule everything else follows from.</p>
+<hr>
+<h2 id="1-what-this-worker-is">1. What this Worker is</h2>
+<p>It measures, and it decides nothing.</p>
+<p>It runs AWS Rekognition liveness, face comparison and ID OCR, then reports the numbers it got — liveness 94.2, face match 91.7 — to your backend over a signed server-to-server channel. <strong>Your backend applies the thresholds and owns the verdict.</strong></p>
+<p>That is not a preference. KYC sits on the login path: a pass/fail computed in the browser could be forged from devtools. A pass/fail computed here and relayed through the browser is no better. Only a value your backend computed, from numbers delivered over a channel the browser cannot forge, is worth anything.</p>
+<h3 id="the-one-rule">The one rule</h3>
+<p><strong>Every product's backend implements the SAME contract</strong> — the same paths, the same shapes, the same authentication (§3).</p>
+<p>The only thing a product may vary is <strong>the order</strong> in which its own flow calls these endpoints. RDB enrols after a passcode; the root dashboard enrols inside a sign-in challenge. Neither costs this Worker anything, because it keeps no state between requests — order lives in your backend, where the state machine is.</p>
+<p>This is why there are no per-product adapters. Adapters would let each backend invent its own API, and the cost lands in exactly one place: N authentication paths to audit instead of one.</p>
+<p>So a <em>tenant</em> here is nothing but <strong>where to send the request</strong> and <strong>which keys to sign it with</strong>.</p>
+<hr>
+<h2 id="2-frontend-integration">2. Frontend integration</h2>
+<h3 id="21-never-call-this-worker-from-the-browser">2.1 Never call this Worker from the browser</h3>
+<p>Your browser code calls <strong>your own origin</strong> (<code>/api/kyc/*</code>); your server forwards to the Worker. The browser must never hold a backend token, and a strict <code>connect-src 'self'</code> CSP forbids it reaching another host anyway.</p>
+<h3 id="22-on-cloudflare-you-must-use-a-service-binding">2.2 On Cloudflare you MUST use a service binding</h3>
+<p>This is the trap that costs a day. Same-account Worker→Worker calls over a <code>*.workers.dev</code> URL <strong>never reach the target Worker</strong> — Cloudflare answers its own bare 404 page. It works in local dev and fails only once deployed.</p>
+<pre><code>// wrangler.jsonc / wrangler.toml of the CALLING app
+"services": [{ "binding": "KYC_WORKER", "service": "ramaaz-kyc" }]</code></pre>
+<pre><code>import { getCloudflareContext } from '@opennextjs/cloudflare';
+
+const { env } = getCloudflareContext();
+const kyc = (env as { KYC_WORKER?: { fetch: typeof fetch } }).KYC_WORKER;
+
+// Binding on Cloudflare; plain fetch in local dev (wrangler dev on :8787).
+const res = kyc
+  ? await kyc.fetch(`https://ramaaz-kyc/api/kyc/${path}`, init)
+  : await fetch(`http://localhost:8787/api/kyc/${path}`, init);</code></pre>
+<h3 id="23-headers-your-proxy-attaches">2.3 Headers your proxy attaches</h3>
+<div class="scroll"><table><thead><tr><th>Header</th><th>When</th><th>Value</th></tr></thead><tbody><tr><td><code>X-Ramaaz-Tenant</code></td><td><strong>always</strong>, except RDB</td><td>your tenant id, e.g. <code>root</code></td></tr><tr><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>user has a session</td><td>the access token</td></tr><tr><td><code>X-Step-Token: &lt;token&gt;</code></td><td><strong>mid-login, no session yet</strong></td><td>the login/challenge token</td></tr></tbody></table></div>
+<p><code>X-Step-Token</code> is the important one for sign-in flows. It tells the Worker there is no access token yet, and routes the commit to the step-scoped backend endpoint. RDB uses it for reset-passcode; the root dashboard uses it for the whole enrolment challenge.</p>
+<p>Omitting <code>X-Ramaaz-Tenant</code> resolves to <code>rdb</code> — RDB predates this mechanism, so its clients need no change. <strong>An unknown tenant is a 503, never a silent fallback</strong>: falling back would deliver your token to another product's backend.</p>
+<p>Cookies are also read (the tenant's configured names), but are <strong>deprecated</strong> — forwarding a whole Cookie header hands this Worker every cookie the user holds when it needs one value. Send headers.</p>
+<h3 id="24-what-you-can-use-immediately">2.4 What you can use immediately</h3>
+<p>Three endpoints are <strong>pure analysis — no auth, no backend, nothing to configure</strong>. A new product can build and test its entire capture UI against these before its backend exists:</p>
+<div class="scroll"><table><thead><tr><th>Endpoint</th><th>Body</th><th>Returns</th></tr></thead><tbody><tr><td><code>POST /api/kyc/analyze-id</code></td><td><code>{ imageData, side, sessionHint }</code></td><td><code>{ status, code?, extractedData? }</code></td></tr><tr><td><code>POST /api/kyc/liveness</code></td><td><code>{ faceImageData, challengeStep, crop }</code></td><td><code>{ isLive, faceImageData?, metrics? }</code></td></tr><tr><td><code>POST /api/kyc/compare-face</code></td><td><code>{ selfieImageData, idFaceImageData }</code></td><td><code>{ status, matchScore?, message? }</code></td></tr></tbody></table></div>
+<p>Everything else needs your backend (§3).</p>
+<h3 id="25-ordering-the-worker-imposes-none">2.5 Ordering — the Worker imposes none</h3>
+<p><strong>The Worker is stateless.</strong> It correlates nothing between requests: there is no session store, no cached face, no notion of "step 2 comes after step 1". The only module-level state is a config cache and a mock-mode retry counter.</p>
+<p>So the order is <strong>yours</strong>. Three things constrain it, and none of them is the Worker:</p>
+<ol><li><strong>Data dependencies.</strong> <code>/compare-face</code> needs two images, so you must have obtained them first — from anywhere, in any order.</li><li><strong>Your backend's state machine.</strong> Stages, challenges, what may follow what.</li><li><strong><code>/reverify/*</code> needs a live challenge</strong> your backend issued.</li></ol>
+<h4 id="the-client-holds-the-images-which-is-what-makes-reuse-possible">The client holds the images, which is what makes reuse possible</h4>
+<div class="scroll"><table><thead><tr><th>Endpoint</th><th>Hands you back</th></tr></thead><tbody><tr><td><code>POST /api/kyc/liveness</code></td><td><code>faceImageData</code> — the validated live frame (cropped when <code>crop: true</code>)</td></tr><tr><td><code>POST /api/kyc/analyze-id</code> (front)</td><td><code>idFaceImageData</code> — the photo cropped out of the document</td></tr><tr><td><code>POST /api/kyc/compare-face</code></td><td>a score for <strong>whatever two images you pass it</strong></td></tr></tbody></table></div>
+<p><code>/compare-face</code> takes <code>{ selfieImageData, idFaceImageData }</code> as plain parameters. It has no memory of a previous capture, so <strong>a face captured early in a flow can be compared against an ID scanned later</strong> — you simply keep the frame and pass it in.</p>
+<p>Note <code>/reverify/verify</code> is a <em>different</em> comparison: live frame vs the <strong>enrolled</strong> selfie your backend points to via <code>selfieImageUrl</code>. Use it to prove "this is the same person we already know". Use <code>/compare-face</code> to prove "the person here matches the document here".</p>
+<h4 id="two-real-orders-same-endpoints">Two real orders, same endpoints</h4>
+<p>These are <strong>examples, not options to choose from, and nothing you register.</strong> A flow is not declared anywhere — not in <code>TENANTS</code>, not in code, not with this Worker at all. It is simply whatever order your frontend calls things in. Two products can use completely different orders on the same day without the Worker knowing either of them exists.</p>
+<p><strong>RDB enrolment — document first</strong></p>
+<pre><code>analyze-id (front)  → idFaceImageData, extracted fields
+analyze-id (back)
+liveness × N        → faceImageData
+compare-face        { selfieImageData: liveness frame, idFaceImageData: from step 1 }
+submit</code></pre>
+<p><strong>Root sign-in — face first, then enrol without recapturing</strong></p>
+<pre><code>liveness            → faceImageData          ← KEEP THIS
+reverify/verify     { challengeId, liveFaceImageData }   → backend decides → stepToken
+analyze-id (front)  → idFaceImageData
+analyze-id (back)
+compare-face        { selfieImageData: THE FRAME FROM STEP 1, idFaceImageData: from analyze-id }
+submit</code></pre>
+<p>Step 5 reuses step 1's frame. <strong>No second face capture, and no Worker change</strong> — the reuse is possible precisely because the Worker keeps nothing.</p>
+<h4 id="where-to-keep-the-frame">Where to keep the frame</h4>
+<p>It is a base64 JPEG, typically 100–500 KB, so it will not fit in a cookie (4 KB) and must not go in the challenge state. Hold it in client memory for the duration of the flow — the existing <code>KycSessionContext</code> is the right place.</p>
+<p>A page reload therefore loses it and forces a recapture. That is the correct trade: persisting a face to <code>localStorage</code> leaves biometric data on the device long after the flow ends, to save one capture.</p>
+<hr>
+<h2 id="3-backend-contract">3. Backend contract</h2>
+<p>Implement these and you are integrated. Same paths, same shapes, every product.</p>
+<h3 id="31-the-two-secrets-and-why-there-are-two">3.1 The two secrets, and why there are two</h3>
+<p>Both are per-tenant, and they are <strong>not interchangeable</strong>. They protect different operations with different blast radii.</p>
+<div class="scroll"><table><thead><tr><th></th><th><code>KYC_INTERNAL_SECRET</code></th><th><code>KYC_SHARED_SECRET</code></th></tr></thead><tbody><tr><td>Sent as</td><td><code>X-Internal-Secret: &lt;secret&gt;</code></td><td><code>X-KYC-Signature: sha256=&lt;hmac&gt;</code></td></tr><tr><td>Mechanism</td><td>the secret itself, in a header</td><td>HMAC-SHA256 <strong>over the body</strong></td></tr><tr><td>Used on</td><td><strong>reads</strong> — "is this challenge live?"</td><td><strong>writes</strong> — "this face scored 91.7"</td></tr><tr><td>User's token</td><td>not sent; <code>userId</code> is in the body</td><td>sent, as <code>Authorization: Bearer</code></td></tr><tr><td>Replay protection</td><td>none</td><td><code>timestamp</code> + <code>nonce</code>, inside the signed body</td></tr><tr><td>Answers</td><td><em>"is the Worker asking?"</em></td><td><em>"did the Worker compute exactly this, just now?"</em></td></tr></tbody></table></div>
+<p><strong><code>KYC_INTERNAL_SECRET</code> — the lookup key.</strong> Used on the two <code>validate</code> endpoints, before any AWS spend, to ask whether a challenge or session is real and belongs to this user. There is no user token on these calls — the Worker is asserting <em>"user X claims challenge Y"</em> — so the only thing the backend can check is that the caller is the Worker. A static shared value is enough for that, because the call changes nothing.</p>
+<p><strong><code>KYC_SHARED_SECRET</code> — the verdict key.</strong> Used on every call that changes identity state: the two reverify commits, <code>/kyc/submit</code>, and <code>/kyc/current/complete</code>. Two credentials travel together here, and they answer two different questions. The <strong>bearer</strong> says <em>who the user is</em>. The <strong>signature</strong> says <em>this result came from the Worker, not from a browser replaying a request</em>. Either alone is insufficient: a browser holds a valid bearer.</p>
+<pre><code>signature = "sha256=" + hmac_sha256(shared_secret, raw_request_body).hex()</code></pre>
+<p><strong>You must reject:</strong> a signature that does not verify; a <code>timestamp</code> more than ~60 seconds old; a <code>nonce</code> you have seen before. Verify against the <strong>raw body bytes</strong>, not a re-serialised object — key order changes the hash.</p>
+<h4 id="why-not-one-secret-for-both">Why not one secret for both?</h4>
+<p>Separation of privilege, and it is worth being concrete about what each one costs you if it leaks:</p>
+<ul><li><strong><code>KYC_INTERNAL_SECRET</code> leaks</strong> → an attacker can probe whether challenge ids are live, and read back <code>selfieImageUrl</code> — a presigned URL to a user's stored selfie. Bad, and biometric, but read-only.</li><li><strong><code>KYC_SHARED_SECRET</code> leaks</strong> → an attacker can <strong>forge a passing face check</strong>. Combined with any valid bearer, that is an account takeover on a flow whose entire purpose is proving the person is real.</li></ul>
+<p>Collapsing them into one value would mean every routine read carries the key that can forge verdicts. Keeping them apart also lets you rotate the dangerous one on its own schedule.</p>
+<p>The same reasoning makes them per-tenant: with shared values, RDB's backend could mint a verdict the root backend would honour.</p>
+<h4 id="known-weakness">Known weakness</h4>
+<p>The internal calls are <strong>not signed</strong> — no HMAC, no timestamp, no nonce — so they are replayable by anyone who obtains the value. That is tolerable today because they are read-only, server-to-server, and over TLS. If you want this airtight, sign them the same way as the commits; the Worker already has <code>signKycPayload()</code> for exactly this shape. Worth doing before production.</p>
+<h3 id="32-endpoints">3.2 Endpoints</h3>
+<div class="scroll"><table><thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Purpose</th></tr></thead><tbody><tr><td><code>POST</code></td><td><code>/kyc/reverify/{challengeId}/validate</code></td><td>internal</td><td>Is this challenge live? → <code>{ valid, selfieImageUrl }</code></td></tr><tr><td><code>POST</code></td><td><code>/kyc/sessions/{kycSessionId}/validate</code></td><td>internal</td><td>Is this enrolment session live?</td></tr><tr><td><code>POST</code></td><td><code>/kyc/reverify/commit</code></td><td>signed</td><td>Face result, user <strong>has</strong> a session</td></tr><tr><td><code>POST</code></td><td><code>/kyc/reverify/step/commit</code></td><td>signed</td><td>Face result, user is <strong>mid-login</strong></td></tr><tr><td><code>POST</code></td><td><code>/kyc/submit</code></td><td>signed</td><td>Full enrolment payload</td></tr><tr><td><code>PATCH</code></td><td><code>/kyc/current/complete</code></td><td>signed</td><td>Mark enrolment complete</td></tr><tr><td><code>POST</code></td><td><code>/kyc/sessions/start</code></td><td>bearer</td><td>Open an enrolment session</td></tr><tr><td><code>GET</code></td><td><code>/kyc/status</code></td><td>bearer</td><td>→ <code>{ status }</code></td></tr><tr><td><code>GET</code></td><td><code>/kyc/current</code></td><td>bearer</td><td>Current record, incl. <code>selfieImageUrl</code></td></tr><tr><td><code>POST</code></td><td><code>/media/upload/direct</code></td><td>bearer</td><td>multipart <code>file</code> + <code>type</code> → <code>{ url }</code></td></tr><tr><td><code>GET</code></td><td><code>/countries?limit=100</code></td><td>bearer</td><td>⚠️ <strong>DEPRECATED</strong> — see below. New backends should not implement it.</td></tr></tbody></table></div>
+<p>Commit request body:</p>
+<pre><code>{ "challengeId": "…", "livenessConfidence": 94.2, "faceMatchScore": 91.7,
+  "timestamp": 1787747000, "nonce": "…" }</code></pre>
+<h4 id="what-challengeid-is">What <code>challengeId</code> is</h4>
+<p><strong>Whatever your backend says it is.</strong> The Worker treats it as an opaque correlation id: it passes it to <code>validate</code>, echoes it in the commit, and never interprets it.</p>
+<p>You therefore have to decide what the caller puts there, and tell them:</p>
+<ul><li>an id you issue alongside the flow state (a challenge id, a session id), which the caller carries and passes through; <strong>or</strong></li><li>the caller's own step/session token, if you are content for that value to appear in a request body as well as the <code>Authorization</code> header.</li></ul>
+<p>Whichever you pick, <code>validate</code> must be able to resolve it to a user and answer whether it is still open. A caller cannot invent this value, so an integration stalls at the first face check until you have named it.</p>
+<p>Commit response — <strong>this is where your decision goes</strong>:</p>
+<pre><code>{ "status": "passed" | "failed", "reason": "…", "stepToken": "…" }</code></pre>
+<p><code>stepToken</code> is what the frontend presents to your <em>next</em> step as proof the face check passed. It must be single-use, short-lived, and verifiable only by you.</p>
+<h3 id="33-country-read-the-iso-3-code-not-the-name">3.3 Country: read the ISO-3 code, not the name</h3>
+<p><code>/kyc/submit</code> carries three country fields. <strong>Read <code>nationalityCountryIso3</code>.</strong></p>
+<div class="scroll"><table><thead><tr><th>Field</th><th>What it is</th></tr></thead><tbody><tr><td><code>nationalityCountryIso3</code></td><td>ISO 3166-1 alpha-3 (<code>SYR</code>, <code>TUR</code>). What the extractor actually computed — from the passport MRZ, or a phrase match. Absent only when the country came from a Textract fallback with no code.</td></tr><tr><td><code>nationalityCountry</code></td><td>The display name (<code>"Syria"</code>). Fallback when no code was determined.</td></tr><tr><td><code>nationalityCountryId</code></td><td>⚠️ <strong>DEPRECATED.</strong> RDB's foreign key, resolved by the Worker calling <code>GET /countries?limit=100</code> and matching the display name exactly.</td></tr></tbody></table></div>
+<p>The deprecated path is worth understanding so nobody rebuilds it. The Worker extracts a precise ISO-3 code, converts it to an English display name, sends that, and the backend matches the lossy name back against its table — with exact string equality, over a page of 100 rows. Three ways to fail: a passport MRZ reads <code>SYRIAN ARAB REPUBLIC</code> where the row says <code>Syria</code>; there are ~195 countries, so <code>limit=100</code> cannot see them all; and every miss returns <code>undefined</code> silently.</p>
+<p>Resolving a country belongs in the backend, where the country table lives and where alias, alpha-2 and Arabic-name handling can be done properly. Once every backend reads the code, <code>nationalityCountryId</code>, <code>resolveCountryId()</code> and <code>GET /countries</code> all get deleted.</p>
+<h3 id="34-the-detail-that-silently-breaks-everything">3.4 The detail that silently breaks everything</h3>
+<p><strong><code>selfieImageUrl</code> must be plain-fetchable</strong> — a public or presigned URL, no Authorization header. The Worker downloads it to compare against the live face, and mid-login it holds a step token that cannot authenticate to a protected media route. Return a presigned URL, not an API path.</p>
+<hr>
+<h2 id="4-adding-a-product">4. Adding a product</h2>
+<p>Three things, and <strong>a flow is not one of them.</strong> You never describe your sequence to this Worker — see §2.5. You register where your backend lives and how to sign to it; the order you call things in is your own business and can change any time without touching anything here.</p>
+<p>You do not even need this to start: <code>/analyze-id</code>, <code>/liveness</code> and <code>/compare-face</code> require no tenant, no secrets and no backend, so a new product can build and test its whole capture UI first and register only when it is ready to commit results.</p>
+<p>No code change. One registry entry plus two secrets:</p>
+<pre><code># wrangler.toml [vars] — and repeat under [env.production.vars],
+# because Wrangler environments do NOT inherit the top-level [vars].
+TENANTS = '''{"rdb":{…},"yourapp":{
+  "baseUrl":"https://your-backend.example.com",
+  "cookies":{"access":"yourapp_at","step":"yourapp_step"},
+  "origins":["https://yourapp.example.com","http://localhost:3000"]
+}}'''</code></pre>
+<pre><code>wrangler secret put KYC_SHARED_SECRET_YOURAPP
+wrangler secret put KYC_INTERNAL_SECRET_YOURAPP</code></pre>
+<p><code>TENANTS</code> is plaintext config that ships with the Worker — <strong>never put a secret in it.</strong> Secrets resolve by convention <code>&lt;PREFIX&gt;_&lt;TENANT_ID&gt;</code> (uppercased). RDB keeps its unsuffixed <code>KYC_SHARED_SECRET</code> / <code>KYC_INTERNAL_SECRET</code>, so nothing about that deployment needs re-provisioning.</p>
+<p>Then confirm it:</p>
+<pre><code>GET /ready
+{"status":"ok","env":"development","tenants":[
+  {"id":"rdb","baseUrl":"…","sharedSecret":true,"internalSecret":true},
+  {"id":"yourapp","baseUrl":"…","sharedSecret":false,"internalSecret":false}]}</code></pre>
+<p>Booleans only — never a secret's value or length. <code>false</code> means the secret is not set, and every signed call for that tenant will answer 503.</p>
+<hr>
+<h2 id="5-wiring-up-checklist">5. Wiring-up checklist</h2>
+<ol><li><code>GET /ready</code> — your tenant listed, both secrets <code>true</code>.</li><li><code>POST /api/kyc/liveness</code> with <code>{}</code> → <code>400 faceImageData is required</code>. Proves routing and tenant resolution without touching your backend.</li><li>Same call with a bogus tenant → <code>503 not configured</code>. Proves you are not silently being served as RDB.</li><li>Your backend's <code>/kyc/reverify/{id}/validate</code> returns <code>{valid:true}</code> for a live challenge and <code>{valid:false}</code> otherwise.</li><li>A commit with a deliberately wrong <code>X-KYC-Signature</code> → rejected.</li><li>A replayed commit (same <code>nonce</code>) → rejected.</li><li>A commit with a <code>timestamp</code> two minutes old → rejected.</li></ol>
+<p>Steps 5–7 are the ones worth being strict about. They are the whole reason the browser cannot forge a KYC pass.</p>
+<hr>
+<h2 id="6-known-issues">6. Known issues</h2>
+<p><strong>⚠️ <code>/liveness-credentials</code> and <code>/reverify/credentials</code> return permanent AWS keys to the browser.</strong> Both answer with <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> verbatim. <code>AWS_SESSION_TOKEN</code> is optional and is not set in <code>wrangler.toml</code>, so despite the comment reading "vend temp AWS creds", these are the Worker's <strong>long-lived IAM user credentials</strong>, handed to any client that passes the session check.</p>
+<p>The AWS Amplify <code>FaceLivenessDetector</code> does need credentials in the browser, but they must be <strong>temporary and scoped</strong>: call STS <code>AssumeRole</code> with a short duration and a policy permitting only <code>rekognition:StartFaceLivenessSession</code>, then return that triple including its <code>sessionToken</code>. Fixing this needs a role ARN, so it is flagged rather than done.</p>
+<p><strong>Cookie support is deprecated</strong> (§2.3). Once every caller sends headers, delete <code>cookies</code> from the registry and the cookie reads in <code>routes/kyc.ts</code>.</p>
+<p><strong>The video-interview routes are gone.</strong> <code>/heygen-*</code>, <code>/simli-*</code>, <code>/speak</code>, <code>/transcribe-speech</code>, <code>/verify-answer</code> and <code>/verify-video</code> were removed — no caller in any product, and they held API credentials with nothing behind them.</p>
+</article>
+<article class="page" id="page-kyc-signed" hidden>
+  <header class="page-head">
+    <p class="crumb">KYC integration</p>
+    <h1>Design note — the signed result token</h1>
+    <p class="src">Source of truth: <code>frontend/ramaaz-kyc/DESIGN-signed-result.md</code></p>
+  </header>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#1-what-is-wrong-with-the-current-design">1. What is wrong with the current design</a></li><li class="lvl-2"><a href="#2-why-the-coupling-exists">2. Why the coupling exists</a></li><li class="lvl-2"><a href="#3-the-proposal">3. The proposal</a></li><li class="lvl-3"><a href="#the-token">The token</a></li><li class="lvl-3"><a href="#what-it-deletes">What it deletes</a></li><li class="lvl-2"><a href="#4-what-is-lost-and-how-it-is-covered">4. What is lost, and how it is covered</a></li><li class="lvl-2"><a href="#5-what-the-service-becomes">5. What the service becomes</a></li><li class="lvl-2"><a href="#6-migration-deliberately-deferred">6. Migration — deliberately deferred</a></li><li class="lvl-2"><a href="#7-open-questions">7. Open questions</a></li></ul></nav>
+  <p><strong>Status: proposed, not built.</strong> Recorded now so the reasoning survives; the migration is deliberately deferred (§6).</p>
+<p>The goal: make <code>ramaaz-kyc</code> an <strong>isolated service</strong> that anything can integrate — a Cloudflare Worker, a Vercel app, a plain Node server, a Flutter client — without that consumer's backend having to implement an API this service dictates.</p>
+<hr>
+<h2 id="1-what-is-wrong-with-the-current-design">1. What is wrong with the current design</h2>
+<p><code>ramaaz-kyc</code> is not a service. It is a <strong>participant in a workflow</strong> that happens to be deployed separately.</p>
+<p>A service takes input and returns output. This one takes input, then <strong>calls back into the consumer's backend</strong>, and requires that backend to implement specific endpoints at specific paths with specific shapes:</p>
+<pre><code>POST /kyc/reverify/{challengeId}/validate     X-Internal-Secret
+POST /kyc/reverify/step/commit                signed
+POST /kyc/reverify/commit                     signed
+POST /kyc/submit                              signed
+PATCH /kyc/current/complete                   signed
+POST /media/upload/direct                     bearer
+GET  /countries?limit=100                     bearer
+GET  /kyc/current                             bearer</code></pre>
+<p>So integrating is not "call an API" — it is "implement our reverse-API". Every consequence follows from that inversion:</p>
+<div class="scroll"><table><thead><tr><th>Coupling</th><th>What it forces on a new consumer</th></tr></thead><tbody><tr><td>Calls back into the backend</td><td>Build 4–8 endpoints with exact paths and shapes</td></tr><tr><td><code>jwtSub()</code> decodes the caller's token</td><td>Issue JWTs with <code>sub</code>; opaque sessions cannot integrate</td></tr><tr><td>Expects <code>/media/upload/direct</code></td><td>Host media upload at that path</td></tr><tr><td>Expects <code>/countries</code></td><td>Keep a countries table (already being removed)</td></tr><tr><td>Reads cookies</td><td>Consumer-specific cookie names in the registry</td></tr></tbody></table></div>
+<p>Three endpoints are already perfect isolated services and prove the point: <code>analyze-id</code>, <code>liveness</code> and <code>compare-face</code> need no auth, no backend and no state. Anything can call them today.</p>
+<hr>
+<h2 id="2-why-the-coupling-exists">2. Why the coupling exists</h2>
+<p>It is not accidental. KYC sits on the login path, so a verdict the browser could forge is worthless. The current design guarantees non-forgeability by never letting the verdict pass through the browser at all: the Worker computes it and delivers it to the backend over an HMAC-signed server-to-server channel.</p>
+<p>Any replacement has to keep that property. That is the whole constraint.</p>
+<hr>
+<h2 id="3-the-proposal">3. The proposal</h2>
+<p><strong>The Worker returns a signed result to the caller. The caller relays it to its own backend. The backend verifies the signature and decides.</strong></p>
+<pre><code>browser ──frames──► consumer's server ──► ramaaz-kyc
+                          │                    │  AWS Rekognition
+                          │◄──signed result────┘
+                          │
+                          ▼
+                   consumer's backend  ── verifies signature, applies thresholds</code></pre>
+<p>The Worker never learns the consumer's API. It has one output: a signed statement of what it measured.</p>
+<h3 id="the-token">The token</h3>
+<p>A JWS (compact JWT), signed HS256 with that tenant's <code>KYC_SHARED_SECRET</code>:</p>
+<pre><code>{
+  "iss":  "ramaaz-kyc",
+  "aud":  "root",                  // the tenant it was issued for
+  "sub":  "&lt;challengeId&gt;",         // whatever correlation id the caller passed
+  "op":   "face-verify",           // face-verify | id-analyze | face-compare
+  "livenessConfidence": 94.2,
+  "faceMatchScore": 91.7,
+  "iat":  1787747000,
+  "exp":  1787747300,              // short — this is a receipt, not a session
+  "jti":  "01M0Z…"                 // one-time; the backend rejects reuse
+}</code></pre>
+<p>The backend must reject: a bad signature; <code>aud</code> that is not itself; an expired <code>exp</code>; a <code>jti</code> it has seen. Same discipline as the current HMAC commits — the rules move, they do not weaken.</p>
+<p><strong>Non-forgeability is preserved.</strong> The browser never holds <code>KYC_SHARED_SECRET</code>, so it cannot mint or alter a result. It can only pass along a token the Worker signed, which is exactly what a signed receipt is for.</p>
+<h3 id="what-it-deletes">What it deletes</h3>
+<p>For <strong>every</strong> consumer, permanently:</p>
+<ul><li><code>/kyc/reverify/{id}/validate</code> and the whole <code>X-Internal-Secret</code> channel</li><li><code>/kyc/reverify/commit</code> and <code>/kyc/reverify/step/commit</code></li><li><code>/kyc/submit</code>, <code>/kyc/current</code>, <code>/kyc/current/complete</code></li><li><code>/media/upload/direct</code>, <code>/countries</code></li><li><code>jwtSub()</code> and the JWT requirement on the caller's token</li><li>cookie reading, and <code>cookies</code> from the tenant registry</li><li><code>KYC_INTERNAL_SECRET</code> entirely — there is no unsigned channel left</li></ul>
+<p>Root's backend endpoint count goes from <strong>4 to 0</strong>. Its only obligation becomes verifying a signature.</p>
+<hr>
+<h2 id="4-what-is-lost-and-how-it-is-covered">4. What is lost, and how it is covered</h2>
+<p><strong>The pre-flight validity check.</strong> Today <code>validate</code> runs before any AWS spend, so a dead challenge costs nothing. Removing it means the Worker will occasionally analyse a frame for a challenge the backend would have rejected.</p>
+<p>Covered by: the caller checks its own challenge before calling — it is the caller's challenge, and it already knows. Cheaper than a round trip, and it puts the decision where the state is.</p>
+<p><strong>Fetching the enrolled selfie.</strong> Today the Worker pulls <code>selfieImageUrl</code> from the backend. Instead the caller passes the reference — a URL or the image — in the request. It already has it, and this removes the awkward requirement that the URL be plain-fetchable by a third party.</p>
+<p><strong>Storage.</strong> Today the Worker uploads images and writes the enrolment record. Under this design it returns them and the caller stores them. That is correct: where a product keeps its documents is not this service's business.</p>
+<hr>
+<h2 id="5-what-the-service-becomes">5. What the service becomes</h2>
+<p>Six endpoints, no auth beyond a per-tenant API key, no backend knowledge:</p>
+<div class="scroll"><table><thead><tr><th>Endpoint</th><th>In</th><th>Out</th></tr></thead><tbody><tr><td><code>POST /v1/analyze-id</code></td><td>image, side</td><td>fields, <code>idFaceImageData</code>, <code>countryIso3</code></td></tr><tr><td><code>POST /v1/liveness</code></td><td>frame</td><td><code>isLive</code>, <code>faceImageData</code></td></tr><tr><td><code>POST /v1/compare-face</code></td><td>two images</td><td>score</td></tr><tr><td><code>POST /v1/face-verify</code></td><td>live frame, reference image, correlation id</td><td><strong>signed result</strong></td></tr><tr><td><code>POST /v1/face-compare</code></td><td>two images, correlation id</td><td><strong>signed result</strong></td></tr><tr><td><code>GET /v1/ready</code></td><td>—</td><td>tenants and key status</td></tr></tbody></table></div>
+<p>The first three stay unsigned — they measure and assert nothing, so there is nothing to forge. The signed pair exist only where a <em>verdict</em> is at stake.</p>
+<p>A tenant then needs one thing: an API key. No base URL, no callback secrets, no cookie names, no origins beyond CORS.</p>
+<hr>
+<h2 id="6-migration-deliberately-deferred">6. Migration — deliberately deferred</h2>
+<p>Not now. The root backend developer has just been handed the current contract, and changing it means he builds twice. The right order:</p>
+<ol><li>Build the current 4 endpoints; get root working end to end. <strong>← we are here</strong></li><li>Add <code>POST /v1/face-verify</code> returning a signed result, <strong>alongside</strong> the existing commit path. Both work; nothing breaks.</li><li>Root moves first — it is the newer consumer and has less to unpick.</li><li>RDB follows.</li><li>Delete the commit path, <code>KYC_INTERNAL_SECRET</code>, <code>jwtSub</code>, and the cookie reads.</li></ol>
+<p>Steps 2–5 are independent and can each ship on their own.</p>
+<p><strong>In the meantime, stop deepening the coupling.</strong> Every new callback into a consumer's backend is something step 5 has to remove. The country change already moved in the right direction by handing resolution back to the backend rather than teaching the Worker another of its tables.</p>
+<hr>
+<h2 id="7-open-questions">7. Open questions</h2>
+<ol><li><strong>Signing algorithm.</strong> HS256 with the shared secret is simplest and matches today. RS256/EdDSA with a published JWKS would let a backend verify without holding a secret that can also <em>mint</em> results — worth it if consumers are ever outside your control.</li><li><strong>Correlation id.</strong> The token's <code>sub</code> is whatever the caller passes. Should the service require it to be opaque, or is a challenge id acceptable? It ends up in logs.</li><li><strong>Result retention.</strong> Should the Worker keep a record of what it signed, for dispute resolution? That reintroduces state, which is why it is a question rather than a proposal.</li></ol>
+</article></main>
+</div>
+
+<footer>
+  <p>Generated from the markdown in <code>docs/</code> — run <code>node docs/build.mjs</code> after editing. Pages marked <strong>TODO</strong> or <strong>OPEN</strong> are waiting on somebody outside this repository.</p>
+</footer>
+
+<script>
+const XREF = {"C:/Users/Yazan Ad/Desktop/Ramaaz/root dasboard/root/docs/README.md":"home","C:/Users/Yazan Ad/Desktop/Ramaaz/root dasboard/root/docs/login/README.md":"login","login/":"login","../login/":"login","C:/Users/Yazan Ad/Desktop/Ramaaz/root dasboard/root/docs/login/backend.md":"login-backend","C:/Users/Yazan Ad/Desktop/Ramaaz/root dasboard/root/docs/kyc/README.md":"kyc","kyc/":"kyc","../kyc/":"kyc","../kyc/README.md":"kyc","C:/Users/Yazan Ad/Desktop/Ramaaz/root dasboard/root/docs/kyc/backend.md":"kyc-backend","backend.md":"kyc-backend","../kyc/backend.md":"kyc-backend","kyc/backend.md":"kyc-backend","C:/Users/Yazan Ad/Desktop/Ramaaz/frontend/ramaaz-kyc/INTEGRATION.md":"kyc-contract","worker-contract.md":"kyc-contract","C:/Users/Yazan Ad/Desktop/Ramaaz/frontend/ramaaz-kyc/DESIGN-signed-result.md":"kyc-signed","signed-result.md":"kyc-signed"};
+const pages = [...document.querySelectorAll('.page')];
+const links = [...document.querySelectorAll('.nav-link')];
+const sidebar = document.getElementById('sidebar');
+
+function show(id, push) {
+  const target = document.getElementById('page-' + id) ? id : pages[0].id.replace('page-', '');
+  pages.forEach(p => { p.hidden = p.id !== 'page-' + target; });
+  links.forEach(a => a.classList.toggle('active', a.dataset.page === target));
+  if (push !== false) history.replaceState(null, '', '#' + target);
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  sidebar.classList.remove('open');
+}
+
+links.forEach(a => a.addEventListener('click', e => { e.preventDefault(); show(a.dataset.page); }));
+
+// Cross-references written as relative markdown paths.
+document.querySelectorAll('a[data-xref]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const id = XREF[a.dataset.xref];
+    if (id) show(id);
+  });
+});
+
+document.getElementById('menu').addEventListener('click', () => sidebar.classList.toggle('open'));
+
+document.getElementById('theme').addEventListener('click', () => {
+  const root = document.documentElement;
+  const dark = root.getAttribute('data-theme') === 'dark' ||
+    (!root.hasAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
+  root.setAttribute('data-theme', dark ? 'light' : 'dark');
+});
+
+show((location.hash || '').slice(1) || pages[0].id.replace('page-', ''), false);
+</script>
+</body>
+</html>

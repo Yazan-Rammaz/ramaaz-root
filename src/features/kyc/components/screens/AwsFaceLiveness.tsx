@@ -1001,23 +1001,6 @@ export default function AwsFaceLivenessScreen() {
                 }}
             />
 
-            {/* Close button */}
-            <div className="flex absolute top-50 end-30 justify-end mb-8">
-                <button
-                    onClick={() => setShowExitDialog(true)}
-                    className="text-red-400 hover:text-red-600"
-                >
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <path
-                            d="M5 5L15 15M15 5L5 15"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                        />
-                    </svg>
-                </button>
-            </div>
-
             <FlexSpace size={100} share={0.1} />
 
             {/* Header */}

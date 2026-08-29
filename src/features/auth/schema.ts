@@ -5,25 +5,20 @@ import { z } from "zod";
  * definition, validated on both sides. This is the project's single validation
  * pattern: every feature exports its zod schemas here and reuses them.
  *
- * Login flow (matches the XD screens): private code → password →
- * WhatsApp OTP → set passcode (first login) / passcode unlock (returning).
+ * Sign-in collects exactly ONE typed value now: the private code. The password
+ * and the 6-digit PIN are gone with the old protocol, and the face and passkey
+ * steps collect evidence rather than text.
+ */
+
+/**
+ * The private code, as issued alongside the access link (e.g. "X1D3P12").
+ *
+ * Deliberately unvalidated beyond "not blank". Its shape belongs to the
+ * backend, and a regex here would reject a perfectly valid code the day that
+ * format changes — needing a frontend release to fix something that was never
+ * wrong. The server checks it either way, and that check is the real one.
  */
 export const privateCodeSchema = z.object({
-  code: z.string().min(7, "Enter your private code").max(32),
+  code: z.string().trim().min(1, "Enter your private code"),
 });
 export type PrivateCodeInput = z.infer<typeof privateCodeSchema>;
-
-export const passwordSchema = z.object({
-  password: z.string().min(8, "At least 8 characters").max(128),
-});
-export type PasswordInput = z.infer<typeof passwordSchema>;
-
-export const otpSchema = z.object({
-  code: z.string().regex(/^[0-9]{6}$/, "Enter the 6-digit code"),
-});
-export type OtpInput = z.infer<typeof otpSchema>;
-
-export const passcodeSchema = z.object({
-  passcode: z.string().regex(/^[0-9]{6}$/, "Enter a 6-digit passcode"),
-});
-export type PasscodeInput = z.infer<typeof passcodeSchema>;

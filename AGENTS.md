@@ -75,6 +75,12 @@ sample").
 
 ## 3. Auth & roles
 
+- **The login protocol** (MFA Type Root — secret permalink, WhatsApp code, face
+  + ID, dual approval) is specified in **`docs/auth-protocol.md`** (Arabic:
+  `docs/auth-protocol.ar.md`; keep the two in sync). Those files describe the
+  *protocol*; `src/lib/auth/endpoints.ts` describes the *wire contract*. Much of
+  the protocol is still unbuilt — the doc marks what exists, flags where the
+  implemented flow diverges, and lists the open questions blocking the rest.
 - httpOnly cookies (`rdb_at`/`rdb_rt`), set only in
   actions/route-handlers/middleware.
 - `src/middleware.ts` (edge middleware) does silent refresh + security headers
@@ -135,9 +141,16 @@ auto-builds (`opennextjs-cloudflare build`) and deploys. Secrets
   `next build --webpack`). OpenNext/Cloudflare can't load Turbopack's split
   server chunks at runtime (`ChunkLoadError` → 500 on every route). Local
   `next dev` still uses Turbopack. Don't drop the `--webpack` flag.
-- The worker is named **`management`** (`wrangler.jsonc`); URL
-  `https://management.yazan-adnof.workers.dev`. Set the real backend with
-  `wrangler secret put NEST_API_URL` — don't ship the placeholder `vars` value.
+- The worker is named **`canroot`** (`wrangler.jsonc`); URL
+  `https://canroot.yazan-adnof.workers.dev`. `NEST_API_URL` is a `vars`
+  entry, not a secret — it is a public hostname, and a `vars` entry would in
+  any case shadow a secret of the same name.
+  - That hostname is load-bearing beyond deployment: it is in the KYC Worker's
+    `TENANTS` origin list for the `root` tenant (CORS), and it is the only
+    domain this console can currently host a **passkey** on. WebAuthn requires
+    the RP ID to be a real domain, so neither a LAN IP nor a tunnel with a
+    changing subdomain will do — the device step can only be exercised here or
+    on `localhost`.
 
 ## 9. Internationalization (i18n) & text direction
 

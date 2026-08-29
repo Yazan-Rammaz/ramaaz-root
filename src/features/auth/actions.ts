@@ -2,474 +2,284 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { api, ApiError, BackendNotConfiguredError } from "@/lib/api/server";
+import { api } from "@/lib/api/server";
 import {
-  setAuthCookies,
-  clearAuthCookies,
-  setPrivateCodeCookie,
-  getPrivateCode,
-  setIdentityCookie,
-  clearRememberedIdentity,
-} from "@/lib/auth/cookies";
+  applyStage,
+  clearChallenge,
+  readChallenge,
+  UnknownStageError,
+} from "@/lib/auth/challenge";
+import { clearAuthCookies } from "@/lib/auth/cookies";
 import {
-  readLoginFlow,
-  updateLoginFlow,
-  clearLoginFlow,
-} from "@/lib/auth/login-flow";
-import {
-  apiErrorSchema,
   AUTH_PATHS,
-  ERROR_CODES,
-  loginResponseSchema,
-  otpVerifyResponseSchema,
-  passCodeResponseSchema,
-  registrationResponseSchema,
-  REFRESH_MAX_AGE,
-  STAGE_COMPLETED,
-  STAGE_OTP_REQUIRED,
-  STAGE_PASS_CODE_REQUIRED,
-  type LoginRequest,
-  type OtpVerifyRequest,
-  type RegistrationRequest,
+  deviceOptionsResponseSchema,
+  stepResponseSchema,
+  type DeviceRequest,
+  type EvidenceRequest,
+  type PrivateCodeRequest,
 } from "@/lib/auth/endpoints";
-import {
-  DEVICE_LABEL,
-  getRegistrationToken,
-  RegistrationTokenUnavailableError,
-} from "@/lib/auth/registration-token";
-import {
-  otpSchema,
-  passcodeSchema,
-  passwordSchema,
-  privateCodeSchema,
-} from "./schema";
+import { isChallengeDead, signInError } from "@/lib/auth/errors";
+import { privateCodeSchema } from "./schema";
 
 /**
- * Server Actions are THE one way the browser triggers a mutation. The login
- * flow is a chain of steps; each action validates its input, exchanges the
- * previous step's token with the backend, and stores the next step's token in
- * the httpOnly flow cookie. No token ever touches client JS.
+ * Server Actions are THE one way the browser triggers a mutation.
  *
- * Paths and response shapes live in `lib/auth/endpoints.ts` — the local backend
- * these were written against is gone, so that table is the one place to remap
- * when the remote backend's contract arrives.
+ * Every step of sign-in has the same three beats: validate the input, exchange
+ * it with the backend, and hand the answer to `applyStage()`. None of them
+ * decides what comes next — the server does, and `applyStage` obeys it. That is
+ * what makes a check being switched on or off backend-side a non-event here.
+ *
+ * Paths and response shapes live in `lib/auth/endpoints.ts`; the routing table
+ * lives in `lib/auth/challenge.ts`. Neither belongs at a call site.
  */
 export type ActionState = {
   ok: boolean;
   error?: string;
+  /**
+   * The challenge is dead — expired, spent, or burned by too many failures.
+   * The screen must stop offering "try again" and send them back to their
+   * access link, because no retry of this step can now succeed.
+   */
+  restart?: boolean;
 };
 
-/** The backend's machine-readable error code, when there is one. */
-function errorCode(error: unknown): string | undefined {
-  if (!(error instanceof ApiError)) return undefined;
-  const parsed = apiErrorSchema.safeParse(error.body);
-  return parsed.success ? parsed.data.error.code : undefined;
-}
-
-function message(error: unknown, fallback: string): string {
-  // No backend wired yet — say so, instead of blaming the user's credentials.
-  if (error instanceof BackendNotConfiguredError) {
-    return "Sign-in is not connected to a backend yet";
-  }
-  if (!(error instanceof ApiError)) return fallback;
-  // Credential endpoints are throttled 5/min per IP; surface that as guidance
-  // instead of the backend's raw "ThrottlerException: Too Many Requests".
-  if (error.status === 429) {
-    return "Too many attempts — please wait a minute and try again";
-  }
-  return error.message;
-}
-
 /**
- * Step 1 — private code.
+ * Step 2 — the private code the administrator pulled over WhatsApp.
  *
- * Makes NO backend call: `/v1/registration` needs the code and the password
- * together, and no endpoint validates the code on its own. So this step only
- * checks the format and carries the code forward in the httpOnly flow cookie.
- *
- * Consequence worth knowing: a wrong private code is not reported here — it
- * surfaces on the password screen, because that is where it first reaches the
- * backend.
+ * There is no companion "resend" action, and that is not an omission: no
+ * endpoint sends this code. The administrator messages the number again
+ * themselves. A code the console could request on somebody's behalf would prove
+ * nothing about who is holding the link, which is the entire point of the step.
  */
-export async function identifyAction(code: string): Promise<ActionState> {
+export async function submitPrivateCodeAction(
+  code: string,
+): Promise<ActionState> {
   const parsed = privateCodeSchema.safeParse({ code });
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message };
   }
 
-  await updateLoginFlow({ privateCode: parsed.data.code });
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/login");
 
-  redirect("/login/password");
-}
-
-/**
- * Step 2 — password. Sends code + password + the pre-issued token to
- * `/v1/registration`; the backend fires the WhatsApp OTP and returns the
- * challenge plus everything the verify screen needs to describe it.
- */
-export async function passwordAction(password: string): Promise<ActionState> {
-  const parsed = passwordSchema.safeParse({ password });
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message };
-  }
-
-  const flow = await readLoginFlow();
-  if (!flow.privateCode) redirect("/login");
-
+  let result;
   try {
-    const token = await getRegistrationToken();
+    const raw = await api.post<unknown>(AUTH_PATHS.privateCode, {
+      challenge_token: challenge.challengeToken,
+      code: parsed.data.code,
+    } satisfies PrivateCodeRequest);
 
-    const raw = await api.post<unknown>(AUTH_PATHS.registration, {
-      private_code: flow.privateCode,
-      password: parsed.data.password,
-      device_label: DEVICE_LABEL,
-      token,
-    } satisfies RegistrationRequest);
-
-    // Parsed, not cast — backend drift fails here, loudly, instead of leaking
-    // undefined into the verify screen (AGENTS.md §4).
-    const result = registrationResponseSchema.parse(raw);
-
-    if (result.stage !== STAGE_OTP_REQUIRED) {
-      return {
-        ok: false,
-        error: `Unsupported sign-in stage "${result.stage}"`,
-      };
-    }
-
-    await updateLoginFlow({
-      challengeToken: result.challenge_token,
-      challengeExpiresAt: result.challenge_expires_at,
-      otpPhone: result.otp.phone,
-      otpLength: result.otp.code_length,
-      otpResendAvailableIn: result.otp.resend_available_in,
-      otpResendsRemaining: result.otp.resends_remaining,
-      // The password is deliberately NOT stored — it has been consumed.
-    });
+    result = stepResponseSchema.parse(raw);
   } catch (error) {
-    if (error instanceof RegistrationTokenUnavailableError) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    if (error instanceof UnknownStageError) {
       return { ok: false, error: error.message };
     }
-    if (error instanceof z.ZodError) {
-      return { ok: false, error: "Unexpected response from the sign-in service" };
-    }
-    return { ok: false, error: message(error, "Invalid code or password") };
+    // A wrong code costs one of five attempts across the whole sequence and
+    // alerts the other root administrators — somebody holding a link and
+    // guessing is the shape of a forwarded link. It is still just a retry.
+    // A dead challenge is not: only a fresh start recovers.
+    return {
+      ok: false,
+      error: signInError(error, "That code is not correct"),
+      restart: isChallengeDead(error),
+    };
   }
 
-  redirect("/login/verify");
+  // Outside the try — applyStage() redirects by throwing, and a call inside
+  // would be caught above and the navigation swallowed.
+  return applyStage(result);
 }
 
 /**
- * Abandon a half-finished sign-in and start over.
+ * Stage 3 — the live face check.
  *
- * Used by <ResetOnReload> on the steps BEFORE an OTP has been sent. Refreshing
- * mid-flow should not leave a stale private code sitting in a cookie.
+ * The frame arrives already gated: `useFaceGate` will not release one until a
+ * single face is present, centred, facing the camera, lit, sharp and still. So
+ * a rejection here is a real mismatch, not a bad photograph — which matters,
+ * because the backend counts failures against a challenge that tolerates five
+ * in total and then kills the session itself. The frontend deliberately keeps
+ * no attempt counter of its own: two authorities disagreeing about how many
+ * tries remain is worse than one.
+ *
+ * The image goes to the KYC Worker, never to the auth backend — see
+ * `docs/kyc-integration.md`. What reaches `/v1/auth/face` is the Worker's
+ * signed verdict, so no biometric ever touches the auth path.
  */
-export async function resetLoginFlowAction(): Promise<void> {
-  await clearLoginFlow();
-}
+export async function submitFaceAction(stepToken: string): Promise<ActionState> {
+  if (!stepToken) return { ok: false, error: "No verification proof" };
 
-/** Resend the WhatsApp code (verify screen). Needs a live challenge. */
-export async function resendOtpAction(): Promise<ActionState> {
-  const flow = await readLoginFlow();
-  if (!flow.challengeToken) redirect("/login");
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
 
+  let result;
   try {
-    // ⏳ Path GUESSED. Body and response follow the confirmed registration
-    // pattern: snake_case, carry the token, get the envelope + fresh otp block
-    // back — so the verify screen's timer and masked number stay accurate.
-    const raw = await api.post<unknown>(AUTH_PATHS.resend, {
-      challenge_token: flow.challengeToken,
-    });
-    const result = registrationResponseSchema.parse(raw);
+    const raw = await api.post<unknown>(AUTH_PATHS.face, {
+      challenge_token: challenge.challengeToken,
+      // Shape settled with the backend: the face image never reaches it, so
+      // this carries the Worker's verdict rather than pixels. Until the Worker
+      // commit path exists, the frame is what there is to send.
+      // The Worker's verdict, not pixels. It minted this after comparing the
+      // live face against the stored photo and committing the scores over its
+      // own signed channel — so the backend can trust it without ever seeing an
+      // image, which is why no biometric touches the auth path.
+      evidence: { step_token: stepToken },
+    } satisfies EvidenceRequest);
 
-    await updateLoginFlow({
-      stage: result.stage,
-      challengeToken: result.challenge_token,
-      challengeExpiresAt: result.challenge_expires_at,
-      otpPhone: result.otp.phone,
-      otpLength: result.otp.code_length,
-      otpResendAvailableIn: result.otp.resend_available_in,
-      otpResendsRemaining: result.otp.resends_remaining,
-    });
-    return { ok: true };
+    result = stepResponseSchema.parse(raw);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return { ok: false, error: "Unexpected response from the sign-in service" };
     }
-    return { ok: false, error: message(error, "Could not resend the code") };
+    if (error instanceof UnknownStageError) {
+      return { ok: false, error: error.message };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "That did not match. Try again."),
+      restart: isChallengeDead(error),
+    };
   }
+
+  // Outside the try — applyStage() redirects by throwing.
+  return applyStage(result);
 }
 
 /**
- * Step 3 — the WhatsApp code. Never ends in a session directly: the passcode
- * step ALWAYS follows — set it (first login) or enter it (every later login).
+ * The evidence the document step will take, ONCE `/v1/kyc/submit` exists.
+ *
+ * Identical in shape to the face step, and for the same reason: the image goes
+ * to the KYC Worker, the Worker commits what it measured over its own signed
+ * channel, the backend mints a single-use token, and only that token is posted
+ * here. No biometric and no government document touches the auth path.
+ *
+ * Nothing mints one yet — see `StubDocumentEvidence` below.
  */
-export async function verifyOtpAction(code: string): Promise<ActionState> {
-  const parsed = otpSchema.safeParse({ code });
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message };
-  }
-
-  const flow = await readLoginFlow();
-  if (!flow.challengeToken) redirect("/login");
-
-  try {
-    const raw = await api.post<unknown>(AUTH_PATHS.registrationOtp, {
-      challenge_token: flow.challengeToken,
-      code: parsed.data.code,
-    } satisfies OtpVerifyRequest);
-
-    const result = otpVerifyResponseSchema.parse(raw);
-
-    if (result.stage !== STAGE_PASS_CODE_REQUIRED) {
-      return { ok: false, error: `Unsupported sign-in stage "${result.stage}"` };
-    }
-
-    await updateLoginFlow({
-      stage: result.stage,
-      // Store the token the server just returned, not the one we sent — it is
-      // re-issued each step and may rotate even when it looks unchanged.
-      challengeToken: result.challenge_token,
-      challengeExpiresAt: result.challenge_expires_at,
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { ok: false, error: "Unexpected response from the sign-in service" };
-    }
-    return { ok: false, error: message(error, "Invalid code") };
-  }
-
-  // Outside the try on purpose: redirect() signals by throwing, so calling it
-  // inside would be caught above and swallow the navigation.
-  //
-  // PASS_CODE_REQUIRED sends the admin to SET a passcode rather than enter one,
-  // because this whole flow is /v1/registration/* — invitation-based first-time
-  // setup (device_label: "setup"). A returning-user login presumably reports a
-  // different stage; when that endpoint arrives, branch here.
-  redirect("/login/set-passcode");
-}
-
-/** Step 4 (first login only) — store the chosen passcode, start the session. */
-export async function setPasscodeAction(passcode: string): Promise<ActionState> {
-  const parsed = passcodeSchema.safeParse({ passcode });
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message };
-  }
-
-  const flow = await readLoginFlow();
-  if (flow.stage !== STAGE_PASS_CODE_REQUIRED || !flow.challengeToken) {
-    redirect("/login");
-  }
-
-  let next = "/dashboard";
-  try {
-    const raw = await api.post<unknown>(AUTH_PATHS.setPasscode, {
-      challenge_token: flow.challengeToken,
-      pass_code: parsed.data.passcode,
-    });
-
-    const result = passCodeResponseSchema.parse(raw);
-    if (result.stage !== STAGE_COMPLETED) {
-      return { ok: false, error: `Unsupported sign-in stage "${result.stage}"` };
-    }
-
-    const { access_token, refresh_token, expires_in, user } = result.tokens;
-    await setAuthCookies({
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      accessMaxAge: expires_in,
-      // The refresh token never expires; only the cookie ceiling applies.
-      refreshMaxAge: REFRESH_MAX_AGE,
-    });
-    // Kept for the passcode lock screen, which needs it to unlock. This is the
-    // only moment it is available in full — /v1/me returns it empty.
-    if (user.private_code) {
-      await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
-      // Display only, so the passcode screen can greet them next time.
-      await setIdentityCookie(
-        { name: user.full_name, role: user.is_root ? "super_admin" : "agent" },
-        REFRESH_MAX_AGE,
-      );
-    }
-
-    // The identity step is not optional decoration: the backend states whether
-    // this admin still owes a face check or full ID enrolment, and the answer
-    // decides where sign-in lands.
-    next =
-      user.requires_face_verification || user.requires_kyc
-        ? "/login/identity"
-        : "/dashboard";
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { ok: false, error: "Unexpected response from the sign-in service" };
-    }
-    return { ok: false, error: message(error, "Could not set passcode") };
-  }
-
-  await clearLoginFlow();
-  redirect(next);
-}
+export type DocumentStepTokenEvidence = { step_token: string };
 
 /**
- * Passcode entry — the one action behind the passcode screen, covering both
- * moments it appears:
- *   mid-login (unlockToken in the flow cookie, no session yet) → /auth/passcode-login
- *   fresh page load (live refresh cookie = the session)        → /auth/passcode
+ * ⚠️ INTERIM. The base64 payload the stub accepts today, and a dead end.
+ *
+ * `root-enrollment.md` §5 is unambiguous that this path is going away: *"do not
+ * build against the payload below… What you must not build is a path that posts
+ * base64 images to /auth/identity-document, because that path is going away."*
+ * The document step will become `{ step_token }` — one line identical to the
+ * face step — as soon as `POST /v1/kyc/submit` is built to mint one.
+ *
+ * It is still sent, deliberately and narrowly: the stub exists, in the doc's
+ * own words, "kept only so the sequence can be walked end to end", and without
+ * it the flow dead-ends at ID_DOCUMENT_REQUIRED and the device step cannot be
+ * reached or tested at all. That is the whole justification — walking the
+ * sequence. It is NOT a contract, the field names below were never agreed, and
+ * a green run proves only that a stub accepts any object with one key.
+ *
+ * ── Removing this ───────────────────────────────────────────────────────────
+ * When `/v1/kyc/submit` lands, delete this type and change the ONE call site in
+ * `IdentityStep.tsx` to pass `{ step_token }`. The action already accepts both
+ * — that is what the union below is for — so nothing here needs to change.
  */
-export async function passcodeUnlockAction(
-  passcode: string,
+export type StubDocumentEvidence = {
+  document_type: "NATIONAL_ID" | "PASSPORT" | "DRIVING_LICENSE";
+  /** Data URLs. `back` is absent for a passport — one page, no reverse. */
+  front: string;
+  back?: string;
+  /** The frame captured at the face step, reused rather than re-shot. */
+  selfie?: string;
+  /** Read off the document by the Worker's OCR. */
+  full_name?: string;
+  document_number?: string;
+  birth_date?: string;
+  expiry_date?: string;
+  country?: string;
+  country_iso3?: string;
+  /** What the Worker measured comparing that selfie to the document photo. */
+  selfie_vs_id_score?: number;
+  liveness_confidence?: number;
+};
+
+/**
+ * Either shape. The union is the migration: both compile, both post, and the
+ * switch is made at the call site rather than by rewriting this file.
+ */
+export type IdentityDocumentEvidence =
+  | DocumentStepTokenEvidence
+  | StubDocumentEvidence;
+
+/**
+ * Stage 4 — first-login ID enrolment, and the LAST step before the device.
+ *
+ * ── Nothing here starts a KYC session ───────────────────────────────────────
+ * Root has no session concept at all: the challenge carries the flow from
+ * `/auth/link` to the tokens, and `challenge_id` is what identifies it to the
+ * Worker. The KYC Worker's own `/submit` route — three uploads to
+ * `/media/upload/direct`, a country lookup against `/countries`, then URLs to
+ * `/kyc/submit` — is RDB's contract, and all three answer 404 here. Its first
+ * symptom was this flow dying on "session start failed: Unauthorized", because
+ * the Worker's `/session` is guarded by an access token that does not exist
+ * mid sign-in.
+ *
+ * ── This step is mid-migration ──────────────────────────────────────────────
+ * Today it posts the stub's base64 payload; tomorrow it posts
+ * `{ step_token }`, exactly like `/auth/face`. See the evidence types above for
+ * why, and for what changes when `/v1/kyc/submit` is built. This function is
+ * indifferent to which — it forwards whatever it is handed.
+ *
+ * The response advances to DEVICE_REQUIRED, so `applyStage` sends the browser
+ * to the passkey ceremony — the step that actually binds the account.
+ */
+export async function submitIdentityDocumentAction(
+  evidence: IdentityDocumentEvidence,
 ): Promise<ActionState> {
-  const parsed = passcodeSchema.safeParse({ passcode });
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message };
-  }
+  // Guards the one field each shape cannot be useful without, so an empty
+  // payload fails here rather than spending an attempt against the challenge —
+  // it tolerates five across all steps before burning.
+  const empty =
+    "step_token" in evidence ? !evidence.step_token : !evidence.front;
+  if (empty) return { ok: false, error: "No document evidence" };
 
-  // Two ways in: mid-sign-in (the flow cookie carries the code), or the lock
-  // screen on a live session (the flow cookie is long gone, so fall back to the
-  // code saved at sign-in). Missing both genuinely means "start over".
-  const flow = await readLoginFlow();
-  const privateCode = flow.privateCode ?? (await getPrivateCode());
-  if (!privateCode) redirect("/login");
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
 
-  let next = "/dashboard";
+  let result;
   try {
-    const raw = await api.post<unknown>(AUTH_PATHS.login, {
-      private_code: privateCode,
-      // `secret` is the 6-digit pass code, NOT the password — see endpoints.ts.
-      secret: parsed.data.passcode,
-      device_label: DEVICE_LABEL,
-    } satisfies LoginRequest);
+    const raw = await api.post<unknown>(AUTH_PATHS.identityDocument, {
+      challenge_token: challenge.challengeToken,
+      // Undefined keys are dropped by JSON.stringify, so a passport simply
+      // arrives without `back` rather than with an explicit null the stub
+      // would have to interpret.
+      evidence: { ...evidence },
+    } satisfies EvidenceRequest);
 
-    const result = loginResponseSchema.parse(raw);
-    if (result.stage !== STAGE_COMPLETED) {
-      return { ok: false, error: `Unsupported sign-in stage "${result.stage}"` };
-    }
-
-    const { access_token, refresh_token, expires_in, user } = result.tokens;
-    await setAuthCookies({
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      accessMaxAge: expires_in,
-      refreshMaxAge: REFRESH_MAX_AGE,
-    });
-    // Re-saved: setAuthCookies has just rotated the session, and the lock
-    // screen must keep working on the next reload.
-    if (user.private_code) {
-      await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
-      // Display only, so the passcode screen can greet them next time.
-      await setIdentityCookie(
-        { name: user.full_name, role: user.is_root ? "super_admin" : "agent" },
-        REFRESH_MAX_AGE,
-      );
-    }
-
-    // Same gate as first-time setup: the backend decides whether identity
-    // still has to be proven before the dashboard.
-    next =
-      user.requires_face_verification || user.requires_kyc
-        ? "/login/identity"
-        : "/dashboard";
+    result = stepResponseSchema.parse(raw);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return { ok: false, error: "Unexpected response from the sign-in service" };
     }
-    // A 401 that is NOT "wrong credentials" means the session or challenge
-    // itself died — retrying with the same passcode can never succeed, so only
-    // a fresh sign-in recovers.
-    //
-    // Matched on the error CODE, not the message: this backend answers a wrong
-    // passcode with "That code or password is incorrect", so the old text
-    // comparison would have classified every mistyped passcode as a dead
-    // session and bounced the admin back to the start instead of letting them
-    // simply try again.
-    if (
-      error instanceof ApiError &&
-      error.status === 401 &&
-      errorCode(error) !== ERROR_CODES.invalidCredentials
-    ) {
-      await clearLoginFlow();
-      await clearAuthCookies();
-      redirect("/login");
+    if (error instanceof UnknownStageError) {
+      return { ok: false, error: error.message };
     }
-    return { ok: false, error: message(error, "Invalid passcode") };
+    return {
+      ok: false,
+      error: signInError(error, "That document could not be enrolled. Try again."),
+      restart: isChallengeDead(error),
+    };
   }
 
-  await clearLoginFlow();
-  redirect(next);
+  // Outside the try — applyStage() redirects by throwing.
+  return applyStage(result);
 }
 
 /**
- * Unlock the idle lock on a live session. Verifies the passcode and STAYS PUT —
- * no redirect, so the admin lands back on whatever page they had open.
+ * Abandon a half-finished sign-in.
  *
- * ⚠️ It signs in again under the hood. There is no endpoint that checks a
- * passcode against an existing session, so the only way to verify one is
- * POST /v1/auth/login, which issues a fresh token pair. The session therefore
- * continues uninterrupted but ROTATES on every unlock. A dedicated
- * verify-pass-code endpoint would make this a read-only check.
+ * The only recovery from a burned challenge. It does not "retry" anything: the
+ * administrator must open their access link again, because that is the only
+ * thing that can open a new challenge.
  */
-export async function verifyPasscodeAction(
-  passcode: string,
-): Promise<ActionState> {
-  const parsed = passcodeSchema.safeParse({ passcode });
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message };
-  }
-
-  // Saved at sign-in; /v1/auth/login needs it alongside the passcode.
-  const privateCode = await getPrivateCode();
-  if (!privateCode) {
-    return { ok: false, error: "Sign in again to unlock" };
-  }
-
-  try {
-    const raw = await api.post<unknown>(AUTH_PATHS.login, {
-      private_code: privateCode,
-      secret: parsed.data.passcode,
-      device_label: DEVICE_LABEL,
-    } satisfies LoginRequest);
-
-    const result = loginResponseSchema.parse(raw);
-    if (result.stage !== STAGE_COMPLETED) {
-      return { ok: false, error: `Unsupported sign-in stage "${result.stage}"` };
-    }
-
-    const { access_token, refresh_token, expires_in, user } = result.tokens;
-    await setAuthCookies({
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      accessMaxAge: expires_in,
-      refreshMaxAge: REFRESH_MAX_AGE,
-    });
-    if (user.private_code) {
-      await setPrivateCodeCookie(user.private_code, REFRESH_MAX_AGE);
-      // Display only, so the passcode screen can greet them next time.
-      await setIdentityCookie(
-        { name: user.full_name, role: user.is_root ? "super_admin" : "agent" },
-        REFRESH_MAX_AGE,
-      );
-    }
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { ok: false, error: "Unexpected response from the sign-in service" };
-    }
-    return { ok: false, error: message(error, "Invalid passcode") };
-  }
-
-  return { ok: true };
-}
-
-/**
- * "Use a different code" — forget this device's remembered admin and go back to
- * the private-code field.
- *
- * Without it a stale root_pc was a dead end: /login jumps straight to the
- * passcode whenever one is remembered, so if that admin no longer exists the
- * only way out was clearing cookies by hand. The session is untouched.
- */
-export async function forgetDeviceAction(): Promise<void> {
-  await clearRememberedIdentity();
+export async function restartSignInAction(): Promise<void> {
+  await clearChallenge();
   redirect("/login");
 }
 
@@ -477,10 +287,122 @@ export async function logoutAction() {
   try {
     await api.post(AUTH_PATHS.logout);
   } catch {
-    // best-effort server-side revoke; clear local cookies regardless
+    // Best-effort server-side revoke; clear local cookies regardless.
   }
   await clearAuthCookies();
-  await clearLoginFlow();
+  await clearChallenge();
   // Through the splash → it re-checks (now unauthenticated) and lands on /login.
   redirect("/");
+}
+
+/* ─────────────────────────── the passkey ─────────────────────────── */
+
+/**
+ * Stage 4a — ask the server for the WebAuthn ceremony.
+ *
+ * Returns only the `publicKey` block and which browser call to make. The
+ * challenge token stays here, in the action: a component driving
+ * `navigator.credentials` never sees a credential of ours, which is what keeps
+ * this inside the BFF rule even though the ceremony must run in the browser.
+ *
+ * ⚠️ `mode` is the SERVER's decision, from what this link has already enrolled.
+ * Never pick it client-side — that is precisely what stops a stranger asking to
+ * "register" on a link that is already bound to somebody's device.
+ */
+export async function deviceOptionsAction(): Promise<
+  ActionState & { mode?: "register" | "authenticate"; publicKey?: Record<string, unknown> }
+> {
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
+
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.deviceOptions, {
+      challenge_token: challenge.challengeToken,
+    });
+    const result = deviceOptionsResponseSchema.parse(raw);
+    return { ok: true, mode: result.mode, publicKey: result.publicKey };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "Could not start device verification"),
+      restart: isChallengeDead(error),
+    };
+  }
+}
+
+/**
+ * Stage 4b — submit the ceremony's answer.
+ *
+ * On a first login this binds the access link to this passkey **permanently**:
+ * from here the link opens from this device and no other. There is no recovery
+ * from losing it — only another root administrator issuing a fresh link — so
+ * this is the single least reversible action in the whole flow.
+ *
+ * `label` is stored here (the one sent to `/device/options` is ignored) and is
+ * what the administrator sees in their credential list.
+ */
+export async function submitDeviceAction(
+  credential: Record<string, unknown>,
+  label: string,
+): Promise<ActionState> {
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
+
+  let result;
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.device, {
+      challenge_token: challenge.challengeToken,
+      label,
+      credential,
+    } satisfies DeviceRequest);
+
+    // The SHAPE of the final response, keys only.
+    //
+    // This is the one step that ends in tokens, and if they do not arrive where
+    // the schema expects them the sign-in dies at the last inch with "COMPLETED
+    // without issuing tokens" — after the passkey has been created and the
+    // server considers the account enrolled. Zod strips unknown keys, so the
+    // parsed object cannot show where they actually were; only the raw envelope
+    // can, and `tokens` nested vs `access_token` at the top level are both
+    // shapes this backend uses on different endpoints.
+    //
+    // KEYS ONLY, never values: this object carries the access and refresh
+    // tokens themselves, and a log is exactly where they must not appear.
+    if (raw && typeof raw === "object") {
+      const top = Object.keys(raw as Record<string, unknown>);
+      const tokens = (raw as { tokens?: unknown }).tokens;
+      console.log(
+        "[auth] /auth/device response shape:",
+        JSON.stringify({
+          keys: top,
+          tokensType: tokens === undefined ? "absent" : typeof tokens,
+          tokenKeys:
+            tokens && typeof tokens === "object"
+              ? Object.keys(tokens as Record<string, unknown>)
+              : undefined,
+        }),
+      );
+    }
+
+    result = stepResponseSchema.parse(raw);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    if (error instanceof UnknownStageError) {
+      return { ok: false, error: error.message };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "That device could not be verified"),
+      restart: isChallengeDead(error),
+    };
+  }
+
+  // Outside the try — applyStage() redirects by throwing. On a returning login
+  // this lands on FACE_REQUIRED; on a first login, on COMPLETED with tokens.
+  return applyStage(result);
 }

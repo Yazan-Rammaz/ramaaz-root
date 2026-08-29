@@ -4,9 +4,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'motion/react';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
+import type { IDDocument } from '@/features/kyc/types/verification';
 import { api } from '@/features/kyc/services/kycApi';
 import { useRouter } from 'next/navigation';
-import { createKycService } from '@/features/kyc/services';
 import ExitConfirmDialog from '../ExitConfirmDialog';
 import faceDetectSvg from '@/features/kyc/assets/face-detect.svg';
 import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
@@ -14,13 +14,54 @@ import { FlexSpace } from '@/components/ui/FlexSpace';
 
 type MatchState = 'matching' | 'success' | 'review' | 'failed';
 
-// Animation timing — matches user's spec.
-const TOTAL_ANIM_MS = 10_000; // 10 sec total comparison animation
+/**
+ * Animation timing.
+ *
+ * The sequence the design asks for is: show the captured face alone for a
+ * beat, run the comparison against the ID, then hold the verdict long enough
+ * to be read before moving on.
+ *
+ * `TOTAL_ANIM_MS` is the comparison itself, and it is a FLOOR rather than a
+ * wait: the real AWS call usually returns sooner, and finishing the animation
+ * early would show a verdict before the person had understood what was being
+ * compared. The screen advances on whichever finishes last.
+ */
+const FACE_ONLY_MS = 2_000; // the captured face, alone, before the ID appears
+const TOTAL_ANIM_MS = 4_000; // the comparison animation
 const OPACITY_STEP_MS = 1_000; // each opacity transition lasts 1 sec
 const FRAME_FLASHES_PER_CYCLE = 3; // flashes 3 times during each ID-visible cycle
 const FRAME_FLASH_MS = 300; // each flash lasts 300 ms
 
-export default function FaceMatchScreen() {
+/**
+ * What this screen hands to whoever owns the enrolment exchange.
+ *
+ * Deliberately this feature's OWN vocabulary — an `IDDocument`, a selfie, two
+ * numbers — and not the auth backend's `evidence` shape. The caller translates.
+ * That is the same seam `onCapture` uses one screen earlier, and it exists for
+ * the same reason: this component drives a camera and a comparison, and has no
+ * business knowing the sign-in protocol or holding a credential. It also keeps
+ * the feature portable (see PORTING.md), which it would not be if a KYC screen
+ * imported a Server Action from `features/auth`.
+ */
+export type EnrolmentInput = {
+    idDocument: IDDocument;
+    /** The frame captured at the face step — never re-shot for this. */
+    selfie: string;
+    /** What Rekognition scored that selfie against the document photo. */
+    selfieVsIdScore: number;
+    livenessConfidence?: number;
+};
+
+export default function FaceMatchScreen({
+    onEnroll,
+}: {
+    /**
+     * Submits the enrolment. Returning an error shows it; returning nothing
+     * means the caller took over — typically by redirecting, which is what the
+     * real implementation does on its way to the device step.
+     */
+    onEnroll?: (input: EnrolmentInput) => Promise<{ error?: string } | void>;
+} = {}) {
     const {
         goTo,
         livenessResult,
@@ -28,15 +69,14 @@ export default function FaceMatchScreen() {
         setMatchResult,
         incrementAttempt,
         resetSession,
-        kycSessionId,
-        setKycSessionId,
     } = useVerification();
     const router = useRouter();
-    const kycService = useRef(createKycService());
 
     const [matchState, setMatchState] = useState<MatchState>('matching');
     const [subtitle, setSubtitle] = useState('AI is comparing your face with your ID...');
     const [showExitDialog, setShowExitDialog] = useState(false);
+    /** False for the first FACE_ONLY_MS — the face is shown on its own. */
+    const [comparing, setComparing] = useState(false);
     const [animDone, setAnimDone] = useState(false);
     const [frameFlashOn, setFrameFlashOn] = useState(false);
 
@@ -46,12 +86,14 @@ export default function FaceMatchScreen() {
         message?: string;
     } | null>(null);
 
-    // A KYC session is single-use: NestJS marks it "consumed" on the FIRST submit
-    // (even a rejected one). This records the sessionId we've already submitted with,
-    // so a retry (the "try again" → runMatch path) fetches a FRESH session instead of
-    // re-submitting the consumed one — which fails with "KYC session has already been
-    // consumed".
-    const submittedSessionRef = useRef<string | null>(null);
+    // (Removed with the session: root has no KYC session to consume. The
+    // challenge carries the whole flow, and re-submitting is governed by its
+    // five-attempt budget on the server — not by a client-side spent flag.)
+
+    /** Guards `runMatch` against overlapping runs. See the note there. */
+    const matchInFlight = useRef(false);
+    /** The comparison currently in flight, so the finaliser can wait for it. */
+    const matchPendingRef = useRef<Promise<unknown> | null>(null);
 
     const handleFailure = useCallback(
         (msg?: string) => {
@@ -66,9 +108,18 @@ export default function FaceMatchScreen() {
     );
 
     const finaliseAfterAnimation = useCallback(async () => {
-        const data = apiResultRef.current;
+        // Wait for the comparison if it has not landed yet. The animation is a
+        // minimum duration for the sake of the person watching, not a deadline
+        // for AWS — so a request still in flight is waited on rather than
+        // written off. Only a cycle with no request at all is a real failure.
+        let data = apiResultRef.current;
+        if (!data && matchPendingRef.current) {
+            await matchPendingRef.current;
+            data = apiResultRef.current;
+        }
         if (!data) {
-            handleFailure('Face match timed out — please try again');
+            console.error('[FaceMatch] no compare result when the animation finished');
+            handleFailure();
             return;
         }
         if (data.status === 'success') {
@@ -80,96 +131,82 @@ export default function FaceMatchScreen() {
                 verdict: 'pass',
                 errorMessage: null,
             });
-            setMatchState('success');
-            setSubtitle('ID Matching With Your Photo Done');
-
+            // ⚠️ NOT done yet — and this is the whole point of the ordering.
+            //
+            // A passing COMPARE is not a passing ENROLMENT. The comparison here
+            // runs against `passThreshold`, which is 0, so it passes on any two
+            // images with a detectable face; the backend then applies the real
+            // threshold and can refuse. Announcing "Done" here and printing a
+            // failure a few seconds later is what that gap looked like on
+            // screen. The success state is set below, after the enrolment has
+            // actually been accepted — and by then the redirect to the device
+            // step is usually already in flight, which is the honest signal
+            // that it worked.
             if (idDocument && livenessResult?.faceImageData) {
-                // Ensure we have a session. If the one fetched on page mount is
-                // missing (e.g. its request 401'd on an expired token), fetch a fresh
-                // one here so we ALWAYS submit to NestJS and let the backend decide —
-                // never silently skip submit and "decide" in the client.
-                // Fetch a fresh session when we have none (mount fetch 401'd) OR when the
-                // current one was already submitted (consumed) — e.g. on a retry after a
-                // rejected attempt. Otherwise NestJS rejects the resubmit as consumed.
-                let sessionId = kycSessionId;
-                if (!sessionId || sessionId === submittedSessionRef.current) {
-                    try {
-                        const s = await kycService.current.startSession();
-                        sessionId = s.sessionId;
-                        setKycSessionId(sessionId);
-                    } catch (err) {
-                        console.error('[FaceMatch] session fetch failed:', err);
-                    }
-                }
-                if (!sessionId) {
-                    handleFailure('Could not start a verification session. Please try again.');
+                // ── Enrolment goes to the AUTH backend, in one call ──────────
+                //
+                // Not to the KYC Worker's /submit. That route is RDB's: three
+                // uploads to /media/upload/direct, a country lookup against
+                // /countries, then URLs posted to /kyc/submit. All three answer
+                // 404 on the root backend, which never had that contract — and
+                // the first symptom was this screen dying on "session start
+                // failed: Unauthorized", because /session is guarded by an
+                // access token that does not exist mid sign-in.
+                //
+                // Root's whole document step is POST /v1/auth/identity-document
+                // with the images inline (root-enrollment.md §5). There is no
+                // KYC session to start: the challenge carries the flow, which
+                // is why nothing here fetches one.
+                //
+                // The action redirects on success — the backend answers
+                // DEVICE_REQUIRED and applyStage() sends the browser to the
+                // passkey ceremony. So there is no navigation to write here,
+                // and no 'success' step on this path: the device screen IS
+                // what comes next.
+                incrementAttempt('face-match');
+
+                if (!onEnroll) {
+                    // No enrolment seam supplied. Loud in the console, because
+                    // the alternative is a screen that looks like it verified
+                    // somebody and stored nothing.
+                    console.error('[FaceMatch] no onEnroll seam supplied');
+                    handleFailure();
                     return;
                 }
 
-                // The backend requires a non-empty ID number. Depending on the
-                // document, the OCR result lands in either `nationalNumber` or its
-                // `documentNumber` alias — send whichever is present in both fields
-                // so the Worker → NestJS `nationalIdNumber` is never empty.
-                const idNumber = idDocument.nationalNumber || idDocument.documentNumber || '';
-                // Mark consumed BEFORE the call: once NestJS receives this submit the
-                // session is spent, so any retry must start a fresh one.
-                submittedSessionRef.current = sessionId;
-                // Count an attempt only on a real submit to NestJS — not on
-                // earlier detection/compare failures.
-                incrementAttempt('face-match');
-                try {
-                    const res = await kycService.current.submitVerification({
-                        kycSessionId: sessionId,
-                        frontImageData: idDocument.frontImageData,
-                        backImageData: idDocument.backImageData || undefined,
-                        selfieImageData: livenessResult.faceImageData,
-                        selfieVsIdScore: score,
-                        // Forwarded so the NestJS backend can factor liveness into
-                        // its decision now that there is no video step. The
-                        // approved/pending/rejected decision is made ONLY in NestJS.
-                        livenessConfidence: livenessResult.metrics?.confidence,
-                        extracted: {
-                            idType: idDocument.idType,
-                            country: idDocument.country,
-                            // `name` is the person's full name (worker `extracted.name`).
-                            // NOT `idName` — that field carries the document-type label
-                            // ("PASSPORT", "Syrian National ID"), which would be submitted
-                            // as the user's fullName.
-                            name: idDocument.name ?? idDocument.idName,
-                            nationalNumber: idNumber,
-                            documentNumber: idNumber,
-                            birthday: idDocument.birthday,
-                            expiryDate: idDocument.expiryDate,
-                        },
-                    });
-                    const status = res.kycRequest?.status;
-                    console.log('[FaceMatch] KYC submitted:', status);
-                    // The backend is the source of truth. Only show success when it
-                    // approved (or left the request pending). A rejected decision
-                    // (e.g. "selfie does not match ID photo") must show the failure
-                    // with the backend's own reason — never an optimistic "verified".
-                    if (status === 'rejected') {
-                        handleFailure(
-                            res.kycRequest?.rejectionReason || 'Verification was not approved.',
-                        );
-                    } else {
-                        goTo('success', 1);
-                    }
-                } catch (err) {
-                    console.error('[FaceMatch] KYC submit failed:', err);
-                    handleFailure(
-                        err instanceof Error && err.message
-                            ? err.message
-                            : 'We could not submit your verification. Please try again.',
-                    );
+                const result = await onEnroll({
+                    idDocument,
+                    selfie: livenessResult.faceImageData,
+                    selfieVsIdScore: score,
+                    livenessConfidence: livenessResult.metrics?.confidence,
+                });
+
+                // Only reached when the caller did NOT redirect — i.e. it
+                // failed.
+                //
+                // The backend's reason goes to the CONSOLE, never to the
+                // screen. It is written for whoever is integrating — "selfie
+                // below threshold", a correlation id, a validation field — and
+                // on a sign-in screen it is at best noise and at worst a
+                // description of how close an attacker got. One fixed line
+                // here; the detail stays where it is useful.
+                if (result?.error) {
+                    console.error('[FaceMatch] enrolment refused:', result.error);
+                    handleFailure();
+                    return;
                 }
+
+                // Accepted. Usually unreachable, because the action redirects
+                // to the device step by throwing — but shown when it does
+                // return, so "Done" is only ever true.
+                setMatchState('success');
+                setSubtitle('ID Matching With Your Photo Done');
             } else {
                 console.warn('[FaceMatch] Skipping submit — missing:', {
-                    kycSessionId,
                     hasIdDocument: !!idDocument,
                     hasFace: !!livenessResult?.faceImageData,
                 });
-                handleFailure('Missing verification data — please start again.');
+                handleFailure();
             }
         } else {
             setMatchResult({
@@ -179,11 +216,26 @@ export default function FaceMatchScreen() {
                 verdict: 'fail',
                 errorMessage: data.message ?? 'Face did not match',
             });
-            handleFailure(data.message);
+            // Same rule as above: the service's own wording goes to the
+            // console, the screen gets the one fixed line.
+            if (data.message) console.error('[FaceMatch] compare failed:', data.message);
+            handleFailure();
         }
     }, [handleFailure, setMatchResult, goTo, incrementAttempt]);
 
     const runMatch = useCallback(async () => {
+        // One comparison at a time.
+        //
+        // `reactStrictMode` double-invokes the mount effect in dev, so this
+        // fired twice within the same millisecond — and each call clears
+        // `apiResultRef` on entry. The second clear lands while the first
+        // cycle's animation is finishing, `finaliseAfterAnimation` reads a null
+        // ref, and the screen reports "Face match timed out" for a request that
+        // answered in under a second. The retry button can produce the same
+        // overlap with a double tap.
+        if (matchInFlight.current) return;
+        matchInFlight.current = true;
+
         setMatchState('matching');
         setSubtitle('AI is comparing your face with your ID...');
         setAnimDone(false);
@@ -194,7 +246,12 @@ export default function FaceMatchScreen() {
         const idFace = idDocument?.idFaceImageData || idDocument?.frontImageData || '';
 
         if (!liveFace || !idFace) {
-            handleFailure('Missing face or ID image');
+            console.error('[FaceMatch] missing face or ID image', {
+                hasLiveFace: Boolean(liveFace),
+                hasIdFace: Boolean(idFace),
+            });
+            handleFailure();
+            matchInFlight.current = false;
             return;
         }
 
@@ -202,13 +259,29 @@ export default function FaceMatchScreen() {
         // This was a raw fetch, so an access token that expired during the
         // verification flow failed the match outright; api.kyc refreshes and
         // retries. It also never throws, so the catch is gone.
-        const res = await api.kyc.compareFace({
-            selfieImageData: liveFace,
-            idFaceImageData: idFace,
-        });
-        apiResultRef.current = res.ok
-            ? res.data
-            : { status: 'error', message: res.error.message };
+        // The request is kept as a PROMISE, not just as a result.
+        //
+        // The animation is a floor, not a guarantee: it can finish while this
+        // call is still out — a slow network, a cold Rekognition call, a phone
+        // that throttled the tab. Reading only the settled result meant
+        // `finaliseAfterAnimation` saw `null` and reported the match as timed
+        // out, discarding a request that then answered fine a moment later.
+        // Holding the promise lets the finaliser WAIT for the answer it
+        // already asked for instead of giving up on it.
+        const pending = api.kyc
+            .compareFace({ selfieImageData: liveFace, idFaceImageData: idFace })
+            .then((res) => {
+                apiResultRef.current = res.ok
+                    ? res.data
+                    : { status: 'error', message: res.error.message };
+                return apiResultRef.current;
+            })
+            .finally(() => {
+                matchInFlight.current = false;
+            });
+
+        matchPendingRef.current = pending;
+        await pending;
     }, [livenessResult, idDocument, handleFailure]);
 
     useEffect(() => {
@@ -217,9 +290,15 @@ export default function FaceMatchScreen() {
 
     // Drive the comparison animation: every 2s a new cycle (1s ID visible, 1s
     // face visible). During the ID-visible second, fire 3 frame-flashes 300ms apart.
+    //
+    // The cycles do not begin immediately. For FACE_ONLY_MS the captured face
+    // sits alone, so the person recognises themselves before anything is
+    // compared against them — the ID sliding in then reads as an act rather
+    // than as two images that were always on screen together.
     useEffect(() => {
         if (matchState !== 'matching') return;
         const start = Date.now();
+        const openTimer = window.setTimeout(() => setComparing(true), FACE_ONLY_MS);
         const cycleMs = OPACITY_STEP_MS * 2; // 2000 ms per cycle
         const flashGap = OPACITY_STEP_MS / FRAME_FLASHES_PER_CYCLE; // ≈ 333 ms
 
@@ -252,6 +331,7 @@ export default function FaceMatchScreen() {
         }, TOTAL_ANIM_MS);
 
         return () => {
+            window.clearTimeout(openTimer);
             window.clearInterval(cycleInterval);
             window.clearTimeout(stopTimer);
             flashTimers.forEach(window.clearTimeout);
@@ -283,22 +363,6 @@ export default function FaceMatchScreen() {
                 onCancel={() => setShowExitDialog(false)}
                 onConfirm={() => router.push('/home')}
             />
-
-            <div className="flex absolute top-50 end-30 justify-end mb-8">
-                <button
-                    onClick={() => setShowExitDialog(true)}
-                    className="text-red-400 hover:text-red-600"
-                >
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <path
-                            d="M5 5L15 15M15 5L5 15"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                        />
-                    </svg>
-                </button>
-            </div>
 
             <FlexSpace size={100} share={0.3} />
 
@@ -348,7 +412,7 @@ export default function FaceMatchScreen() {
                 )}
 
                 {/* ID image — crossfades over the face every cycle */}
-                {idImage && matchState === 'matching' && (
+                {idImage && matchState === 'matching' && comparing && (
                     <motion.div
                         className="absolute z-10 w-280 h-157 bottom-11 start-35"
                         animate={{ opacity: [0.5, 1, 1, 0.5, 0.5] }}

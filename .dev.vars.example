@@ -5,6 +5,6 @@
 # runs with no backend (screens render, data calls fail with one clear error).
 NEST_API_URL="https://staging-backend.ramaaz.store"
 
-# Sent as `token` in POST /v1/registration. Temporary: a dedicated endpoint
-# will issue this — see src/lib/auth/registration-token.ts.
-REGISTRATION_TOKEN=""
+# Nothing else is needed. Sign-in carries no build-time credential: the access
+# link's token arrives in the URL at /enter/<token> and is exchanged for a
+# challenge — see src/lib/auth/link.ts.

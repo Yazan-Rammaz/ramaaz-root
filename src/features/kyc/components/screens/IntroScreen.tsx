@@ -1,90 +1,142 @@
 'use client';
 
-import React from 'react';
 import Image from 'next/image';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
-import { useRouter } from 'next/navigation';
 import { useKycSession } from '@/features/kyc/context/KycSessionContext';
-import shieldSvg from '@/features/kyc/assets/shield.svg';
-import notVerifiedSvg from '@/features/kyc/assets/not-verified.svg';
+import infoSvg from '@/features/kyc/assets/shield.svg';
 
+// XD px -> scaling rem.
+const rem = (px: number) => `${px * 0.0625}rem`;
+
+/**
+ * Consent, and the first thing an administrator sees on a first login.
+ *
+ * ── The photo is the one just captured ──────────────────────────────────────
+ * Not the stored reference, and not a fresh capture: it is the frame from the
+ * face step, held in `VerificationContext` for the whole flow. Showing it back
+ * is the point — it says "this is who we just verified you as" before asking
+ * for consent, rather than asking someone to agree to something abstract.
+ *
+ * It is also why this screen and the face step share a route. A navigation
+ * between them would drop the frame (it is React state, far too large for a
+ * cookie), and the administrator would have to capture their face twice — the
+ * one thing this flow is built to avoid.
+ *
+ * ── Disagree and Terms are inert, by request ────────────────────────────────
+ * Both are rendered because they are in the design, and both are disabled: the
+ * terms document does not exist yet, and refusing consent mid-challenge has no
+ * defined outcome. Shown-but-disabled is the honest state — a live control that
+ * silently did nothing would be worse than one that plainly cannot be pressed.
+ */
 export default function IntroScreen() {
-    const { goTo } = useVerification();
-    const router = useRouter();
+    const { goTo, livenessResult } = useVerification();
     const { userData } = useKycSession();
 
-    const userName = userData?.user?.firstName || userData?.user?.lastName || 'RDB User';
+    // Supplied by the backend on the face-check response. Absent until that
+    // lands, so the greeting degrades to just "Welcome !" rather than showing a
+    // placeholder name that is not this person's.
+    const fullName = [userData?.user?.firstName, userData?.user?.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
 
-    const handleStart = () => {
-        goTo('id-capture-front', 1);
-    };
-
-    const handleLater = () => {
-        router.push('/home');
-    };
+    const photo = livenessResult?.faceImageData;
 
     return (
-        <div className="flex flex-col h-full bg-[#FFFDD0] px-40 py-0">
-            {/* Top spacer */}
-            <div className="h-1/2 flex items-end justify-center">
-                {/* Main content */}
-                <div className="flex flex-col items-start">
-                    <h1 className="fz-30 font-bold text-[#1D1D1D] mb-10">
-                        Identity Verification !
-                    </h1>
-                    <p className="fz-16 font-medium text-[#1D1D1D] mb-8">
-                        Protect Your Account & Get Full Access
-                    </p>
-                    <p className="fz-12 text-[#1D1D1D] leading-relaxed mb-10">
-                        We Need To Verify Your Identity Once To Protect Your Account From Fraud And
-                        Comply With Security Regulations One-Time Process To Confirm That You. It
-                        Helps Keep Your Account Secure, Prevents Fraud, And Ensures Safe
-                        Transactions Just Like Showing Your ID When Opening A Bank Account.
-                    </p>
+        <div className="flex h-full flex-col items-center justify-center px-40">
+            <div className="flex w-346 flex-col items-start">
+                {/* The frame captured moments ago, in the face step. */}
+                {photo ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- a
+                    // data: URL held in memory; next/image would need a loader
+                    // and would gain nothing over a 115px square.
+                    <img
+                        src={photo}
+                        alt=""
+                        className="h-115 w-115 self-center rad-20 object-cover"
+                    />
+                ) : (
+                    <div className="h-115 w-115 self-center rad-20 bg-[#F2F2F2]" />
+                )}
 
-                    {/* User name with badge */}
-                    <div className="flex items-center gap-12">
-                        <span className="fz-12 text-[#1D1D1D]">{userName}</span>
-                        <Image
-                            src={notVerifiedSvg}
-                            alt="not verified"
-                            className="w-15 h-15 object-contain"
-                        />
-                    </div>
-                </div>
-            </div>
-            {/* Bottom spacer */}
+                <p
+                    className="fz-16 self-center leading-none text-[#1D1D1D]"
+                    style={{ marginTop: rem(20) }}
+                >
+                    {fullName ? (
+                        <>
+                            <span className="font-normal text-[#707070]">{fullName}</span>
+                            <span className="font-medium">, Welcome !</span>
+                        </>
+                    ) : (
+                        <span className="font-medium">Welcome !</span>
+                    )}
+                </p>
 
-            <div className="h-1/2 flex items-end justify-center">
-                <div className="flex flex-col">
-                    {/* Privacy badge */}
-                    <div className="flex items-center flex-col justify-center gap-8 mb-12">
-                        <Image
-                            src={shieldSvg}
-                            alt="shield"
-                            className="w-15 h-15 object-contain"
-                        />
-                        <span className="fz-12 text-[#388CFF]">
-                            Your Privacy Is Completely Safe
-                        </span>
-                    </div>
+                <h1
+                    className="fz-30 self-start leading-none font-bold text-[#1D1D1D]"
+                    style={{ marginTop: rem(24) }}
+                >
+                    Your First Login Root !
+                </h1>
 
-                    {/* Start Verification button */}
-                    <button
-                        onClick={handleStart}
-                        className=" py-16 w-390 h-60 rad-20 bg-[#FCFCFC] border border-[#5D5C5D]/50 border-dashed text-[#5D5C5D] fz-16 font-medium mb-30"
+                <p
+                    className="fz-14 leading-normal font-medium text-[#1D1D1D]"
+                    style={{ marginTop: rem(20) }}
+                >
+                    You Are Required To Identity Verification &amp; Read And Agree To The
+                    Agreement And Terms Of Use.
+                </p>
+
+                <p
+                    className="fz-12 leading-normal font-normal text-[#707070]"
+                    style={{ marginTop: rem(12) }}
+                >
+                    Consent Constitutes A Full And Binding Commitment, And Shall Be
+                    Considered A Formal Legal Contract In Accordance With The Applicable
+                    Laws And Provisions. If You Do Not Agree, Please Refrain From
+                    Proceeding And Click <span className="font-bold">&ldquo;Disagree&rdquo;</span>.
+                </p>
+
+                {/* Inert — the terms document does not exist yet. */}
+                <div
+                    className="flex w-full flex-col items-center gap-6"
+                    style={{ marginTop: rem(40) }}
+                >
+                    <Image src={infoSvg} alt="" width={16} height={16} />
+                    <span
+                        aria-disabled
+                        className="fz-12 leading-none font-normal text-[#388CFF] opacity-60"
                     >
-                        Start Verification
-                    </button>
-
-                    {/* Later link */}
-                    <button
-                        onClick={handleLater}
-                        className="w-full text-center fz-14 text-[#388CFF] hover:underline mb-35"
-                    >
-                        Later, Use The Limited Version
-                    </button>
+                        Terms Of Services
+                    </span>
                 </div>
+
+                <button
+                    type="button"
+                    onClick={() => goTo('id-capture-front', 1)}
+                    className="hairline fz-16 h-56 w-full rad-28 leading-none font-normal text-[#707070] transition-colors hover:text-[#1D1D1D]"
+                    style={
+                        {
+                            marginTop: rem(48),
+                            '--hairline-radius': rem(28),
+                            '--hairline-color': '#C3C3C3',
+                            '--hairline-dash': '3 3',
+                        } as React.CSSProperties
+                    }
+                >
+                    Start Identity Verification
+                </button>
+
+                {/* Inert — refusing consent mid-challenge has no defined outcome. */}
+                <button
+                    type="button"
+                    disabled
+                    className="fz-14 w-full cursor-not-allowed leading-none font-medium text-[#1D1D1D] opacity-40"
+                    style={{ marginTop: rem(24) }}
+                >
+                    Disagree
+                </button>
             </div>
         </div>
     );

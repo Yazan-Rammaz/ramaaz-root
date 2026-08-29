@@ -1,27 +1,33 @@
 import type { IKycService } from './kycService.interface';
 import { HttpKycService } from './httpKycService';
-import { MockKycService } from './mockKycService';
 
 let instance: IKycService | null = null;
 
 /**
- * THE switch between "screens only" and "wired to the real backend".
+ * THE KYC service.
  *
- * Right now it returns the mock: the backend contract for admin KYC is not
- * agreed yet (SCENARIOS.md lists exactly what is needed), while every screen is
- * finished and needs walking through. `MockKycService` satisfies the whole
- * `IKycService` contract locally, so the flow runs end-to-end with no network.
+ * One implementation, talking to the real KYC Worker. There is deliberately no
+ * mock:
  *
- * ── To go live, change ONE line ─────────────────────────────────────────────
- *     instance = new HttpKycService();
+ *  - A mock always says the ID is readable and the faces match, so it can prove
+ *    the screens render but never the thing most likely to disappoint — how a
+ *    real Syrian or Turkish ID actually reads through Textract.
+ *  - Worse, it makes a broken integration look healthy. A flow that "passes"
+ *    against invented data is indistinguishable from one that works.
  *
- * `HttpKycService` is the domain layer over the transport; it still needs its
- * `api.kyc.*` calls pointed at the real endpoints (SCENARIOS.md §"What I need
- * from you"). Both classes implement the same interface, so no screen changes.
+ * Three of the Worker's endpoints — `analyze-id`, `liveness` and
+ * `compare-face` — need no auth, no backend and no credentials, so the whole
+ * capture path is exercisable against real AWS today. The calls that reach the
+ * product backend (sessions, submit, reverify) will fail until that backend
+ * exists, and failing is the honest outcome: it says what is actually missing
+ * instead of hiding it behind a fixture.
+ *
+ * Requests go to our own origin at `/api/kyc/*` and are forwarded server-side
+ * by `app/api/kyc/[...path]/route.ts`, which attaches the credential. The
+ * browser never holds a token (AGENTS.md §2).
  */
 export function createKycService(): IKycService {
-    if (instance) return instance;
-    instance = new MockKycService();
+    if (!instance) instance = new HttpKycService();
     return instance;
 }
 
@@ -31,4 +37,4 @@ export function __setKycService(service: IKycService | null) {
 }
 
 export type { IKycService } from './kycService.interface';
-export { HttpKycService, MockKycService };
+export { HttpKycService };

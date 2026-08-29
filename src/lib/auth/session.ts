@@ -18,9 +18,19 @@ export type SessionUser = {
   /** Unmasked phone from the session payload. */
   phone?: string;
   privateCode?: string;
-  /** Must pass a live face check against the stored photo before the dashboard. */
+  /**
+   * ── Both are vestigial ──────────────────────────────────────────────────
+   * They described the previous protocol, where identity was proven AFTER
+   * sign-in and a session could exist with the checks still outstanding. The
+   * face and ID steps now run inside the challenge, before a token exists, so
+   * a session means they are already done and `stage` is what reports them
+   * while they are not.
+   *
+   * Kept, defaulting to false, only because the KYC screens still read them
+   * while they are ported onto the challenge (phase 2). Do not add new
+   * branches on these.
+   */
   requiresFaceVerification: boolean;
-  /** Has never completed ID enrolment — drives the full KYC flow. */
   requiresKyc: boolean;
 };
 
@@ -50,8 +60,8 @@ export function toSessionUser(u: WireUser): SessionUser {
     role: u.is_root ? "super_admin" : "agent",
     phone: u.phone,
     privateCode: u.private_code,
-    requiresFaceVerification: u.requires_face_verification,
-    requiresKyc: u.requires_kyc,
+    requiresFaceVerification: u.requires_face_verification ?? false,
+    requiresKyc: u.requires_kyc ?? false,
   };
 }
 

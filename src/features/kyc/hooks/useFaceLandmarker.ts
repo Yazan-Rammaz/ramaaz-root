@@ -38,7 +38,7 @@ let loadPromise: Promise<import('@mediapipe/tasks-vision').FaceLandmarker> | nul
 const MEDIAPIPE_BASE_URL = '/vendor/mediapipe';
 
 const MODEL_ASSET_PATH =
-    'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+    '/vendor/mediapipe/face_landmarker.task';
 
 /**
  * Fire-and-forget: starts the model download immediately.

@@ -41,11 +41,16 @@ export const PATHS = {
     status: '/api/kyc/status',
     current: '/api/kyc/current',
     submit: '/api/kyc/submit',
-    complete: '/api/kyc/complete',
     webhookNestjs: '/api/kyc/webhook-nestjs',
-    verifyVideo: '/api/kyc/verify-video',
     reverifyStart: '/api/kyc/reverify/start',
     reverifyVerify: '/api/kyc/reverify/verify',
+    /**
+     * Document enrolment. NOT `submit` above — that is RDB's route, and it
+     * needs a KYC session, a media-upload endpoint and a countries table, none
+     * of which exist on root (all three answer 404). `enroll` sends the images
+     * inline in one call the Worker signs. See kyc-submit-contract.md.
+     */
+    enroll: '/api/kyc/enroll',
 } as const;
 
 async function request<T>(
@@ -133,11 +138,10 @@ export const api = {
         status: () => get<StatusResponse>(PATHS.status),
         current: <T>() => get<T>(PATHS.current),
         submit: (body: unknown) => post<SubmitResponse>(PATHS.submit, body),
-        completeVideo: <T>(body: unknown) => post<T>(PATHS.complete, body),
         webhookNestjs: <T>(body: unknown) => post<T>(PATHS.webhookNestjs, body),
-        verifyVideo: <T>(body: unknown) => post<T>(PATHS.verifyVideo, body),
         reverifyStart: <T>(body: unknown) => post<T>(PATHS.reverifyStart, body),
         reverifyVerify: <T>(body: unknown) => post<T>(PATHS.reverifyVerify, body),
+        enroll: <T>(body: unknown) => post<T>(PATHS.enroll, body),
     },
 
     /**

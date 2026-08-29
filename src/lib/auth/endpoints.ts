@@ -1,16 +1,37 @@
 import { z } from "zod";
 
 /**
- * THE auth contract — every path, request and response shape the login flow
+ * THE auth contract — every path, request and response shape the sign-in flow
  * uses, in one place.
  *
- * Base URL is `NEST_API_URL` (staging: http://staging-backend.ramaaz.store).
+ * Base URL is `NEST_API_URL` (staging: https://staging-backend.ramaaz.store).
  *
- * ── Two generations live here ───────────────────────────────────────────────
- * ✅ MIGRATED  — confirmed against the real backend, snake_case wire format.
- * ⏳ PENDING   — still the shapes of the deleted local `root-backend`. They are
- *               camelCase and almost certainly wrong; each is replaced as its
- *               real endpoint arrives.
+ * ── The protocol, in one picture ────────────────────────────────────────────
+ * Sign-in is ONE state machine with two paths through it. The server decides
+ * which, and says so in `stage` on every response:
+ *
+ *   FIRST LOGIN   link → private-code → face → id-document → id-info → device
+ *   LATER LOGINS  link → device → face
+ *
+ * See `root-enrollment.md` in the workspace root for the authoritative writeup.
+ *
+ * ── Four rules that hold for every step ─────────────────────────────────────
+ *  1. ONE challenge token for the whole attempt — it does NOT rotate. Every
+ *     response echoes the same value. It is a signed JWT whose `sub` is the
+ *     administrator's id, but treat it as opaque: the row behind it decides the
+ *     stage, so a token that verifies is not a token that works.
+ *  2. Branch on `stage`, never on a step counter — a check switched off in a
+ *     deployment simply never reports its stage, and a client walking a
+ *     hard-coded list would send a request the server refuses.
+ *  3. The whole sequence expires (AUTH_CHALLENGE_TTL, 10 min) and tolerates 5
+ *     failed attempts across ALL steps combined. Past either, restart at /link.
+ *  4. Order is enforced server-side. A step sent early answers CHALLENGE_INVALID
+ *     with no hint about what was expected instead.
+ *
+ * ── Status against staging (probed 2026-08-26) ──────────────────────────────
+ *  ✅ live      /v1/auth/link · /private-code · /face · /device/options · /device
+ *  ❌ 404       /v1/auth/identity-document · /v1/auth/identity-info
+ *  ⚰️ removed   /v1/registration/*  — the old password+OTP+PIN flow is GONE.
  *
  * No `server-only` here on purpose: these are paths, schemas and types with no
  * secrets, and edge middleware imports them too.
@@ -19,32 +40,89 @@ import { z } from "zod";
 /* ─────────────────────────── paths ─────────────────────────── */
 
 export const AUTH_PATHS = {
-  /** ✅ Private code + password → OTP challenge. Collapses what used to be two
-   *  calls (`/auth/identify` then `/auth/login`) into one. */
-  registration: "/v1/registration",
-  /** ✅ WhatsApp OTP code → next stage (PASS_CODE_REQUIRED). */
-  registrationOtp: "/v1/registration/otp",
+  /**
+   * ✅ Step 1. Opens a challenge from the access link's token. Takes
+   * `{ token, device_label? }` — the token goes in the BODY, never in a URL of
+   * our own: a path segment lands in access logs, proxy logs and history.
+   *
+   * Refusals (unknown / revoked / expired link, address range, country,
+   * suspended account) are deliberately indistinguishable and all answer
+   * UNAUTHENTICATED. Do not try to tell them apart.
+   */
+  link: "/v1/auth/link",
 
-  /** ✅ Re-send the WhatsApp OTP. Takes `{ challenge_token }`. Path confirmed
-   *  against staging; response shape still unverified. */
-  resend: "/v1/registration/otp/resend",
-  /** ✅ Store the chosen passcode. Takes `{ challenge_token, pass_code }` —
-   *  note `pass_code`, and the HYPHEN in the path. Both confirmed against
-   *  staging; response shape still unverified. */
-  setPasscode: "/v1/registration/pass-code",
+  /**
+   * ✅ Step 2. The code the administrator PULLS over WhatsApp by messaging the
+   * trigger phrase from their registered handset — there is no endpoint that
+   * sends it, and deliberately is not one: a code the console could request on
+   * someone's behalf would prove nothing about who holds the link.
+   *
+   * Consequence for the UI: there is NO RESEND CALL. They message again.
+   */
+  privateCode: "/v1/auth/private-code",
 
-  /** ✅ Returning-user login (private code + password), as opposed to the
-   *  invitation-based /v1/registration flow. Exists — it answers
-   *  INVALID_CREDENTIALS — but its request/response shapes are unknown. */
-  login: "/v1/auth/login",
-  /** ✅ The authoritative session read. GET, Bearer access token. Exists;
-   *  response shape unverified. */
+  /**
+   * ✅ Face check. Runs on EVERY sign-in — step 4 on a first login, and the
+   * final step before COMPLETED on every later one.
+   *
+   * ⚠️ The verifier is a stub today: it accepts any well-formed `evidence`
+   * object and returns success. Build the capture for real, but never present
+   * the result to anyone as a verified identity.
+   */
+  face: "/v1/auth/face",
+
+  /**
+   * First-login ID enrolment — and MID-MIGRATION, so read this before sending
+   * anything.
+   *
+   * ⚠️ The base64 payload this accepts today is going away. `root-enrollment.md`
+   * §5: *"do not build against the payload below… that path is going away."*
+   * It will take `evidence: { step_token }`, minted by `POST /v1/kyc/submit`,
+   * exactly as `/auth/face` does — the document is a photograph of a government
+   * ID with a face on it, so every argument for keeping the selfie out of the
+   * auth backend applies to it with more force, not less.
+   *
+   * It has not moved yet only because `/v1/kyc/submit` is not built: the
+   * backend is waiting on the KYC side's payload schema. Until then the stub
+   * accepts what it always did, and we send it — narrowly, so the sequence can
+   * be walked to the device step. See `StubDocumentEvidence` in
+   * `features/auth/actions.ts` for the swap.
+   *
+   * There is deliberately no companion `identity-info`. That existed when
+   * the protocol expected the administrator to TYPE their ID details as a
+   * separate step; OCR removed it, so no second user action was left for a
+   * second stage to wait on. See docs/kyc/backend.md, decision 7.
+   */
+  identityDocument: "/v1/auth/identity-document",
+
+  /**
+   * ✅ Ask for the WebAuthn ceremony. Answers `{ mode, publicKey }`, where
+   * `mode` ("register" | "authenticate") decides which browser call to make.
+   * The SERVER decides that from what the link has already enrolled — never
+   * pick it client-side, that is what stops a stranger asking to "register" on
+   * a link that is already bound.
+   *
+   * A `label` sent here is accepted and IGNORED; send it to `device` instead.
+   */
+  deviceOptions: "/v1/auth/device/options",
+  /**
+   * ✅ Submit the ceremony's answer, plus the `label` that IS stored and shown
+   * in the administrator's credential list.
+   *
+   * On a first login this binds the link to this passkey permanently — the
+   * trusted device. From then on the link opens from this device and no other,
+   * and a lost device is NOT self-recoverable: the only path is another root
+   * administrator issuing a fresh link.
+   */
+  device: "/v1/auth/device",
+
+  /** ✅ The authoritative session read. GET, Bearer access token. */
   me: "/v1/me",
 
   /**
    * ✅ Silent refresh. Takes `{ refresh_token }` in the BODY (no bearer) and
    * answers 200 with `access_token` at the TOP level — not nested under
-   * `tokens` the way /registration/pass-code is.
+   * `tokens` the way the sign-in responses are.
    *
    * ⚠️ Single-use, and rotated on every call. Replaying a spent refresh token
    * returns TOKEN_REUSED and the backend KILLS THE WHOLE SESSION — it reads a
@@ -54,12 +132,6 @@ export const AUTH_PATHS = {
   refresh: "/v1/auth/refresh",
   /** ✅ Best-effort server-side revoke. Bearer access token. */
   logout: "/v1/auth/logout",
-
-  /** ⏳ Mid-login passcode entry (unlock token, no session yet). Not found on
-   *  staging — belongs to the returning-user flow, still to be provided. */
-  passcodeLogin: "/auth/passcode-login",
-  /** ⏳ Passcode entry on a device with a live refresh cookie. */
-  passcode: "/auth/passcode",
 } as const;
 
 /* ─────────────────────── error envelope ─────────────────────── */
@@ -67,12 +139,13 @@ export const AUTH_PATHS = {
 /**
  * Every error response from this backend, confirmed against staging:
  *
- *   401 { error: { code: "UNAUTHENTICATED",    message, correlation_id } }
- *   422 { error: { code: "VALIDATION_FAILED",  message, fields, correlation_id } }
+ *   401 { error: { code: "UNAUTHENTICATED",   message, correlation_id } }
+ *   404 { error: { code: "NOT_FOUND",         message, correlation_id } }
+ *   422 { error: { code: "VALIDATION_FAILED", message, fields, correlation_id } }
  *
  * The message is nested under `error`, NOT top-level — `lib/api/server.ts`
  * reads it via `errorMessage()`. `correlation_id` is what support needs to
- * trace a failed login in the backend's logs.
+ * trace a failed sign-in in the backend's logs, so surface it on hard failures.
  */
 export const apiErrorSchema = z.object({
   error: z.object({
@@ -85,14 +158,30 @@ export const apiErrorSchema = z.object({
 });
 export type ApiErrorBody = z.infer<typeof apiErrorSchema>;
 
-/** Error codes seen on staging. */
+/** Error codes worth handling by name. */
 export const ERROR_CODES = {
+  /**
+   * The link is unknown, revoked, expired, outside its address range or
+   * country — or the account is suspended. ONE message covers all of them,
+   * because the server gives one. Never guess which condition tripped.
+   */
   unauthenticated: "UNAUTHENTICATED",
+  /** A missing field, or `evidence` that is not an object with ≥1 key. */
   validationFailed: "VALIDATION_FAILED",
-  /** Wrong private code / password / pass code — the user can just retry. */
-  invalidCredentials: "INVALID_CREDENTIALS",
-  /** The registration challenge expired or was consumed — restart sign-in. */
+  /**
+   * Expired, already used, burned by too many failures, or a step sent out of
+   * order. Restart at /auth/link — do NOT retry the step.
+   */
   challengeInvalid: "CHALLENGE_INVALID",
+  /** Wrong private code — costs an attempt, but the user can simply retry. */
+  invalidCredentials: "INVALID_CREDENTIALS",
+  /** Private-code requests from one number: five per fifteen minutes. */
+  rateLimited: "RATE_LIMITED",
+  /**
+   * The WhatsApp or one-time-code gateway is down. Say the SERVICE is
+   * unavailable — never that the code was wrong. Retrying is safe.
+   */
+  serviceUnavailable: "SERVICE_UNAVAILABLE",
   /** Access token past its `expires_at` — refresh and retry. */
   tokenExpired: "TOKEN_EXPIRED",
   /** A spent refresh token was replayed; the backend ENDS THE SESSION. */
@@ -100,90 +189,148 @@ export const ERROR_CODES = {
   notFound: "NOT_FOUND",
 } as const;
 
-/* ─────────────────── ✅ POST /v1/registration ─────────────────── */
+/* ──────────────────────────── stages ──────────────────────────── */
 
 /**
- * The wire format is snake_case — unlike the old local backend. Request and
- * response schemas keep that shape exactly; nothing is renamed on the way out,
- * and the response is mapped to camelCase only after parsing.
+ * The server's own state-machine positions. These are the ONLY thing that
+ * decides which screen comes next.
+ *
+ * ⚠️ Pinned backend-side by `TestAPIStageNames` in
+ * `internal/service/sequence_test.go`. A rename there is a breaking change for
+ * every screen built from this contract.
  */
-export const registrationRequestSchema = z.object({
-  private_code: z.string(),
-  password: z.string(),
-  /** Identifies the device this login is bound to. */
-  device_label: z.string(),
-  /** Pre-issued token supplied with the credentials (see `getRegistrationToken`). */
-  token: z.string(),
-});
-export type RegistrationRequest = z.infer<typeof registrationRequestSchema>;
-
-/**
- * OTP delivery metadata. Everything the verify screen needs to describe the
- * message that was just sent, without the frontend guessing any of it.
- */
-export const otpChallengeSchema = z.object({
-  /** Masked destination, e.g. "•••••••••540". Safe to display. */
-  phone: z.string(),
-  channel: z.string(),
-  /** How many digits the code has — drives the input box count. */
-  code_length: z.number().int().positive(),
-  expires_at: z.string(),
-  /** Seconds until the code dies. */
-  expires_in: z.number().int(),
-  /** Seconds before "resend" may be pressed — drives the resend timer. */
-  resend_available_in: z.number().int(),
-  resends_remaining: z.number().int(),
-  delivered: z.boolean(),
-});
-
-/**
- * The envelope every step of the registration flow returns: where you are now,
- * the token that proves it, and when that token dies. Each step extends it with
- * whatever else that step produces.
- */
-const challengeEnvelope = z.object({
-  /** Open string, not an enum: an unrecognised stage should parse and then be
-   *  rejected in one explicit place, not fail as a confusing schema error. */
-  stage: z.string(),
-  /** Re-issued at every step — always store the one just returned, never the
-   *  one you sent, so a rotation can't silently invalidate the flow. */
-  challenge_token: z.string(),
+export const STAGES = {
+  /** Message WhatsApp, then type the code that comes back. */
+  privateCode: "PRIVATE_CODE_REQUIRED",
+  /** Live face capture. Both first and later logins. */
+  face: "FACE_REQUIRED",
   /**
-   * Plain string, NOT `z.string().datetime()`. Precision varies per endpoint —
-   * nanoseconds from /registration ("…58.56108563Z"), milliseconds from
-   * /registration/otp ("…58.556Z") — and zod's datetime() rejects more than
-   * three fractional digits, which would fail every single login.
+   * First login only — the whole ID enrolment: capture, OCR, confirm, submit.
+   *
+   * One stage, not two. `ID_INFO_REQUIRED` is gone because a stage exists to
+   * say "the server is blocked until you send something", and once the summary
+   * has been confirmed there is nothing further to send.
    */
-  challenge_expires_at: z.string(),
+  idDocument: "ID_DOCUMENT_REQUIRED",
+  /** WebAuthn ceremony: enrol this device, or prove it. */
+  device: "DEVICE_REQUIRED",
+  /** Signed in; `tokens` is present on this response and nowhere else. */
+  completed: "COMPLETED",
+} as const;
+
+export type Stage = (typeof STAGES)[keyof typeof STAGES];
+
+/**
+ * Stage → the screen that answers it. THE routing table: every step handler
+ * returns here rather than naming its own successor, so the server stays in
+ * charge of the order (rule 2 above) and a disabled check simply skips.
+ *
+ * COMPLETED is absent on purpose — it is not a screen, it is the end, and it
+ * is handled explicitly where tokens are stored.
+ */
+export const STAGE_ROUTES: Record<string, string> = {
+  [STAGES.privateCode]: "/login",
+
+  /**
+   * ⚠️ Three stages, ONE route — and this is load-bearing, not tidiness.
+   *
+   * The face captured at FACE_REQUIRED is reused when the ID is compared
+   * against it, so the administrator never captures their face twice. That
+   * frame is a ~300 KB data URL living in React state: far too large for a
+   * cookie, and biometric data we will not put in browser storage.
+   *
+   * So it survives exactly as long as the React tree does. Give these stages
+   * separate URLs and navigating between them unmounts everything and drops the
+   * frame — silently, with the only symptom being a second face capture nobody
+   * asked for.
+   *
+   * `/login/identity` therefore hosts the whole identity flow and picks its
+   * entry step from the stage.
+   */
+  [STAGES.face]: "/login/identity",
+  [STAGES.idDocument]: "/login/identity",
+
+  [STAGES.device]: "/login/device",
+};
+
+/* ─────────────────── POST /v1/auth/link ─────────────────── */
+
+/**
+ * The access link's token — the last path segment of the link the
+ * administrator was issued.
+ *
+ * Lives here rather than in `features/auth/schema.ts` because `lib/auth/link.ts`
+ * is what validates it, and `lib` must not import from `features`.
+ */
+export const linkTokenSchema = z.object({
+  token: z.string().min(16, "That link is not valid").max(256),
 });
+export type LinkTokenInput = z.infer<typeof linkTokenSchema>;
 
-export const registrationResponseSchema = challengeEnvelope.extend({
-  otp: otpChallengeSchema,
+export const linkRequestSchema = z.object({
+  /** The last path segment of the access link. Sent in the body, never a URL. */
+  token: z.string(),
+  /** Optional. Names the SESSION, not the passkey — the passkey label is sent
+   *  to /auth/device instead. */
+  device_label: z.string().optional(),
 });
-export type RegistrationResponse = z.infer<typeof registrationResponseSchema>;
+export type LinkRequest = z.infer<typeof linkRequestSchema>;
 
-/* ───────────────── ✅ POST /v1/registration/otp ───────────────── */
+/* ─────────────── POST /v1/auth/private-code ─────────────── */
 
-export const otpVerifyRequestSchema = z.object({
+export const privateCodeRequestSchema = z.object({
   challenge_token: z.string(),
   code: z.string(),
 });
-export type OtpVerifyRequest = z.infer<typeof otpVerifyRequestSchema>;
+export type PrivateCodeRequest = z.infer<typeof privateCodeRequestSchema>;
 
-/** Same envelope, no extra payload — the stage is the whole answer. */
-export const otpVerifyResponseSchema = challengeEnvelope;
-export type OtpVerifyResponse = z.infer<typeof otpVerifyResponseSchema>;
+/* ───────── POST /v1/auth/{face,identity-document,identity-info} ───────── */
 
-/* ──────────────────────────── stages ──────────────────────────── */
+/**
+ * The three stub-verified steps share one request shape.
+ *
+ * `evidence` is free-form: the server checks ONLY that it is an object with at
+ * least one key, and passes whatever is inside to the future provider
+ * verbatim. So the field names below are a SUGGESTION, not a contract — settle
+ * them with whoever implements the providers before hard-coding them.
+ */
+export const evidenceRequestSchema = z.object({
+  challenge_token: z.string(),
+  evidence: z.record(z.string(), z.unknown()),
+});
+export type EvidenceRequest = z.infer<typeof evidenceRequestSchema>;
 
-/** After /registration — a code has been sent, enter it. */
-export const STAGE_OTP_REQUIRED = "OTP_REQUIRED";
-/** After /registration/otp — choose a passcode. */
-export const STAGE_PASS_CODE_REQUIRED = "PASS_CODE_REQUIRED";
-/** After /registration/pass-code — signed in; tokens issued. */
-export const STAGE_COMPLETED = "COMPLETED";
+/* ──────────────── POST /v1/auth/device/options ──────────────── */
 
-/* ─────────────── ✅ POST /v1/registration/pass-code ─────────────── */
+/**
+ * `publicKey` is deliberately NOT parsed field-by-field. It is a WebAuthn
+ * options object that the browser validates far more strictly than we could,
+ * and re-describing it here would mean this file breaking every time the spec
+ * or the server's algorithm list moves. `mode` is the part we branch on, so
+ * that is the part that is checked.
+ *
+ * Its binary fields (`challenge`, `user.id`, `excludeCredentials[].id`,
+ * `allowCredentials[].id`) arrive as base64url STRINGS and must become
+ * ArrayBuffers before `navigator.credentials.*` will accept them — the single
+ * most common integration failure on this endpoint. See lib/auth/webauthn.ts.
+ */
+export const deviceOptionsResponseSchema = z.object({
+  /** "register" → credentials.create(); "authenticate" → credentials.get(). */
+  mode: z.enum(["register", "authenticate"]),
+  publicKey: z.record(z.string(), z.unknown()),
+});
+export type DeviceOptionsResponse = z.infer<typeof deviceOptionsResponseSchema>;
+
+export const deviceRequestSchema = z.object({
+  challenge_token: z.string(),
+  /** Stored, and shown to the administrator in their credential list. */
+  label: z.string().optional(),
+  /** `PublicKeyCredential.toJSON()` output, passed through untouched. */
+  credential: z.record(z.string(), z.unknown()),
+});
+export type DeviceRequest = z.infer<typeof deviceRequestSchema>;
+
+/* ─────────────────────── step responses ─────────────────────── */
 
 /**
  * The signed-in admin, as the backend describes them.
@@ -192,6 +339,13 @@ export const STAGE_COMPLETED = "COMPLETED";
  * privilege signal, and `full_name` is one string — both are mapped in
  * `lib/auth/session.ts` rather than reshaped here, so this stays a faithful
  * record of the wire format.
+ *
+ * Almost everything is optional because the same shape is returned by three
+ * endpoints with three different levels of detail: the COMPLETED response is
+ * the fullest, /v1/auth/refresh is close behind, and GET /v1/me returns a
+ * SPARSE projection where absent fields come back as Go zero values (`""`,
+ * "0001-01-01T00:00:00Z"). Requiring any of them made getSession() throw on
+ * every request, which redirected every protected page to /login forever.
  */
 export const wireUserSchema = z.object({
   id: z.string(),
@@ -201,31 +355,27 @@ export const wireUserSchema = z.object({
   is_root: z.boolean(),
 
   /**
-   * ── Only fully populated by the sign-in responses ────────────────────────
-   * GET /v1/me returns a SPARSE projection of the same object: `phone` is
-   * absent entirely and the rest come back as Go zero values (`""`,
-   * "0001-01-01T00:00:00Z"). They are optional so a session read does not
-   * explode — requiring `phone` here made getSession() throw on every request,
-   * which redirected every protected page to /login forever.
+   * ⚠️ Stays `false` FOREVER on a root account — there is no PIN in this
+   * protocol; the passkey replaced it. A UI that reads this as "setup
+   * incomplete" shows a permanent setup prompt to somebody fully enrolled.
    */
+  has_pass_code: z.boolean().optional(),
+
   private_code: z.string().optional(),
-  /** Unmasked, unlike the masked `otp.phone` shown mid-flow. Absent from /v1/me. */
   phone: z.string().optional(),
   locale: z.string().optional(),
   timezone: z.string().optional(),
   created_at: z.string().optional(),
-  /** Only sent by /v1/auth/refresh — absent from the sign-in responses. */
   last_login_at: z.string().optional(),
-  /** ⚠️ Unreliable from /v1/me — it reported `false` for an admin who had just
-   *  set one. Trust it only from a sign-in response. */
-  has_pass_code: z.boolean(),
+
   /**
-   * The two flags the identity step has been waiting for (SCENARIOS.md §4c):
-   * whether this admin must pass a live face check, and whether they still
-   * need full ID enrolment.
+   * Left over from the previous contract, where identity was proven AFTER
+   * sign-in. It no longer decides anything: the face and ID steps now run
+   * INSIDE the challenge, before a token exists, and `stage` is what reports
+   * them. Optional so a payload without them still parses.
    */
-  requires_face_verification: z.boolean(),
-  requires_kyc: z.boolean(),
+  requires_face_verification: z.boolean().optional(),
+  requires_kyc: z.boolean().optional(),
 });
 export type WireUser = z.infer<typeof wireUserSchema>;
 
@@ -241,51 +391,40 @@ export const wireTokensSchema = z.object({
   expires_in: z.number().int(),
   user: wireUserSchema,
 });
+export type WireTokens = z.infer<typeof wireTokensSchema>;
 
-/** Tokens are nested under `tokens` here — unlike /v1/auth/refresh, which
- *  returns `access_token` at the top level. */
-export const passCodeResponseSchema = z.object({
+/**
+ * ONE response shape for every step of the flow.
+ *
+ * Deliberately not a discriminated union on `stage`: an unrecognised stage
+ * must PARSE and then be rejected in one explicit place (`applyStage`), rather
+ * than surfacing as a confusing schema error three layers down.
+ *
+ * `challenge_token` is optional only because COMPLETED omits it — the flow is
+ * over and there is nothing left to prove. `tokens` is present on COMPLETED
+ * and nowhere else.
+ */
+export const stepResponseSchema = z.object({
   stage: z.string(),
-  tokens: wireTokensSchema,
+  challenge_token: z.string().optional(),
+  /**
+   * Stable for the whole attempt, and NOT a credential — which is exactly why
+   * it exists separately from the token. It is what identifies this sign-in to
+   * the KYC Worker, so it travels in request bodies and appears in logs, and
+   * the token must never be used for that.
+   */
+  challenge_id: z.string().optional(),
+  /**
+   * Plain string, NOT `z.string().datetime()`. Precision varies per endpoint —
+   * nanoseconds from some, milliseconds from others — and zod's datetime()
+   * rejects more than three fractional digits, which would fail every sign-in.
+   */
+  challenge_expires_at: z.string().optional(),
+  tokens: wireTokensSchema.optional(),
 });
-export type PassCodeResponse = z.infer<typeof passCodeResponseSchema>;
+export type StepResponse = z.infer<typeof stepResponseSchema>;
 
-/* ─────────────────── ✅ POST /v1/auth/login ─────────────────── */
-
-/**
- * Returning-user sign-in — one call, no OTP. Distinct from the invitation-based
- * /v1/registration/* flow, which is first-time setup only.
- *
- * `secret` is the 6-DIGIT PASS CODE, not the password: staging accepts the
- * value set via /v1/registration/pass-code and answers COMPLETED, and the
- * password schema requires 8+ characters, so a password could not be this
- * value. `device_label` is accepted empty here.
- */
-export const loginRequestSchema = z.object({
-  private_code: z.string(),
-  secret: z.string(),
-  device_label: z.string(),
-});
-export type LoginRequest = z.infer<typeof loginRequestSchema>;
-
-/** Identical envelope to /registration/pass-code. */
-export const loginResponseSchema = passCodeResponseSchema;
-
-/* ─────────────────── ✅ POST /v1/auth/refresh ─────────────────── */
-
-/**
- * Exactly the token block the sign-in responses nest under `tokens` — but
- * returned at the TOP level here, which is the one shape difference between
- * this endpoint and the others.
- *
- * Its `user` is FULLY populated (phone, private_code, locale, …), unlike the
- * sparse projection GET /v1/me returns. So a refresh is a more trustworthy
- * source of the KYC flags than the session read is.
- */
-export const refreshResponseSchema = wireTokensSchema;
-export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
-
-/* ────────────────────── ✅ GET /v1/me ────────────────────── */
+/* ────────────────────── GET /v1/me ────────────────────── */
 
 /**
  * The session read. Wrapped in `user` — and it also carries `projects`, which
@@ -299,6 +438,18 @@ export const meResponseSchema = z.object({
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
 
+/* ─────────────────── POST /v1/auth/refresh ─────────────────── */
+
+/**
+ * Exactly the token block the sign-in response nests under `tokens` — but
+ * returned at the TOP level here, which is the one shape difference between
+ * this endpoint and the others.
+ */
+export const refreshResponseSchema = wireTokensSchema;
+export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
+
+/* ──────────────────────── lifetimes ──────────────────────── */
+
 /**
  * How long to keep the refresh cookie.
  *
@@ -309,7 +460,7 @@ export type MeResponse = z.infer<typeof meResponseSchema>;
  * So the cookie should outlive nothing but the browser's own ceiling: 400 days
  * is the maximum a cookie may declare (browsers clamp anything longer), and
  * anything shorter would sign the admin out while their token was still
- * perfectly valid — which is what the previous 30-day guess did.
+ * perfectly valid.
  *
  * A session therefore ends in exactly three ways: an explicit sign-out, a
  * replayed refresh token (reuse detection kills the whole family — see
@@ -317,25 +468,34 @@ export type MeResponse = z.infer<typeof meResponseSchema>;
  */
 export const REFRESH_MAX_AGE = 60 * 60 * 24 * 400;
 
-/* ─────────────────── ⏳ awaiting real endpoints ─────────────────── */
+/**
+ * How long the whole challenge lives, per `AUTH_CHALLENGE_TTL` backend-side.
+ * Used only as the flow cookie's ceiling — `challenge_expires_at` from the
+ * server is the authoritative deadline and is what the countdown reads.
+ */
+export const CHALLENGE_MAX_AGE = 10 * 60;
 
-/** What every session-opening endpoint returns. Shape UNVERIFIED. */
+/**
+ * `ROOT_PRIVATE_CODE_TTL`. Short by design, and SHORTER THAN WHATSAPP DELIVERY
+ * OFTEN TAKES — so the private-code screen shows a live countdown and keeps
+ * the "message the number again" instruction permanently on screen rather than
+ * in a one-time toast. There is no resend endpoint to offer instead.
+ */
+export const PRIVATE_CODE_TTL = 50;
+
+/**
+ * The token pair, in the shape the cookie layer wants it — camelCase, with
+ * both lifetimes resolved to seconds.
+ *
+ * Not a wire shape: it is what `lib/auth/refresh.ts` hands to middleware, which
+ * runs on the edge and must not know that the access token's life comes from
+ * the response while the refresh token's comes from REFRESH_MAX_AGE.
+ */
 export type AuthTokens = {
   accessToken: string;
   refreshToken: string;
+  /** seconds */
   accessMaxAge: number;
+  /** seconds */
   refreshMaxAge: number;
 };
-
-/** `resend` — a refreshed OTP challenge. Shape UNVERIFIED. */
-export type ChallengeResponse = {
-  challengeToken: string;
-};
-
-/**
- * `verify` — the OTP was right, and the passcode step ALWAYS follows: set one
- * on a first login, enter the existing one otherwise. Shape UNVERIFIED.
- */
-export type VerifyResponse =
-  | { stage: "set-passcode"; setupToken: string }
-  | { stage: "enter-passcode"; unlockToken: string };

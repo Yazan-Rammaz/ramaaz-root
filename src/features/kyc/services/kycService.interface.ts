@@ -127,8 +127,6 @@ export interface IKycService {
     ): Promise<AnalyzeIdResult>;
     captureID(imageData: string, side: 'front' | 'back'): Promise<Partial<IDDocument>>;
     matchFaceToID(faceData: string, idData: string): Promise<MatchResult>;
-    startVideoCall(sessionId: string): Promise<{ streamUrl: string }>;
-    endVideoCall(sessionId: string): Promise<{ success: boolean }>;
     sendWebhook(
         userId: string,
         status: 'verified' | 'rejected',
@@ -138,13 +136,6 @@ export interface IKycService {
     submitVerification(
         payload: SubmitVerificationPayload,
     ): Promise<{ success: boolean; kycRequest?: KycRequest }>;
-    completeVideo(payload: {
-        kycSessionId: string;
-        videoCallUrl: string;
-        livenessConfidence: number;
-        videoVsIdScore: number;
-    }): Promise<{ success: boolean; kycRequest?: KycRequest }>;
-    verifyVideo(payload: VerifyVideoPayload): Promise<VerifyVideoResult>;
 
     /**
      * Face re-verification (step-up). Open an AWS liveness session bound to a
@@ -157,6 +148,13 @@ export interface IKycService {
      * The pass/fail decision is made ONLY in NestJS.
      */
     submitReverify(payload: ReverifyPayload): Promise<ReverifyResult>;
+
+    /**
+     * First-login document enrolment. The Worker re-reads the document,
+     * re-compares the faces, and commits the result to the backend over its own
+     * signed channel; what comes back is the backend's verdict.
+     */
+    enrollDocument(payload: EnrollPayload): Promise<EnrollResult>;
 }
 
 export interface ReverifySession {
@@ -173,6 +171,48 @@ export interface ReverifyPayload {
     liveFaceImageData?: string;
 }
 
+/**
+ * What the browser sends to enrol a document — images and a correlation id, and
+ * nothing else.
+ *
+ * It deliberately does NOT carry the OCR result or the match score, even though
+ * this client already holds both from `analyzeId` and `compareFace`. The Worker
+ * re-derives them on the exact bytes it is about to sign, because a score a
+ * client can choose is a score an attacker can choose — and the Worker's
+ * signature is what makes the backend trust it. See kyc-submit-contract.md.
+ */
+export interface EnrollPayload {
+    /** The 26-char ULID from the sign-in challenge. Not the challenge token. */
+    challengeId: string;
+    /** Data URLs. `backImage` is absent for a passport — one page. */
+    frontImage: string;
+    backImage?: string;
+    /** The frame captured at the face step, reused rather than re-shot. */
+    selfieImage: string;
+    /** A hint only. Textract's own reading wins on the Worker side. */
+    documentType?: string;
+}
+
+/**
+ * The backend's verdict, relayed by the Worker.
+ *
+ * `stepToken` is the whole point: present on a pass, and the only thing that
+ * may be posted to `/auth/identity-document`. Its absence is the failure.
+ */
+export interface EnrollResult {
+    status: 'passed' | 'failed' | 'error';
+    /** Why the backend refused, when `status === 'failed'`. */
+    reason?: string;
+    /** Machine-readable code when `status === 'error'` (bad capture, etc). */
+    code?: string;
+    /** User-facing message when `status === 'error'`. */
+    message?: string;
+    /** Single-use proof for `/auth/identity-document`. Pass only. */
+    stepToken?: string;
+    /** What the Worker measured, echoed for display and logs. */
+    selfieVsIdScore?: number;
+}
+
 export interface ReverifyResult {
     status: 'passed' | 'failed' | 'error';
     /** Failure reason from NestJS when `status === 'failed'`. */
@@ -187,29 +227,7 @@ export interface ReverifyResult {
     livenessConfidence?: number;
 }
 
-export interface VerifyVideoPayload {
-    kycSessionId: string;
-    language: 'ar' | 'en' | 'tr';
-    expectedName: string;
-    expectedBirthday: string;
-    nameTranscript: string | null;
-    ageTranscript: string | null;
-    faceFrames: string[];
-    idFaceImageData: string;
-    livenessConfidence: number;
-    videoCallUrl?: string;
-}
-
-export interface VerifyVideoMatch {
-    matches: boolean;
-    confidence: number;
-    reasoning: string;
-}
-
-export interface VerifyVideoResult {
-    passed: boolean;
-    nameMatch: VerifyVideoMatch;
-    ageMatch: VerifyVideoMatch;
-    face: { bestScore: number; usedFrames: number };
-    kycStatus?: 'pending' | 'approved' | 'rejected';
-}
+// The avatar-led video-interview step was removed. Its routes are gone from the
+// KYC Worker, no screen ever called it, and it configured a product decision
+// that was reversed — so the types went with it rather than lingering as a
+// contract nobody implements.

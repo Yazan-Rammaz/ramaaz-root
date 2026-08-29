@@ -8,7 +8,6 @@
  *   1. idConfig      — ID & Passport capture (quality, card detection, OCR, MRZ/barcode)
  *   2. faceConfig    — Face liveness detection (pose, centering, retries, timing)
  *   3. compareConfig — Face-to-ID comparison (similarity thresholds, timing)
- *   4. videoConfig   — Video call (duration, reconnect, pre-call settings)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -445,54 +444,10 @@ export const compareConfig = {
 
     // ── Timing ───────────────────────────────────────────────────────────────
     timing: {
-        /** Pause [ms] after a successful match before navigating to video-pre-call. */
+        /** Pause [ms] after a successful match before navigating onward. */
         successNavDelayMs: 2000,
     },
 
-    // ── Mock branch ───────────────────────────────────────────────────────────
-    mock: {
-        /** Simulated API delay [ms] in mock mode. */
-        delayMs: 1200,
-        /** Simulated match score returned by the mock. */
-        mockScore: 94,
-    },
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SECTION 4 — VIDEO CALL CONFIG
-// ─────────────────────────────────────────────────────────────────────────────
-export const videoConfig = {
-    // ── Session limits ────────────────────────────────────────────────────────
-    session: {
-        /** Maximum call duration [ms] before the session is force-ended. */
-        maxDurationMs: 20 * 60 * 1000,
-        /** How many reconnect attempts before showing a failure screen. */
-        reconnectAttempts: 3,
-        /** Delay [ms] between reconnect attempts. */
-        reconnectDelayMs: 2000,
-        /** Idle timeout [ms] — if no agent joins within this window, end the call. */
-        agentJoinTimeoutMs: 60 * 1000,
-    },
-
-    // ── Pre-call checks ───────────────────────────────────────────────────────
-    preCall: {
-        /** Whether to request microphone permission on the pre-call screen. */
-        checkMicrophone: true,
-        /** Whether to run a brief camera check on the pre-call screen. */
-        checkCamera: true,
-        /** Pause [ms] after permissions are confirmed before starting the call. */
-        preCallReadyDelayMs: 800,
-    },
-
-    // ── Media constraints ────────────────────────────────────────────────────
-    media: {
-        /** Ideal video width for the video call stream. */
-        idealWidth: 1280,
-        /** Ideal video height for the video call stream. */
-        idealHeight: 720,
-        /** Ideal frame rate for the video call stream. */
-        idealFrameRate: 30,
-    },
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -505,7 +460,6 @@ export const kycConfig = {
     id: idConfig,
     face: faceConfig,
     compare: compareConfig,
-    video: videoConfig,
 } as const;
 
 export default kycConfig;

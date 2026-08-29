@@ -4,11 +4,11 @@ import type {
     LivenessChallenge,
     AnalyzeIdResult,
     SubmitVerificationPayload,
-    VerifyVideoPayload,
-    VerifyVideoResult,
     ReverifySession,
     ReverifyPayload,
     ReverifyResult,
+    EnrollPayload,
+    EnrollResult,
 } from './kycService.interface';
 import type { LivenessResult, IDDocument, MatchResult } from '@/features/kyc/types/verification';
 import { api, type ApiResult } from './kycApi';
@@ -123,16 +123,6 @@ export class HttpKycService implements IKycService {
         };
     }
 
-    async startVideoCall(sessionId: string): Promise<{ streamUrl: string }> {
-        await new Promise((r) => setTimeout(r, 1000));
-        return { streamUrl: 'mock://video-stream' };
-    }
-
-    async endVideoCall(sessionId: string): Promise<{ success: boolean }> {
-        await new Promise((r) => setTimeout(r, 500));
-        return { success: true };
-    }
-
     async sendWebhook(
         userId: string,
         status: 'verified' | 'rejected',
@@ -152,15 +142,6 @@ export class HttpKycService implements IKycService {
         payload: SubmitVerificationPayload,
     ): Promise<{ success: boolean; kycRequest?: KycRequest }> {
         return unwrap(await api.kyc.submit(payload), 'Submit failed');
-    }
-
-    async completeVideo(payload: {
-        kycSessionId: string;
-        videoCallUrl: string;
-        livenessConfidence: number;
-        videoVsIdScore: number;
-    }): Promise<{ success: boolean; kycRequest?: KycRequest }> {
-        return unwrap(await api.kyc.completeVideo(payload), 'Complete video failed');
     }
 
     async startReverify(challengeId: string): Promise<ReverifySession> {
@@ -192,7 +173,38 @@ export class HttpKycService implements IKycService {
         };
     }
 
-    async verifyVideo(payload: VerifyVideoPayload): Promise<VerifyVideoResult> {
-        return unwrap(await api.kyc.verifyVideo(payload), 'Verify video failed');
+    async enrollDocument(payload: EnrollPayload): Promise<EnrollResult> {
+        const res = await api.kyc.enroll(payload);
+
+        // Read exactly like submitReverify: this endpoint answers with a full
+        // verdict even on a non-2xx, so a failure body is domain data rather
+        // than a transport error. Only a response with no `status` at all
+        // genuinely failed to reach a decision.
+        const data = (res.ok ? res.data : ((res.error.body ?? {}) as Record<string, unknown>)) as
+            Partial<EnrollResult> & { error?: string; detail?: string };
+
+        if (!res.ok && !data.status) {
+            // `detail` is the BACKEND's own error body, relayed by the Worker.
+            // It is the difference between "the enrolment backend rejected the
+            // document" — which names nothing — and knowing it was an expired
+            // challenge, an unset bucket, or a field this client got wrong.
+            // Dropping it costs one of the three document attempts to learn
+            // what a log line already knew.
+            const detail = typeof data.detail === 'string' ? data.detail.slice(0, 300) : '';
+            throw new Error(
+                [data.error ?? `Enrolment failed: ${res.error.message}`, detail]
+                    .filter(Boolean)
+                    .join(' — '),
+            );
+        }
+
+        return {
+            status: data.status ?? 'error',
+            reason: data.reason,
+            code: data.code,
+            message: data.message ?? data.error,
+            stepToken: data.stepToken,
+            selfieVsIdScore: data.selfieVsIdScore,
+        };
     }
 }

@@ -297,3 +297,52 @@ body {
         animation: none;
     }
 }
+
+/* Face-capture scanning sweep — a soft band travelling down the frame while
+   the gate is still looking. Deliberately slow and low-contrast: it signals
+   "searching" without competing with the corner brackets, which carry the
+   actual state. Hidden under prefers-reduced-motion by the component. */
+@keyframes face-sweep {
+    0%   { transform: translateY(-4rem); opacity: 0; }
+    12%  { opacity: 1; }
+    88%  { opacity: 1; }
+    100% { transform: translateY(25rem); opacity: 0; }
+}
+
+.face-sweep {
+    background: linear-gradient(
+        to bottom,
+        rgba(255, 235, 0, 0) 0%,
+        rgba(255, 235, 0, 0.16) 50%,
+        rgba(255, 235, 0, 0) 100%
+    );
+    animation: face-sweep 2.6s ease-in-out infinite;
+}
+
+/* Verification scan line — the bright green bar that travels over the LOCKED
+   frame while the backend decides. A different animal from .face-sweep above:
+   that one is soft and one-directional and means "still looking"; this one is
+   sharp, green and bounces, and means "holding still while something else
+   works". Reading them apart at a glance is the point, so they must not
+   converge on the same weight or colour.
+
+   Travel is 25rem (the 400 XD-px frame) minus the band's own 4.5rem, so it
+   stops flush with each edge instead of sliding out of view. `alternate` is
+   what gives it the iOS back-and-forth rather than a repeating wipe. */
+@keyframes face-scanline {
+    from { transform: translateY(0); }
+    to   { transform: translateY(20.5rem); }
+}
+
+.face-scanline {
+    background: linear-gradient(
+        to bottom,
+        rgba(52, 199, 89, 0) 0%,
+        rgba(52, 199, 89, 0.3) 44%,
+        rgba(52, 199, 89, 0.95) 50%,
+        rgba(52, 199, 89, 0.3) 56%,
+        rgba(52, 199, 89, 0) 100%
+    );
+    box-shadow: 0 0 1.5rem rgba(52, 199, 89, 0.5);
+    animation: face-scanline 1.4s ease-in-out infinite alternate;
+}

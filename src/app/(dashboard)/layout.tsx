@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { requireSession } from "@/lib/auth/session";
 import { AddActionProvider } from "@/features/shell/add-action";
-import { IdleLock } from "@/features/auth/components/IdleLock";
 import { Sidebar } from "@/features/shell/components/Sidebar";
 import { Navbar } from "@/features/shell/components/Navbar";
 
@@ -12,16 +11,23 @@ import { Navbar } from "@/features/shell/components/Navbar";
  * scroll — the shape is held by the scaling engine, not a fixed 1366×1024 box.
  *
  * `requireSession()` is the authoritative auth gate (backend `/v1/me`).
- * <IdleLock> adds the UX lock: after 5 minutes without interaction it covers
- * the shell with the passcode gate. It does NOT sign anyone out — the session
- * stays live and the lock is dismissed by re-entering the passcode.
+ *
+ * ── The idle lock is temporarily absent ─────────────────────────────────────
+ * <IdleLock> used to cover the shell after 5 minutes idle, dismissed by the
+ * 6-digit passcode. That passcode no longer exists — this protocol has no PIN —
+ * and its replacement is a face re-verify, which needs a session-authenticated
+ * face endpoint the backend does not expose yet (/v1/auth/face takes a
+ * challenge token, and a locked screen has a session instead).
+ *
+ * The component itself survives, timer and all, and takes the gate as a prop.
+ * Remount it here with the face gate when that endpoint lands. The navbar's
+ * lock button still fires its event; nothing listens until then.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const session = await requireSession();
+  await requireSession();
 
   return (
     <AddActionProvider>
-      <IdleLock name={session.name} role={session.role} />
       <div className="flex h-full w-full overflow-hidden">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">

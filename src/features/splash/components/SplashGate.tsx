@@ -131,53 +131,40 @@ export function SplashGate() {
         )}
         style={{ transitionDuration: `${SLIDE_MS}ms`, transitionTimingFunction: IOS_EASE }}
       >
-        {/* Brand mark — vertically centered. rdb glyph + "Ramaaz Digital
-            Banking" subtitle both live inside rdb.svg. */}
-        <div className="relative flex flex-col items-center">
-          <Icon
-            name="auth/rdb"
-            width={144.21}
-            height={104.22}
-            alt="Ramaaz Digital Banking"
-          />
-
-          {/* Loader group sits 138 XD px below the brand mark, centered. */}
+        {/* Loader group, centred. No product logo here: the splash is the
+            Root console's, and the rdb mark belongs to the screens beneath. */}
+        <div className="flex flex-col items-center">
+          {/* Track 220 x 8 with a true 0.5px outline; blue fill (#3066CC)
+              animates 0 -> 100%. Inner clip layer rounds the fill. */}
           <div
-            className="absolute top-full left-1/2 flex -translate-x-1/2 flex-col items-center"
-            style={{ marginTop: rem(138) }}
+            className="hairline relative h-8 w-220 rad-4"
+            style={
+              {
+                "--hairline-radius": rem(4),
+                "--hairline-color": "#FF5F61",
+              } as React.CSSProperties
+            }
+            role="progressbar"
+            aria-label="Loading"
           >
-            {/* Track 220 x 8 with a true 0.5px outline (#707070); blue fill
-                (#3066CC) animates 0 -> 100%. Inner clip layer rounds the fill. */}
-            <div
-              className="hairline relative h-8 w-220 rad-4"
-              style={
-                {
-                  "--hairline-radius": rem(4),
-                  "--hairline-color": "#707070",
-                } as React.CSSProperties
-              }
-              role="progressbar"
-              aria-label="Loading"
-            >
-              <div className="absolute inset-0 overflow-hidden rad-4">
-                <div
-                  className="bg-primary absolute inset-y-0 start-0 transition-[width] ease-in-out"
-                  style={{
-                    width: filled ? "100%" : "0%",
-                    transitionDuration: `${FILL_MS}ms`,
-                  }}
-                />
-              </div>
+            <div className="absolute inset-0 overflow-hidden rad-4">
+              <div
+                className="bg-primary absolute inset-y-0 start-0 transition-[width] ease-in-out"
+                style={{
+                  width: filled ? "100%" : "0%",
+                  transitionDuration: `${FILL_MS}ms`,
+                }}
+              />
             </div>
-
-            {/* Fixed English brand label (not localized, static). */}
-            <span
-              className="fz-14 text-black font-normal"
-              style={{ marginTop: rem(12), lineHeight: rem(20) }}
-            >
-              Ramaaz Root
-            </span>
           </div>
+
+          {/* Fixed English label (not localized, static). */}
+          <span
+            className="fz-14 text-black font-normal"
+            style={{ marginTop: rem(12), lineHeight: rem(20) }}
+          >
+            Root
+          </span>
         </div>
 
         {/* Powered-by mark — bottom corner, 30 XD px inset (mirrors in RTL). */}

@@ -57,7 +57,21 @@ export default function IDSummaryScreen() {
             //     },
             // });
             markCompleted('id-summary');
-            goTo('face-detection', 1);
+            // Straight to the comparison — the face was already captured, at
+            // the very first step of this flow.
+            //
+            // 'face-detection' used to sit here and ask for a SECOND capture.
+            // It is not gone (VerificationPage still routes it, AwsFaceLiveness
+            // is untouched), it is simply no longer in the path: the frame
+            // taken before ID capture is the one FaceMatchScreen compares
+            // against the ID, so asking again photographed the same person
+            // twice to answer a question already answered.
+            //
+            // This only works because the frame SURVIVES the ID steps — it
+            // lives in VerificationContext, which is why IdentityGate must not
+            // remount the provider mid-flow. Break that and this jump lands on
+            // "Missing face or ID image" (FaceMatchScreen.tsx:213).
+            goTo('face-match', 1);
         } catch (err) {
             setSubmitError(
                 err instanceof Error
@@ -84,23 +98,6 @@ export default function IDSummaryScreen() {
                 onCancel={() => setShowExitDialog(false)}
                 onConfirm={() => router.push('/home')}
             />
-
-            {/* Close button */}
-            <div className="flex absolute top-50 end-30 justify-end mb-8">
-                <button
-                    onClick={() => setShowExitDialog(true)}
-                    className="text-red-400 hover:text-red-600"
-                >
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <path
-                            d="M5 5L15 15M15 5L5 15"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                        />
-                    </svg>
-                </button>
-            </div>
 
             <FlexSpace size={100} share={0.4} />
             {/* Header */}

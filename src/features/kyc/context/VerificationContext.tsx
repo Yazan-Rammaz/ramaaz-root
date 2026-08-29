@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import type {
     VerificationStep,
     LivenessResult,
@@ -58,12 +58,16 @@ export function VerificationProvider({
 
     // T037: Resume from last incomplete step on mount.
     // KYC completes at 'face-match'; the video interview step was removed.
+    // 'face-detection' is deliberately absent: the face is captured once, at
+    // the start of the flow, and compared straight after the ID summary. The
+    // step and its screen still exist — they are just not on the path, and
+    // leaving it here would let the resume effect below send somebody to a
+    // capture the flow no longer asks for.
     const STEP_ORDER: VerificationStep[] = [
         'intro',
         'id-capture-front',
         'id-capture-back',
         'id-summary',
-        'face-detection',
         'face-match',
         'success',
     ];
@@ -79,6 +83,33 @@ export function VerificationProvider({
             setCurrentStep(firstIncomplete);
         }
     }, []); // Only on mount
+
+    /**
+     * Follow `initialStep` when the CALLER changes it.
+     *
+     * The server can move this flow forward while the tree stays mounted: a
+     * passed face check redirects to the same route, which re-renders with the
+     * next stage and therefore a new `initialStep`. A `useState` initialiser
+     * only runs on mount, so without this the provider keeps rendering the step
+     * it opened with — the symptom being a face check that stays on screen
+     * after it has already passed.
+     *
+     * Remounting the provider on a changed `key` would also work, and is what
+     * this used to rely on. It cannot be used here: a remount clears
+     * `livenessResult`, and that frame is the captured face the ID is compared
+     * against later in enrolment. Losing it costs a second capture nobody asked
+     * for — exactly what STAGE_ROUTES keeps three stages on one route to avoid.
+     *
+     * The ref skips the mount pass so this never overrides the resume effect
+     * above; it fires only on a genuine change.
+     */
+    const openedAt = useRef(initialStep);
+    useEffect(() => {
+        if (initialStep === openedAt.current) return;
+        openedAt.current = initialStep;
+        setDirection(1);
+        setCurrentStep(initialStep);
+    }, [initialStep]);
 
     const goTo = useCallback((step: VerificationStep, dir: 1 | -1 = 1) => {
         setDirection(dir);

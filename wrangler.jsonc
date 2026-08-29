@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
-  "name": "ramaaz-root",
+  "name": "canroot",
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -15,20 +15,33 @@
     // a secret. A `vars` entry would in any case shadow a secret of the same
     // name, which is how the old placeholder ("https://yourdomain.com") could
     // have silently overridden a correctly-set secret.
-    //
-    // DEV_RESET_KEY is deliberately ABSENT here — it is a real secret and must
-    // be set with `wrangler secret put DEV_RESET_KEY`, never committed.
-    "NEST_API_URL": "https://staging-backend.ramaaz.store",
+    "NEST_API_URL": "https://staging-backend.ramaaz.store"
+  },
+  // Service binding to the KYC Worker.
+  //
+  // ⚠️ REQUIRED on Cloudflare, not an optimisation. A same-account
+  // Worker→Worker fetch over a *.workers.dev URL never reaches the target
+  // Worker — Cloudflare answers its own bare 404 page instead. Plain fetch
+  // works in `next dev`, so without this the KYC proxy passes locally and
+  // 404s only once deployed.
+  //
+  // Both Workers must be in the same Cloudflare account; both are in
+  // yazan-adnof, so this resolves.
+  "services": [{ "binding": "KYC_WORKER", "service": "ramaaz-kyc" }],
 
-    // ⚠️ TEMPORARY, AND LIVE ON THE PUBLIC WORKER URL.
-    //
-    // Enables /api/dev/reset on the deployed site, by request. Anyone who can
-    // reach the worker can then delete the root admin and read the replacement's
-    // password — there is no way to protect it, because the caller is the
-    // browser and any shared secret would ship in the client bundle.
-    //
-    // Acceptable only while this points at STAGING. Set to "0" and redeploy
-    // before this worker ever talks to production data.
-    "NEXT_PUBLIC_DEV_AUTOFILL": "1"
+  // Retain logs, rather than requiring somebody to be watching.
+  //
+  // Without this, `console.log` output exists only while a `wrangler tail` is
+  // attached — so a failed run is diagnosable only if a tail happened to be
+  // connected at that second, and otherwise the evidence is simply gone. That
+  // cost several sign-in attempts during the KYC integration, and attempts are
+  // scarce: a challenge tolerates five failures and then burns.
+  //
+  // The KYC Worker has had this from the start (`[observability.logs]` in its
+  // wrangler.toml), which is why that half of the system was always readable
+  // and this half was not.
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": true }
   }
 }

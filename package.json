@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3002",
-    "dev:mobile": "next dev -H 0.0.0.0 -p 3002",
+    "dev:mobile": "node ./scripts/dev-mobile.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
@@ -15,8 +15,7 @@
     "sync:vendor": "node ./scripts/sync-vendor.mjs",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv",
-    "dev:reset": "node ./scripts/dev-reset-root.mjs"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
