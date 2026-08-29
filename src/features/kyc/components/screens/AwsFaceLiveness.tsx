@@ -769,7 +769,9 @@ export default function AwsFaceLivenessScreen() {
                     const rawFace = result.faceImageData || frame;
                     // Mask onto the #E9EEEE background — keeps the centred face,
                     // replaces the surrounding pixels.  Falls back to raw on error.
-                    let maskedFace = rawFace;
+                    // `const` while the masking below is commented out. Restore
+                    // `let` if that block comes back.
+                    const maskedFace = rawFace;
                     // try {
                     //     maskedFace = await maskFaceOnBackground(rawFace, '#E9EEEE');
                     // } catch (err) {

@@ -1,9 +1,17 @@
+# Lint, typecheck, build. Nothing else — see the note on tests below.
 name: CI
 
 on:
   push:
-    branches: [main]
+    # `dev` is the trunk (it is the repo's default branch); `main` tracks it.
+    branches: [main, dev]
   pull_request:
+
+# A new push supersedes the run it interrupted. Without this, pushing three
+# times in a minute queues three full builds and the first two are landfill.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -13,9 +21,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22 LTS. Was 20, which reached end of life in April 2026.
+          node-version: 22
           cache: npm
 
+      # `postinstall` runs scripts/sync-vendor.mjs, which downloads ~43MB of
+      # opencv.js and MediaPipe wasm into public/vendor. It needs network access
+      # and dominates the install time. It is not optional: the KYC screens
+      # import those runtimes, so the build fails without them.
       - run: npm ci
 
       - name: Lint
@@ -24,25 +37,23 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit tests
-        run: npm run test
-
+      # No NEST_API_URL on purpose. The BFF client validates it lazily and
+      # throws BackendNotConfiguredError, which the auth code already treats as
+      # "signed out" — so the build completes and prerenders every route.
+      # Verified: a build with the variable unset produces the same route table
+      # as one with it set. The previous value here was a fake host, which only
+      # bought DNS timeouts during prerender.
       - name: Build
         run: npm run build
-        env:
-          NEST_API_URL: https://api.example.com
 
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Playwright tests
-        run: npm run e2e
-        env:
-          NEST_API_URL: https://api.example.com
+# ── Why there are no test steps ──────────────────────────────────────────────
+# This workflow used to run `npm run test` (vitest) and a second `e2e` job
+# running `npm run e2e` (Playwright). NEITHER SCRIPT EXISTS in package.json —
+# they were removed along with vitest.config.ts and the suites, and AGENTS.md
+# §10 now states the project has no automated tests and none should be added.
+# So both steps failed on every run with "Missing script", and CI had been red
+# for long enough that its result carried no information.
+#
+# They are deleted rather than commented out: a commented-out test step invites
+# someone to uncomment it and hit the same wall. If tests come back, add the
+# script first, then the step.
