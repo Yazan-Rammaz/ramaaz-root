@@ -23,7 +23,7 @@
         "faceHold": "Öyle kalın…",
         "faceChecking": "Kontrol ediliyor…",
         "faceCaptureFailed": "Görüntü alınamadı. Tekrar deneyin.",
-        "faceCameraBlocked": "Kamera erişimi engelli. Tarayıcınızdan izin verip sayfayı yenileyin.",
+        "faceCameraBlocked": "Kamera erişimi engellendi. Tarayıcınızda izin verin, ardından erişim bağlantınızı yeniden açın.",
         "faceVerifyFailed": "Doğrulama başarısız — tekrar deneyin",
         "deviceTitle": "Bu Cihazı Doğrula",
         "deviceBody": "Hesabınız bu cihazdaki bir geçiş anahtarıyla korunuyor. Tarayıcınız istediğinde parmak izinizle, yüzünüzle veya cihaz PIN’inizle onaylayın.",
@@ -39,7 +39,8 @@
         "introConsent": "Onay, tam ve bağlayıcı bir taahhüt oluşturur ve yürürlükteki kanun ve hükümler uyarınca resmî bir hukuki sözleşme sayılır. Kabul etmiyorsanız lütfen devam etmeyin ve <strong>“Kabul Etmiyorum”</strong> seçeneğine tıklayın.",
         "introTerms": "Hizmet Şartları",
         "introStart": "Kimlik Doğrulamayı Başlat",
-        "introDisagree": "Kabul Etmiyorum"
+        "introDisagree": "Kabul Etmiyorum",
+        "faceSetupFailed": "Yüz kontrolü başlatılamadı."
     },
     "common": {
         "appName": "Ramaaz Root",

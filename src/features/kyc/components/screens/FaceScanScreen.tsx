@@ -6,6 +6,8 @@ import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useFaceGate } from '@/features/kyc/hooks/useFaceGate';
+import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { restartSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -118,8 +120,21 @@ type Props = {
 
 export function FaceScanScreen({ onCapture, verified = false }: Props) {
     const t = useTranslations('auth');
-    const { videoRef, canvasRef, error: cameraError, startCamera, stopCamera, captureFrame } =
-        useCamera({ facingMode: 'user' });
+    const {
+        videoRef,
+        canvasRef,
+        isActive,
+        error: cameraError,
+        startCamera,
+        stopCamera,
+        captureFrame,
+    } = useCamera({ facingMode: 'user' });
+
+    // The landmarker is a module-level singleton, so asking for it here costs
+    // nothing beyond the hook — `useFaceGate` is already holding the same
+    // instance. What this buys is the two signals the gate does not surface:
+    // whether the model is usable yet, and whether it failed outright.
+    const { isReady: modelReady, loadError: modelError } = useFaceLandmarker();
 
     const [phase, setPhase] = useState<Phase>('scanning');
     /** The locked frame. Non-null from capture until the camera reopens. */
@@ -136,10 +151,24 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
     const { ready: gateReady, reset: resetGate } = gate;
     const sent = useRef(false);
 
+    /**
+     * The camera opens only once the detector can actually use it.
+     *
+     * The model is ~3.4MB on the wire and the WASM runtime another ~3.1MB, so
+     * on a phone this is seconds, not milliseconds. Opening the camera first
+     * lights the recording indicator, spins up the sensor and decodes frames
+     * that are thrown away — all while nothing is able to look at them. Worse,
+     * it tells the user the check has started: they hold still, and the capture
+     * they are waiting for cannot come yet.
+     *
+     * So: preparing dots on a black frame, then the camera. Nothing is on that
+     * is not being used.
+     */
     useEffect(() => {
+        if (!modelReady) return;
         void startCamera();
         return () => stopCamera();
-    }, [startCamera, stopCamera]);
+    }, [modelReady, startCamera, stopCamera]);
 
     // The hold completed — take the frame and hand it up. Guarded by a ref so a
     // re-render between `ready` and the phase change cannot fire a second
@@ -194,6 +223,40 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
     // 'failed' outranks `verified` so a rejection can never be painted green,
     // however the two signals happened to interleave.
     const shown: Phase = phase === 'failed' ? 'failed' : verified ? 'passed' : phase;
+
+    /**
+     * Nothing can be looked for yet — the camera has not opened, or the face
+     * landmarker's model is still downloading (3.6MB, and on a cold phone
+     * connection that is seconds, not milliseconds).
+     *
+     * Worth distinguishing, because the two states look identical and are not.
+     * A screen that shows the hunting sweep while the model is still loading is
+     * telling the user "hold still, I am looking at you" when nothing is
+     * looking at all — so they hold still, nothing happens, and the only
+     * conclusion available to them is that it is broken.
+     *
+     * It was also how a real outage stayed invisible: the model 404'd in
+     * production for want of a file, `useFaceLandmarker` swallows that by
+     * design, and the screen showed a working camera that never captured.
+     * `model_loading` that never ends now reads as a stuck preparing state
+     * rather than as a face the gate keeps rejecting.
+     */
+    const preparing =
+        phase === 'scanning' && !modelError && (!modelReady || !isActive);
+
+    /**
+     * Setup failed outright — most often the model 404ing, which is exactly
+     * what happened in production.
+     *
+     * This is the ONE message on the screen, and it sits OUTSIDE the frame, in
+     * the dead space the centring already reserves below it. That placement is
+     * the design's own instruction for this case: the frame carries no text, so
+     * anything that must be said goes under it. Without this the failure is
+     * invisible — `useFaceLandmarker` swallows the error by design — and the
+     * person is left looking at a black rectangle with no way to know that
+     * waiting will never help.
+     */
+    const setupFailed = Boolean(modelError) || Boolean(cameraError);
 
     // Brackets pull inward once the gate is holding and stay in while the
     // verdict is outstanding, so the frame never loosens mid-check.
@@ -346,10 +409,33 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                     );
                 })}
 
-                {/* Scanning sweep while searching. Stops the moment the gate
-                    starts holding, so the animation always means "still
-                    looking" and never competes with the hold. */}
-                {!active && !cameraError && (
+                {/* Preparing — camera opening, or the landmarker model still on
+                    the wire. Three pulsing dots, no words: the frame carries no
+                    text by design, and this has to read at a glance as "not
+                    started yet" rather than as a verdict. It is deliberately
+                    unlike the sweep and the scan line, which both mean work is
+                    happening TO you. */}
+                {preparing && !cameraError && (
+                    <span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 flex items-center justify-center gap-8"
+                    >
+                        {[0, 1, 2].map((i) => (
+                            <span
+                                key={i}
+                                className="face-prep-dot h-8 w-8 rounded-full bg-white/70 motion-reduce:animate-none"
+                                style={{ animationDelay: `${i * 160}ms` }}
+                            />
+                        ))}
+                    </span>
+                )}
+
+                {/* Scanning sweep while searching. Held back until the gate can
+                    actually see — a sweep during `preparing` would claim to be
+                    hunting for a face before anything is able to look. Stops
+                    the moment the gate starts holding, so it always means
+                    "still looking" and never competes with the hold. */}
+                {!active && !preparing && !cameraError && (
                     <span
                         aria-hidden
                         className="face-sweep pointer-events-none absolute inset-x-0 h-64 motion-reduce:hidden"
@@ -382,8 +468,43 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
 
                 {/* No text inside the frame. Every state it could describe is
                     already carried by something visual: the brackets, the
-                    sweep, the scan line, and the border colour. */}
+                    sweep, the scan line, and the verdict ring. */}
             </div>
+
+            {/* Setup failure, UNDER the frame — the only words on this screen.
+                Zero-height so it cannot move the frame: it draws into the dead
+                space the centring already reserves below. Absent unless
+                something is genuinely broken, so the quiet frame stays quiet.
+
+                The way out is `startOver`, not a reload, and the difference is
+                not pedantic. Reloading this route re-reads the same challenge
+                cookie and lands in the same broken state; the access link is
+                what actually starts a sign-in, and its token is deliberately
+                never held anywhere the page could link back to. So the only
+                honest instruction is the one the other steps already give:
+                open the link again. */}
+            {setupFailed && (
+                <div className="relative h-0 w-350">
+                    <div
+                        className="absolute inset-x-0 flex flex-col items-center gap-12"
+                        style={{ top: rem(16) }}
+                    >
+                        <p
+                            role="alert"
+                            className="fz-12 px-20 text-center leading-normal font-medium text-[#FF3B30]"
+                        >
+                            {cameraError ? t('faceCameraBlocked') : t('faceSetupFailed')}
+                        </p>
+                        <button
+                            type="button"
+                            className="fz-14 text-primary leading-none font-semibold underline"
+                            onClick={() => void restartSignInAction()}
+                        >
+                            {t('startOver')}
+                        </button>
+                    </div>
+                </div>
+            )}
         </main>
     );
 }

@@ -319,6 +319,23 @@ body {
     animation: face-sweep 2.6s ease-in-out infinite;
 }
 
+/* Preparing — the camera is opening, or the face landmarker's 3.6MB model is
+   still downloading. Three dots breathing in sequence.
+
+   Deliberately NOT a sweep or a scan line: those two both say "something is
+   examining you", and during this state nothing is. Saying so matters more than
+   it sounds — a hunting animation shown while the model loads asks the user to
+   hold still for a detector that does not exist yet, and when it never fires
+   the only conclusion available to them is that the screen is broken. */
+@keyframes face-prep {
+    0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+    40%           { opacity: 1;    transform: scale(1); }
+}
+
+.face-prep-dot {
+    animation: face-prep 1.2s ease-in-out infinite both;
+}
+
 /* Verification scan line — the bright green bar that travels over the LOCKED
    frame while the backend decides. A different animal from .face-sweep above:
    that one is soft and one-directional and means "still looking"; this one is

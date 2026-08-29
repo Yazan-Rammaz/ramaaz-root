@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AuthCodeField } from './AuthCodeField';
+import { kickstartLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { restartSignInAction, submitPrivateCodeAction } from '../actions';
 
 // XD px -> scaling rem.
@@ -30,6 +31,27 @@ export function PrivateCodeStep() {
     const t = useTranslations('auth');
     const [error, setError] = useState<string | null>(null);
     const [dead, setDead] = useState(false);
+
+    /**
+     * Start downloading the face model NOW, while they type.
+     *
+     * The face step needs ~6.6MB over the wire before it can capture anything:
+     * 3.1MB of MediaPipe WASM and 3.4MB of model weights (measured against the
+     * deployed worker, brotli'd). Left until that screen mounts, the whole
+     * download happens with the person already staring at the frame waiting for
+     * something to happen — which is most of why the check felt broken.
+     *
+     * Typing a code takes ten to thirty seconds. That is free time, and it is
+     * enough to cover the download outright on wifi and most of it on 4G.
+     * `kickstartLandmarker` is idempotent (the promise is cached), exists for
+     * exactly this, and had never been called from anywhere.
+     *
+     * Fire-and-forget by design: it cannot fail loudly here, and it must not —
+     * a slow model is not a reason to block someone entering their code.
+     */
+    useEffect(() => {
+        kickstartLandmarker();
+    }, []);
 
     if (dead) {
         return (
