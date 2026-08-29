@@ -24,11 +24,32 @@ import { useEffect, useState } from 'react';
  * Read `innerHeight` for the preset. Read the insets to know how much of a
  * bleeding layout is hidden behind the notch and the home indicator.
  */
+/** Guarded so the first render (before the effect, and on the server) is safe. */
+function innerWidthSafe() {
+    return typeof window === 'undefined' ? '' : String(window.innerWidth);
+}
+
 export function MetricsReadout() {
     const [m, setM] = useState<Record<string, string> | null>(null);
+    /**
+     * The SMALLEST viewport seen while this page has been open — and the number
+     * that actually matters.
+     *
+     * `innerHeight` is not one value. Safari's toolbar collapses on scroll and
+     * comes back; a call, a screen recording or a personal hotspot grows the
+     * status bar and takes the difference out of the page. A single reading
+     * describes one of those moments and silently misses the tightest one,
+     * which is exactly the moment a layout breaks in.
+     *
+     * So: put the phone in the worst state you care about — on a call, toolbar
+     * showing — and this remembers it. That figure is what to type into the
+     * gallery, and what belongs in DEVICES.
+     */
+    const [minH, setMinH] = useState<number | null>(null);
 
     useEffect(() => {
         const read = () => {
+            setMinH((prev) => (prev === null ? innerHeight : Math.min(prev, innerHeight)));
             const cs = getComputedStyle(document.documentElement);
             const probe = getComputedStyle(document.getElementById('safe-probe')!);
             const rootPx = parseFloat(cs.fontSize);
@@ -80,9 +101,25 @@ export function MetricsReadout() {
 
             <h1 className="fz-20 font-bold text-[#1D1D1D]">Device metrics</h1>
             <p className="fz-13 mt-6 text-[#707070]">
-                Open this on the device. Put <b>innerWidth × innerHeight</b> into DEVICES in
-                catalog.ts — that is the box a screen actually has to fit.
+                Open this on the device, put it in the worst state you care about — on a
+                call, toolbar showing — then type the figure below into the gallery&apos;s W
+                and H boxes. At that size the gallery is pixel-identical to the real page.
             </p>
+
+            {/* The headline number: the tightest viewport seen so far. */}
+            <div
+                className="mt-16 rad-15 px-16 py-14"
+                style={{ background: '#F4F7FF', border: '1px solid #D6E2FF' }}
+            >
+                <p className="fz-11 text-[#3066CC]">Use this in the gallery</p>
+                <p className="fz-28 mt-4 font-bold text-[#1D1D1D]">
+                    {minH === null ? '…' : `${innerWidthSafe()} × ${minH}`}
+                </p>
+                <p className="fz-11 mt-4 text-[#707070]">
+                    smallest height seen while this page has been open — scroll, take a call,
+                    and watch it drop
+                </p>
+            </div>
 
             <div className="mt-20 flex flex-col gap-2">
                 {m ? (
