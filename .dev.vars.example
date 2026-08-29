@@ -8,3 +8,10 @@ NEST_API_URL="https://staging-backend.ramaaz.store"
 # Nothing else is needed. Sign-in carries no build-time credential: the access
 # link's token arrives in the URL at /enter/<token> and is exchanged for a
 # challenge — see src/lib/auth/link.ts.
+
+# Unlocks /design in a DEPLOYED environment. Leave unset locally — the gallery
+# is always on in development. In production set it as a Cloudflare SECRET
+# (`npx wrangler secret put DESIGN_GALLERY_KEY`), never as a wrangler.jsonc
+# `vars` entry: a vars entry shadows a secret of the same name, and would commit
+# the value. Unlock a device once at /design/unlock?key=<value>.
+DESIGN_GALLERY_KEY=""

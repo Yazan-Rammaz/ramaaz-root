@@ -25,16 +25,22 @@ const isProdEnv = process.env.NODE_ENV === 'production' || globalEnv.NODE_ENV ==
 /**
  * May this response be framed by our own origin?
  *
- * True for the design gallery in development and nothing else. The gallery
- * frames each screen so it gets a viewport of exactly the XD canvas width —
- * which is what makes one XD pixel equal one rendered pixel — and `DENY` blocks
- * that even same-origin (`SAMEORIGIN` is the value that does not).
+ * The design gallery only, on any environment. It frames each screen so the
+ * screen gets a viewport of exactly the XD canvas width — which is what makes
+ * one XD pixel equal one rendered pixel — and `DENY` blocks that even
+ * same-origin (`SAMEORIGIN` is the value that does not).
  *
- * Scoped twice over: development, AND a path that 404s in production anyway.
- * Every other response keeps `DENY` / `frame-ancestors 'none'` byte for byte.
+ * This used to be development-only. It is not any more, because the gallery now
+ * runs in production behind a key — and it would be a strange kind of security
+ * to serve it there and then break the framing it is built on.
+ *
+ * The relaxation is still worth nothing to an attacker: it applies only to
+ * `/design` responses, and without the key every one of those is a 404. Framing
+ * somebody's 404 page buys nothing. Every other path on the site keeps
+ * `DENY` / `frame-ancestors 'none'` byte for byte.
  */
 function isFramable(req: NextRequest) {
-    return !isProdEnv && req.nextUrl.pathname.startsWith('/design');
+    return req.nextUrl.pathname.startsWith('/design');
 }
 
 function buildCsp(nonce: string, framable: boolean) {

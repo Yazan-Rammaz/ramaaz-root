@@ -274,9 +274,22 @@ The `ar`/`tr` copy for the intro consent paragraph is an unreviewed draft.
 
 **Design gallery.** `/design` renders every screen standalone at its exact XD
 canvas, with an Alt-to-measure inspector and drawn iPhone/Safari/Chrome chrome;
-`/design/metrics` reads a real device's viewport. Development only — every route
-`404`s in production (verified against a production server). Add a screen by
-editing `src/app/design/catalog.ts` and `screens.tsx` together.
+`/design/metrics` reads a real device's viewport. Add a screen by editing
+`src/app/design/catalog.ts` and `screens.tsx` together.
+
+Always on in development. In a deployed environment it is **off unless
+`DESIGN_GALLERY_KEY` is set** — as a Cloudflare *secret*, never a `wrangler.jsonc`
+`vars` entry, which would shadow the secret and commit the value. With it set,
+unlock a device once at `/design/unlock?key=…`; that swaps the key for a
+`/design`-scoped httpOnly cookie. Everything without the cookie answers `404`,
+including `/design/unlock` itself with a wrong key — a `401` would confirm there
+is something there to unlock.
+
+It is gated because it renders every screen of this console with the session
+gate and the sign-in challenge stepped over. No real data and no session, so it
+grants access to nothing — but it does hand a stranger the exact shape and
+wording of the whole sign-in, which is material for walking somebody through a
+convincing fake of it.
 
 Open items, in priority order:
 
