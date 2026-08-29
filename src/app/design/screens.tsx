@@ -43,7 +43,9 @@ import { FIXTURE_KYC_USER, FIXTURE_SYSTEMS } from './fixtures';
 /** The `(auth)` layout: full-bleed with the brand mark pinned top-start. */
 function AuthShell({ children }: { children: ReactNode }) {
     return (
-        <div className="relative h-screen overflow-hidden">
+        // `h-full` mirrors the real (auth) layout — see the note there on why
+        // `h-screen` is wrong on iOS.
+        <div className="relative h-full overflow-hidden">
             <div className="absolute top-30 start-30">
                 <Icon name="auth/rdb" width={72} height={52} alt="Ramaaz Digital Banking" />
                 <p className="text-[#388CFF] text-center mt-4 font-medium">Root</p>

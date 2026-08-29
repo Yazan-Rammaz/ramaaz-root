@@ -65,12 +65,46 @@ html {
    browsers that DO support the hint, e.g. Chrome Android.)
 
    Hard floor for the mobile lock: 26.875rem == 400px at the locked 14.88px;
-   below 400px the content is clipped rather than distorted. */
+   below 400px the content is clipped rather than distorted.
+
+   ── The height is 100svh, and `inset: 0` was a bug ──────────────────────────
+   A `position: fixed` box with `inset: 0` is sized by the INITIAL CONTAINING
+   BLOCK, and on iOS Safari that is the LARGE viewport — the height the page
+   would have if the browser's toolbar were hidden. The toolbar is not hidden,
+   so the shell was laid out about 100px taller than the part you can see, and
+   everything the design puts at the foot sat behind Safari's bar. On the ID
+   capture screen that was most of the "Start Live Detection Your ID" button:
+   visible in the design gallery, cut in half on the actual phone.
+
+   `svh` is the SMALL viewport height — the viewport with the toolbars showing,
+   i.e. the part that is always visible. Laying out to it means the foot of a
+   screen is never behind chrome. `dvh` would track the toolbar as it collapses
+   and expands, which sounds better and is worse: every scroll would reflow a
+   layout whose whole premise is that it does not move. `lvh` is the value we
+   effectively had, and is the bug.
+
+   `bottom` is deliberately not set — with top, bottom and height all given, the
+   box is over-constrained and one of them is silently dropped.
+
+   The fallback is an `@supports` block rather than two `height` declarations in
+   a row. The usual trick — `height: 100vh; height: 100svh;` — does not survive
+   this build: Lightning CSS sees two declarations of the same property, keeps
+   the winner and deletes the fallback, so a browser without `svh` would be left
+   with no height at all and a `position: fixed` shell collapsed to its content.
+   Verified by reading the emitted CSS, not assumed. */
 body {
     position: fixed;
-    inset: 0;
+    top: 0;
+    inset-inline: 0;
+    height: 100vh;
     overflow: hidden;
     min-width: 26.875rem;
+}
+
+@supports (height: 100svh) {
+    body {
+        height: 100svh;
+    }
 }
 
 /* Scrolling still works, the bar itself is just never drawn — the OS default

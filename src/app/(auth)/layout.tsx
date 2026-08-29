@@ -10,7 +10,11 @@ import { Icon } from '@/components/ui/Icon';
  */
 export default function AuthLayout({ children }: { children: ReactNode }) {
     return (
-        <div className="relative h-screen overflow-hidden">
+        // `h-full`, not `h-screen`. `h-screen` is `100vh`, which on iOS Safari
+        // is the LARGE viewport — the height with the toolbar hidden — so the
+        // foot of every auth screen would sit behind Safari's bar. `h-full`
+        // inherits the body's `100svh` instead, which is the visible box.
+        <div className="relative h-full overflow-hidden">
             <div className="absolute top-30 start-30">
                 <Icon name="auth/rdb" width={72} height={52} alt="Ramaaz Digital Banking" />
                 <p className="text-[#388CFF] text-center mt-4 font-medium">Root</p>
