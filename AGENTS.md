@@ -121,22 +121,63 @@ Start a new feature with `npm run gen` — never hand-roll the structure.
 
 ## 7. Commands
 
-| Command             | What                                         |
-| ------------------- | -------------------------------------------- |
-| `npm run dev`       | Local dev (Cloudflare bindings via OpenNext) |
-| `npm run lint`      | ESLint (layering + fetch ban)                |
-| `npm run typecheck` | `tsc --noEmit`                               |
-| `npm run gen`       | Scaffold a new feature slice                 |
-| `npm run preview`   | Build + run on Cloudflare Workers locally    |
-| `npm run deploy`    | Build + deploy to Cloudflare                 |
+| Command              | What                                                       |
+| -------------------- | ---------------------------------------------------------- |
+| `npm run dev`        | `next dev` (Turbopack) on **port 3002**                     |
+| `npm run dev:mobile` | Same, over **https on the LAN** — for testing on a phone    |
+| `npm run lint`       | ESLint (layering + fetch ban)                               |
+| `npm run typecheck`  | `tsc --noEmit`                                              |
+| `npm run gen`        | Scaffold a new feature slice                                |
+| `npm run build`      | `next build --webpack` — produces `.next` only, NOT a Worker |
+| `npm run preview`    | OpenNext build + run on Cloudflare Workers locally           |
+| `npm run deploy`     | OpenNext build + deploy to Cloudflare                        |
 
-## 8. Deploy
+`dev:mobile` exists because iOS needs https for `getUserMedia` — the KYC screens
+cannot open a camera over plain http on a LAN address. It serves a self-signed
+certificate, so the phone will warn once.
 
-Cloudflare **Workers Builds** is connected to the git repo → push to `main`
-auto-builds (`opennextjs-cloudflare build`) and deploys. Secrets
-(`NEST_API_URL`) are Cloudflare secrets; local dev uses `.dev.vars`
-(git-ignored).
+⚠️ `npm run build` is **not** a deployable build. It runs Next only; the Worker
+(`.open-next/worker.js`) comes from `opennextjs-cloudflare build`. See §8 — this
+distinction has already cost one broken deploy configuration.
 
+## 8. Branches & deploy
+
+### Branch model
+
+`main` is the release branch. `dev` is where work happens, and it is the repo's
+default branch. A feature goes from zero to finished on `dev` — built, exercised
+end to end, its scenarios closed — and only then merges to `main`. Nothing
+half-built lands on `main`.
+
+⚠️ **This is the intent, not yet the wiring.** Cloudflare's production branch is
+currently **`dev`**, so every push to `dev` deploys to the live worker. That is
+deliberate and temporary: a second worker for `main`, configured identically, is
+planned. Until it exists, treat a push to `dev` as a production release.
+
+### Cloudflare Workers Builds
+
+Connected to `Yazan-Rammaz/ramaaz-root`, worker **`canroot`**, production branch
+**`dev`**, preview builds on. Settings that matter:
+
+| Field | Value |
+| --- | --- |
+| Build command | `npx opennextjs-cloudflare build` |
+| Deploy command | `npx wrangler deploy` |
+| Build variable | `NODE_VERSION = 22` |
+
+- **The build command is not `npm run build`.** That runs Next alone and
+  produces `.next`; `wrangler.jsonc` points `main` at `.open-next/worker.js` and
+  assets at `.open-next/assets`, and `.open-next/` is git-ignored — so a fresh
+  clone that only ran `npm run build` has no Worker to deploy at all. This was
+  the original misconfiguration; it fails at the deploy step, not the build one,
+  which makes it read like a Cloudflare problem rather than a command problem.
+- **First builds are slow.** `postinstall` runs `scripts/sync-vendor.mjs`, which
+  downloads ~43MB of opencv.js and MediaPipe wasm into `public/vendor`. It is not
+  optional — the KYC screens import those runtimes.
+- Measured on 2026-08-29: `opennextjs-cloudflare build` exits 0 and
+  `wrangler deploy --dry-run` reports **6.86MB raw / 1.42MB gzipped**, against a
+  3MB gzipped limit on the free plan. Room to spare, but it is the number to
+  re-check before adding anything large.
 - **The production build uses webpack, not Turbopack** (`build` =
   `next build --webpack`). OpenNext/Cloudflare can't load Turbopack's split
   server chunks at runtime (`ChunkLoadError` → 500 on every route). Local
@@ -151,6 +192,17 @@ auto-builds (`opennextjs-cloudflare build`) and deploys. Secrets
     the RP ID to be a real domain, so neither a LAN IP nor a tunnel with a
     changing subdomain will do — the device step can only be exercised here or
     on `localhost`.
+
+### CI
+
+`.github/workflows/ci.yml` runs on push to `main` and `dev`, and on every PR:
+**lint → typecheck → build**. No test steps — see §10.
+
+`NEST_API_URL` is deliberately unset in CI. The BFF client validates it lazily
+and throws `BackendNotConfiguredError`, which the auth code already treats as
+"signed out", so the build completes and prerenders every route. A build with
+the variable unset produces the same route table as one with it set; the fake
+host that used to be there only bought DNS timeouts during prerender.
 
 ## 9. Internationalization (i18n) & text direction
 
@@ -186,18 +238,45 @@ Three languages, **one way**: `next-intl` with a **cookie-based** locale (no
     - **The switcher lives ONLY on the Settings page** — never in headers,
       layouts, or other screens.
 
-## 10. Session pickup — where we left off (as of 2026-06-17)
+## 10. Session pickup — where we left off (as of 2026-08-29)
 
-The scaffold is complete and verified: `tsc`, `eslint` and `next build` all
-pass. **This project has no automated tests** — no unit, component or e2e
-suite, and none should be added. Verify changes by running the app.
-Initial commit is on `main`. Remote `origin` is set to
-`https://github.com/Yazan-Rammaz/management.git` but **nothing is pushed yet**
-(by the owner's request).
+`tsc`, `eslint` and `next build` all pass, and so does
+`opennextjs-cloudflare build`.
+
+**This project has no automated tests** — no unit, component or e2e suite.
+Verify changes by running the app. CI reflects this: it runs lint, typecheck and
+build, nothing else.
+
+> ⚠️ **Open question.** The branch model in §8 says a feature merges to `main`
+> "with tests and closed scenarios". If that means *automated* tests, this
+> paragraph and `.github/workflows/ci.yml` both have to change — the scripts and
+> the tooling are gone (`vitest.config.ts` and the suites were deleted, and the
+> workflow referenced `npm run test` / `npm run e2e` for months after neither
+> existed, which is why CI was permanently red). Decide which it is before the
+> next feature lands.
+
+**Repo:** `https://github.com/Yazan-Rammaz/ramaaz-root`. Both `dev` and `main`
+are pushed and currently identical. `dev` is the default branch.
+
+**Lint debt, deliberately scoped.** `eslint.config.mjs` downgrades three React
+Compiler rules (`set-state-in-effect`, `immutability`, `purity`) to warnings for
+`src/features/kyc/**` only. Those 15 findings are real — camera loops and
+scanner state machines ported from rdb — but fixing them means restructuring
+live camera code CI cannot exercise. They stay errors everywhere else so the
+debt cannot spread. `public/vendor/**` is ignored outright: it is downloaded,
+git-ignored, third-party, and not ours to lint.
 
 **i18n is wired** (see §9): `next-intl`, cookie-based `en`/`ar`/`tr`, auto
-direction, dev port is `3006`. All existing screens are translated. New screens
-must follow §9 — no hardcoded strings, logical Tailwind utilities only.
+direction. New screens must follow §9 — no hardcoded strings, logical Tailwind
+utilities only. ⚠️ Most **KYC screens still carry hardcoded English**; only the
+newer ones (face scan, private code, device, no-access, intro) use `messages/`.
+The `ar`/`tr` copy for the intro consent paragraph is an unreviewed draft.
+
+**Design gallery.** `/design` renders every screen standalone at its exact XD
+canvas, with an Alt-to-measure inspector and drawn iPhone/Safari/Chrome chrome;
+`/design/metrics` reads a real device's viewport. Development only — every route
+`404`s in production (verified against a production server). Add a screen by
+editing `src/app/design/catalog.ts` and `screens.tsx` together.
 
 Open items, in priority order:
 
@@ -213,8 +292,9 @@ Open items, in priority order:
    (section 1). Each new domain area = `npm run gen` then wire pages under
    `src/app/(dashboard)/`. Drop exported `.svg` icons into `/public/icons`.
 
-3. **Deploy wiring (owner action):** `git push -u origin main`, then connect the
-   repo in Cloudflare → Workers Builds and set the `NEST_API_URL` secret.
+3. **Give `main` its own worker.** Cloudflare's production branch is `dev`
+   today, so `main` deploys nowhere and every push to `dev` is a release. A
+   second worker for `main` with the same config closes that gap — see §8.
 
 Roles so far: `super_admin`, `country_manager`, `agent`
 (`src/lib/auth/rbac.ts`). Extend there if more are needed.

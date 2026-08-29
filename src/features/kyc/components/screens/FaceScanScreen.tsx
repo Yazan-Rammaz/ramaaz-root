@@ -199,8 +199,10 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
     // verdict is outstanding, so the frame never loosens mid-check.
     const active = gate.pass || phase !== 'scanning';
 
-    const borderColor =
-        shown === 'passed' ? '#34C759' : shown === 'failed' ? '#FF3B30' : 'transparent';
+    // Green or red ONLY on a verdict. Null the rest of the time, and the ring
+    // is not drawn at all — no permanent outline around the frame.
+    const verdictColor =
+        shown === 'passed' ? '#34C759' : shown === 'failed' ? '#FF3B30' : null;
 
     const bracketColor =
         shown === 'failed' ? '#FF3B30' : gateReady || shown === 'passed' ? '#34C759' : '#FFEB00';
@@ -222,9 +224,12 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                 </div>
             </div>
 
-            {/* Camera frame — 350 x 400, radius 30, black. The border is always
-                present and only changes colour, so the verdict never nudges the
-                layout by two pixels.
+            {/* Camera frame — 350 x 400, radius 30, black. NO border of its own:
+                the frame is the picture, and a permanent ring around it is a
+                rule the design does not have. The verdict ring is drawn as an
+                overlay inside the frame instead (see below), which is what lets
+                the border exist only when there is a verdict without the video
+                jumping two pixels when one lands.
 
                 ── The FRAME is what is centred, not the group ─────────────────
                 `justify-center` would centre the title block and the frame
@@ -235,11 +240,10 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                 centres the frame. Nothing else moves — the header still sits its
                 12 above, and the 12 inside it is untouched. */}
             <div
-                className="relative h-400 w-350 overflow-hidden rad-30 border-2 bg-black transition-colors duration-300 motion-reduce:transition-none"
+                className="relative h-400 w-350 overflow-hidden rad-30 bg-black"
                 style={{
                     marginTop: rem(HEADER_GAP),
                     marginBottom: rem(HEADER_H + HEADER_GAP),
-                    borderColor,
                 }}
             >
                 <video
@@ -285,6 +289,21 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                     aria-hidden
                     className="pointer-events-none absolute h-1 w-1 opacity-0"
                 />
+
+                {/* The verdict ring. An OVERLAY, not a border on the frame:
+                    a border would take its 2px out of the 350 x 400 box, so the
+                    video would shift the moment a verdict arrived — and a
+                    transparent border held in reserve to avoid that is just the
+                    permanent outline this screen is not supposed to have. Drawn
+                    over the picture, it costs the layout nothing and exists only
+                    when there is something to say. */}
+                {verdictColor && (
+                    <span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 rad-30 border-2"
+                        style={{ borderColor: verdictColor }}
+                    />
+                )}
 
                 {/* Corner brackets, 18 x 18. They pull inward and turn green as
                     the hold completes: the iOS Face ID tell that the device has
