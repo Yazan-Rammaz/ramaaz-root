@@ -1,0 +1,28 @@
+# Cache headers for static assets, read by Cloudflare Workers Assets.
+#
+# Without this file everything is served `public, max-age=0, must-revalidate` —
+# the Workers Assets default — which was measured on the deployed worker and
+# applied even to content-hashed files. The cost lands hardest on the KYC
+# runtime: ~6.6MB of WASM and model weights revalidated on EVERY sign-in, and a
+# full re-download whenever the browser has evicted any of it.
+#
+# OpenNext copies public/ into .open-next/assets/, so this file ends up where
+# Workers Assets looks for it. It is treated as configuration, not served.
+
+# Content-hashed by the build — the filename changes when the bytes do, so
+# there is nothing to revalidate. This is what `immutable` is for.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The KYC browser runtimes: opencv.js, MediaPipe's WASM, and the face landmarker
+# weights. NOT content-hashed, so deliberately not `immutable` and not a year.
+#
+# 30 days is the trade. These change only when someone bumps
+# @mediapipe/tasks-vision or the pinned model revision (float16/1) and re-runs
+# sync-vendor — rare, and never by accident. The risk being bounded is a client
+# holding an old WASM against a new model; a month caps how long that can last,
+# where `immutable` would not. If you ever do bump them and cannot wait out the
+# window, rename the directory — a new path is the only reliable cache bust for
+# unhashed files.
+/vendor/*
+  Cache-Control: public, max-age=2592000
