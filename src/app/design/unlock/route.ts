@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { cfEnv } from '@/lib/cf-env';
 
 /**
  * `/design/unlock?key=…` — trade the key for a cookie, once per device.
@@ -18,7 +19,8 @@ import { NextResponse, type NextRequest } from 'next/server';
  * Scoped to `/design`, so it is never sent with a request to anything else.
  */
 export async function GET(req: NextRequest) {
-    const expected = process.env.DESIGN_GALLERY_KEY;
+    // cfEnv — see the note in ../layout.tsx.
+    const expected = cfEnv('DESIGN_GALLERY_KEY');
     const presented = req.nextUrl.searchParams.get('key');
 
     // Not configured, or wrong key: 404, the same answer every other /design

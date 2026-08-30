@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { cfEnv } from '@/lib/cf-env';
 
 /**
  * The design gallery — a tool for checking screens against XD.
@@ -35,7 +36,9 @@ import { notFound } from 'next/navigation';
 export default async function DesignLayout({ children }: { children: ReactNode }) {
     if (process.env.NODE_ENV === 'development') return <>{children}</>;
 
-    const key = process.env.DESIGN_GALLERY_KEY;
+    // cfEnv, not process.env — a Cloudflare secret does not reach process.env
+    // under `next dev`, and would read as "not configured" rather than as set.
+    const key = cfEnv('DESIGN_GALLERY_KEY');
     // Not configured — the gallery does not exist here.
     if (!key) notFound();
 

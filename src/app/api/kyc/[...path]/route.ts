@@ -3,6 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { readChallenge } from "@/lib/auth/challenge";
 import { getAccessToken } from "@/lib/auth/cookies";
 import { KYC_TENANT, kycWorkerUrl } from "@/lib/kyc/worker";
+import { cfEnv } from "@/lib/cf-env";
 
 /**
  * The KYC proxy — the browser's only route to the `ramaaz-kyc` Worker.
@@ -112,10 +113,14 @@ async function proxy(req: NextRequest): Promise<Response> {
   // produce is a status and a number. See the block above the routes in
   // ramaaz-kyc/src/routes/kyc.ts.
   if (pathname.includes("/liveness-lab/")) {
-    const secret = process.env.LIVENESS_LAB_SECRET;
+    // `cfEnv`, not `process.env` — these live in `.dev.vars` and in Cloudflare
+    // secrets, neither of which reaches `process.env` under `next dev`. Reading
+    // them the obvious way returned undefined, and the gate below then failed
+    // closed and looked exactly like a wrong secret.
+    const secret = cfEnv("LIVENESS_LAB_SECRET");
     const unlocked =
       process.env.NODE_ENV === "development" ||
-      req.cookies.get("design_gallery")?.value === process.env.DESIGN_GALLERY_KEY;
+      req.cookies.get("design_gallery")?.value === cfEnv("DESIGN_GALLERY_KEY");
 
     if (!secret || !unlocked) {
       // 404, not 403 — the same answer /design gives, and for the same reason:
