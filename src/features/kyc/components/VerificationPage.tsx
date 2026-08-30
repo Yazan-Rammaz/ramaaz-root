@@ -11,12 +11,15 @@ import SuccessScreen from './screens/SuccessScreen';
 import ContactSupportScreen from './screens/ContactSupportScreen';
 import AwsFaceLivenessScreen from './screens/AwsFaceLiveness';
 import { FaceScanScreen } from './screens/FaceScanScreen';
+import { FaceLivenessScreen } from './screens/FaceLivenessScreen';
 
 const transition = { duration: 0.35, ease: [0.4, 0, 0.2, 1] as [number, number, number, number] };
 
 export default function VerificationPage({
     onCapture,
     onReverified,
+    challengeId,
+    onLivenessSession,
     faceVerified = false,
     onEnroll,
 }: {
@@ -43,6 +46,17 @@ export default function VerificationPage({
      * `EnrolmentInput`.
      */
     onEnroll?: (input: EnrolmentInput) => Promise<{ error?: string } | void>;
+    /**
+     * The sign-in this check belongs to. Present only in the real flow; the
+     * design gallery mounts these screens without one.
+     */
+    challengeId?: string;
+    /**
+     * Submits a finished AWS liveness session. Supplying this (with a
+     * challengeId) is what selects Face Liveness over the single-frame capture
+     * — see the `face-reverify` case below.
+     */
+    onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
 } = {}) {
     const { currentStep, direction, setLivenessResult } = useVerification();
 
@@ -69,6 +83,23 @@ export default function VerificationPage({
             case 'intro':
                 return <IntroScreen />;
             case 'face-reverify':
+                // AWS Rekognition Face Liveness when the caller supplied a
+                // challenge id and a handler for the session — which the real
+                // sign-in always does. A photograph on a second phone passed the
+                // single-frame check below; this one streams a short video and
+                // AWS decides whether a live person was there.
+                //
+                // FaceScanScreen is still the fallback, and still reachable from
+                // the design gallery, because it is what runs if this component
+                // is ever mounted without that pair.
+                if (challengeId && onLivenessSession) {
+                    return (
+                        <FaceLivenessScreen
+                            challengeId={challengeId}
+                            onSession={onLivenessSession}
+                        />
+                    );
+                }
                 // The capture designed for this flow: one black frame, yellow
                 // corner brackets, automatic capture once the local gate is
                 // satisfied. The older FaceReverifyScreen carried rdb's own

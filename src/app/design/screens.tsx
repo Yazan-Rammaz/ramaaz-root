@@ -135,13 +135,20 @@ export const SCREENS: Record<string, () => ReactNode> = {
     // through VerificationPage, because it is not a step in that state machine
     // yet — the point of this entry is to judge whether it should become one.
     //
-    // ⚠️ It talks to the REAL Rekognition. The challenge id below is a
-    // placeholder, so /reverify/start will refuse it and the screen will show
-    // its failure state. To see the oval, open it inside a live sign-in.
+    // ⚠️ It talks to the REAL Rekognition, and the challenge id below is a
+    // placeholder — so /reverify/start refuses it and this shows the failure
+    // state, not the oval. The oval needs a live sign-in; this entry exists so
+    // the chrome, the title block and the failure copy can be checked at all.
     'kyc-face-liveness': () => (
         <AuthShell>
             <Screen variant="centered" maxW={430} gutter={0} className="h-full">
-                <FaceLivenessScreen challengeId="design-preview" />
+                <FaceLivenessScreen
+                    challengeId="design-preview"
+                    // Never reached without a valid challenge; present because
+                    // the prop is required, and required because in the real
+                    // flow a session with nowhere to go is a bug.
+                    onSession={async () => ({ error: 'Design gallery — no live challenge.' })}
+                />
             </Screen>
         </AuthShell>
     ),

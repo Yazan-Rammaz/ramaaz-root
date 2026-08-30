@@ -38,6 +38,58 @@ export function IdentityStep({
     return (
         <IdentityGate
             needsEnrollment={needsEnrollment}
+            challengeId={challengeId}
+            /**
+             * The AWS Face Liveness path, and the reason it exists: a photograph
+             * of the enrolled administrator, held up on a second phone, passed
+             * `onCapture` below and signed in. CompareFaces answers "same face"
+             * and nothing about whether a person was there.
+             *
+             * The shape is deliberately the same as `onCapture` — the Worker is
+             * asked, it answers with a stepToken, the token goes to the auth
+             * backend. What differs is what we hand it. `onCapture` sends an
+             * IMAGE the browser chose; this sends a SESSION ID, and the Worker
+             * fetches the picture from AWS itself. That is the part a tampered
+             * client cannot get around, and it is worth more than the liveness
+             * score.
+             *
+             * ⚠️ The liveness score is measured but NOT thresholded here, nor in
+             * the Worker — it travels to NestJS as `livenessConfidence` and
+             * NestJS decides. If a spoof ever passes, that threshold is where to
+             * look first.
+             */
+            onLivenessSession={async (sessionId) => {
+                if (!challengeId) {
+                    return { error: 'This sign-in is missing its challenge id.' };
+                }
+
+                let verdict;
+                try {
+                    verdict = await createKycService().submitReverify({
+                        challengeId,
+                        sessionId,
+                    });
+                } catch (err) {
+                    return {
+                        error:
+                            err instanceof Error && err.message
+                                ? err.message
+                                : 'The verification service is unavailable.',
+                    };
+                }
+
+                if (verdict.status !== 'passed' || !verdict.stepToken) {
+                    return {
+                        error:
+                            verdict.reason ??
+                            verdict.message ??
+                            'That did not match. Try again.',
+                    };
+                }
+
+                const result = await submitFaceAction(verdict.stepToken);
+                return result?.error ? { error: result.error } : undefined;
+            }}
             onCapture={async (frame) => {
                 if (!challengeId) {
                     return { error: 'This sign-in is missing its challenge id.' };

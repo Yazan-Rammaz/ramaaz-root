@@ -42,6 +42,8 @@ export function IdentityGate({
     needsEnrollment,
     onCapture,
     onEnroll,
+    challengeId,
+    onLivenessSession,
 }: {
     /** True when this admin has never completed ID enrolment. */
     needsEnrollment: boolean;
@@ -49,6 +51,10 @@ export function IdentityGate({
     onCapture?: (frame: string) => Promise<{ error?: string } | void>;
     /** Submits the ID enrolment once the face has matched it. Same seam. */
     onEnroll?: (input: EnrolmentInput) => Promise<{ error?: string } | void>;
+    /** The sign-in this check belongs to — see VerificationPage. */
+    challengeId?: string;
+    /** Submits a finished AWS liveness session — see VerificationPage. */
+    onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
 }) {
     // ── Who moves the flow off the face check ───────────────────────────────
     // The SERVER does, and `needsEnrollment` is how it says so: a passed face
@@ -110,6 +116,8 @@ export function IdentityGate({
                     that waits out SUCCESS_HOLD_MS. That gap IS the green
                     frame: the capture screen paints the verdict during it. */}
                 <VerificationPage
+                    challengeId={challengeId}
+                    onLivenessSession={onLivenessSession}
                     onCapture={onCapture}
                     onReverified={handleReverified}
                     faceVerified={wantsEnrolling}

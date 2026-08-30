@@ -8,6 +8,7 @@ import '@aws-amplify/ui-react/styles.css';
 
 import { Icon } from '@/components/ui/Icon';
 import { api } from '@/features/kyc/services/kycApi';
+import { createKycService } from '@/features/kyc/services';
 import { restartSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
@@ -105,12 +106,22 @@ type Credentials = {
 
 export function FaceLivenessScreen({
     challengeId,
-    onPassed,
+    onSession,
 }: {
     /** Identifies the sign-in this check belongs to. Not a credential. */
     challengeId: string;
-    /** Called once the Worker has accepted the result. */
-    onPassed?: () => void;
+    /**
+     * Hands the finished session id up. Returning an error rejects it and
+     * re-arms the screen.
+     *
+     * The same seam `FaceScanScreen` uses for a captured frame, and for the
+     * same reason: the caller is the only side holding the challenge token, so
+     * a component driving a camera never sees a credential. What changed is
+     * what crosses it — an id rather than an image, which is the whole point.
+     * The Worker fetches the picture from AWS itself, so nothing this component
+     * could be made to send can decide who is compared.
+     */
+    onSession: (sessionId: string) => Promise<{ error?: string } | void>;
 }) {
     const t = useTranslations('auth');
 
@@ -129,15 +140,17 @@ export function FaceLivenessScreen({
         let cancelled = false;
 
         void (async () => {
-            const started = await api.kyc.reverifyStart<StartResponse>({ challengeId });
-            if (cancelled) return;
-            if (!started.ok || !started.data?.sessionId) {
+            try {
+                const started = await createKycService().startReverify(challengeId);
+                if (cancelled) return;
+                if (!started?.sessionId) throw new Error('no session id');
+                setSession(started);
+                setPhase('ready');
+            } catch {
+                if (cancelled) return;
                 setError(t('faceSetupFailed'));
                 setPhase('failed');
-                return;
             }
-            setSession(started.data);
-            setPhase('ready');
         })();
 
         return () => {
@@ -167,21 +180,27 @@ export function FaceLivenessScreen({
      * live — that verdict is fetched server-side from the session id, which is
      * the whole point. Ask the Worker.
      */
-    const handleComplete = useCallback(async () => {
-        setPhase('checking');
-        const res = await api.kyc.reverifyVerify<{ status?: string; reason?: string }>({
-            challengeId,
-            sessionId: session?.sessionId,
-        });
+    // Hoisted out of the callback: an optional chain in a dependency array
+    // defeats the React Compiler's memoisation ("Compilation Skipped"), and a
+    // plain value does not.
+    const sessionId = session?.sessionId ?? null;
 
-        if (!res.ok || res.data?.status !== 'passed') {
-            setError(res.ok ? (res.data?.reason ?? t('faceVerifyFailed')) : t('faceVerifyFailed'));
+    const handleComplete = useCallback(async () => {
+        if (!sessionId) return;
+        setPhase('checking');
+        try {
+            const result = await onSession(sessionId);
+            if (result?.error) {
+                setError(result.error);
+                setPhase('failed');
+                return;
+            }
+            setPhase('passed');
+        } catch (err) {
+            setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
             setPhase('failed');
-            return;
         }
-        setPhase('passed');
-        onPassed?.();
-    }, [challengeId, onPassed, session?.sessionId, t]);
+    }, [onSession, sessionId, t]);
 
     return (
         <main className="flex h-full flex-col items-center justify-center">
