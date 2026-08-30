@@ -45,6 +45,16 @@ export const PATHS = {
     reverifyStart: '/api/kyc/reverify/start',
     reverifyVerify: '/api/kyc/reverify/verify',
     /**
+     * Temporary AWS credentials for the Face Liveness component, gated on the
+     * challenge. They are short-lived and permit exactly one action —
+     * `rekognition:StartFaceLivenessSession` — because the browser has to sign
+     * its own video stream to AWS and there is no server-side path for that.
+     *
+     * A GET with the challenge in the query string, not a POST: it reads state
+     * rather than changing any, and that is how the Worker exposes it.
+     */
+    reverifyCredentials: '/api/kyc/reverify/credentials',
+    /**
      * Document enrolment. NOT `submit` above — that is RDB's route, and it
      * needs a KYC session, a media-upload endpoint and a countries table, none
      * of which exist on root (all three answer 404). `enroll` sends the images
@@ -141,6 +151,8 @@ export const api = {
         webhookNestjs: <T>(body: unknown) => post<T>(PATHS.webhookNestjs, body),
         reverifyStart: <T>(body: unknown) => post<T>(PATHS.reverifyStart, body),
         reverifyVerify: <T>(body: unknown) => post<T>(PATHS.reverifyVerify, body),
+        reverifyCredentials: <T>(challengeId: string) =>
+            get<T>(`${PATHS.reverifyCredentials}?challengeId=${encodeURIComponent(challengeId)}`),
         enroll: <T>(body: unknown) => post<T>(PATHS.enroll, body),
     },
 

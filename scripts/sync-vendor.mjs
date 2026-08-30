@@ -55,6 +55,25 @@ const FACE_MODEL_URL =
 /** The real file is ~3.7 MB; anything smaller is an error page. */
 const FACE_MODEL_MIN_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Blazeface — the face detector Amazon's Face Liveness component runs in the
+ * browser before it will stream anything.
+ *
+ * `FaceLivenessDetectorCore` defaults to fetching this from tfhub.dev and its
+ * WASM backend from cdn.jsdelivr.net. Both are blocked here on purpose:
+ * `script-src` and `connect-src` are `'self'`, and a sign-in that depends on
+ * two third-party CDNs staying reachable is a sign-in with two more ways to
+ * fail — in countries where that reachability is not a given. Same reasoning
+ * that put opencv.js and MediaPipe in this directory.
+ *
+ * One manifest and one weight shard; the manifest names the shard, so both are
+ * fetched from the same directory.
+ */
+const BLAZEFACE_BASE =
+    'https://tfhub.dev/tensorflow/tfjs-model/blazeface/1/default/1/model.json?tfjs-format=file';
+/** ~64 KB of JSON; anything much smaller is an error page. */
+const BLAZEFACE_MIN_BYTES = 20 * 1024;
+
 // ── MediaPipe: copy from node_modules ───────────────────────────────────────
 function syncMediapipe() {
     const src = join(root, 'node_modules', '@mediapipe', 'tasks-vision', 'wasm');
@@ -135,12 +154,83 @@ async function syncFaceModel() {
     }
 }
 
-// All three, unconditionally — `a && await b` would skip a download whenever an
-// earlier step failed, which is exactly the fresh-clone case.
+// ── TensorFlow WASM backend: copy from node_modules ─────────────────────────
+// Same argument as MediaPipe's WASM — copied rather than downloaded so the
+// served binaries cannot drift from the @tensorflow/tfjs-backend-wasm version
+// the liveness component was built against.
+function syncTfjsWasm() {
+    const src = join(root, 'node_modules', '@tensorflow', 'tfjs-backend-wasm', 'dist');
+    const dest = join(vendor, 'tfjs-wasm');
+    if (!existsSync(src)) {
+        console.error(`[sync-vendor] missing ${src} — run npm install first.`);
+        return false;
+    }
+    mkdirSync(dest, { recursive: true });
+    let n = 0;
+    let bytes = 0;
+    for (const name of readdirSync(src)) {
+        // Only the binaries the browser fetches at runtime. The package also
+        // ships JS entry points, which the bundler handles itself.
+        if (!name.endsWith('.wasm')) continue;
+        const from = join(src, name);
+        if (!statSync(from).isFile()) continue;
+        copyFileSync(from, join(dest, name));
+        bytes += statSync(from).size;
+        n++;
+    }
+    console.log(`[sync-vendor] tfjs-wasm: ${n} files (${(bytes / 1048576).toFixed(1)} MB)`);
+    return n > 0;
+}
+
+// ── Blazeface: download the manifest and the shard it names ─────────────────
+async function syncBlazeface() {
+    const dest = join(vendor, 'blazeface');
+    const manifestPath = join(dest, 'model.json');
+    if (existsSync(manifestPath) && statSync(manifestPath).size >= BLAZEFACE_MIN_BYTES) {
+        console.log('[sync-vendor] blazeface: already present, skipping');
+        return true;
+    }
+    mkdirSync(dest, { recursive: true });
+    console.log('[sync-vendor] blazeface: downloading …');
+    try {
+        const res = await fetch(BLAZEFACE_BASE, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`manifest HTTP ${res.status}`);
+        const text = await res.text();
+        if (text.length < BLAZEFACE_MIN_BYTES) {
+            throw new Error(`manifest was ${text.length} bytes — probably an error page`);
+        }
+        writeFileSync(manifestPath, text);
+
+        // The manifest names its own weight files, so follow it rather than
+        // hardcoding a shard count that a future model revision could change.
+        const manifest = JSON.parse(text);
+        const shards = (manifest.weightsManifest ?? []).flatMap((w) => w.paths ?? []);
+        if (shards.length === 0) throw new Error('manifest lists no weight files');
+
+        const base = new URL(BLAZEFACE_BASE);
+        for (const shard of shards) {
+            const url = new URL(shard, base).toString();
+            const bin = await fetch(url, { redirect: 'follow' });
+            if (!bin.ok) throw new Error(`${shard} HTTP ${bin.status}`);
+            writeFileSync(join(dest, shard), Buffer.from(await bin.arrayBuffer()));
+        }
+        console.log(`[sync-vendor] blazeface: model.json + ${shards.length} shard(s)`);
+        return true;
+    } catch (err) {
+        console.error(`[sync-vendor] blazeface FAILED: ${err.message}`);
+        console.error('[sync-vendor] The AWS liveness check will not start.');
+        return false;
+    }
+}
+
+// All of them, unconditionally — `a && await b` would skip a download whenever
+// an earlier step failed, which is exactly the fresh-clone case.
 const mediapipeOk = syncMediapipe();
 const faceModelOk = await syncFaceModel();
+const tfjsOk = syncTfjsWasm();
+const blazefaceOk = await syncBlazeface();
 const openCvOk = await syncOpenCv();
-const ok = mediapipeOk && faceModelOk && openCvOk;
+const ok = mediapipeOk && faceModelOk && tfjsOk && blazefaceOk && openCvOk;
 // Do not fail the install: a developer who never touches KYC should not be
 // blocked by a flaky download. The warning above is the signal.
 if (!ok) console.warn('[sync-vendor] completed with errors (see above).');

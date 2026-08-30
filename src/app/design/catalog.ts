@@ -191,6 +191,13 @@ export const DESIGN_CATALOG: DesignEntry[] = [
         note: 'Live camera — hold still 2s to see the capture and verdict states',
     },
     {
+        slug: 'kyc-face-liveness',
+        title: 'Face scan — AWS liveness',
+        group: 'Identity',
+        canvas: 'mobile',
+        note: 'Real Rekognition. The oval is AWS’s and cannot be restyled',
+    },
+    {
         slug: 'kyc-intro',
         title: 'Intro',
         group: 'Identity',

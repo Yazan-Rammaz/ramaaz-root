@@ -16,6 +16,7 @@ import type { VerificationStep } from '@/features/kyc/types/verification';
 import VerificationPage from '@/features/kyc/components/VerificationPage';
 
 import { SystemList } from '@/features/system/components/SystemList';
+import { FaceLivenessScreen } from '@/features/kyc/components/screens/FaceLivenessScreen';
 
 // The real route components. These have no guards of their own — the session
 // gate lives in the (dashboard) layout, and `no-access` / `forbidden` are
@@ -129,6 +130,21 @@ export const SCREENS: Record<string, () => ReactNode> = {
 
     // ── Identity (KYC) ──────────────────────────────────────────────────────
     'kyc-face-scan': () => <KycStep step="face-reverify" />,
+
+    // The AWS replacement for the screen above. Rendered directly rather than
+    // through VerificationPage, because it is not a step in that state machine
+    // yet — the point of this entry is to judge whether it should become one.
+    //
+    // ⚠️ It talks to the REAL Rekognition. The challenge id below is a
+    // placeholder, so /reverify/start will refuse it and the screen will show
+    // its failure state. To see the oval, open it inside a live sign-in.
+    'kyc-face-liveness': () => (
+        <AuthShell>
+            <Screen variant="centered" maxW={430} gutter={0} className="h-full">
+                <FaceLivenessScreen challengeId="design-preview" />
+            </Screen>
+        </AuthShell>
+    ),
     'kyc-intro': () => <KycStep step="intro" />,
     'kyc-id-front': () => <KycStep step="id-capture-front" />,
     'kyc-id-back': () => <KycStep step="id-capture-back" />,

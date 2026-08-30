@@ -65,7 +65,24 @@ function buildCsp(nonce: string, framable: boolean) {
     const scriptSrc = dev
         ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval' 'wasm-unsafe-eval'`
         : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`;
-    const connectSrc = dev ? `connect-src 'self' ws:` : `connect-src 'self'`;
+    // ── The one third party the browser may talk to ─────────────────────────
+    //
+    // Amazon Rekognition Face Liveness streams the selfie video from the BROWSER
+    // to AWS over a signed WebSocket. There is no server-side path: the Amplify
+    // component signs the socket itself, and no worker can stand in the middle
+    // of a live stream. So `connect-src 'self'` — which is what stops this app
+    // from talking to anything but its own origin — has to name that host.
+    //
+    // It is narrow on purpose. Only the streaming endpoint, only wss, and only
+    // in the region the Worker creates sessions in. The credentials the browser
+    // signs with are minted per attempt by the KYC Worker via STS, last fifteen
+    // minutes, and permit exactly `rekognition:StartFaceLivenessSession` — see
+    // livenessCredentials() in the ramaaz-kyc repo. Everything else about the
+    // BFF rule stands: no other origin, and no token that outlives the check.
+    const rekognitionStreaming = 'wss://streaming-rekognition.us-east-1.amazonaws.com';
+    const connectSrc = dev
+        ? `connect-src 'self' ws: ${rekognitionStreaming}`
+        : `connect-src 'self' ${rekognitionStreaming}`;
     const directives = [
         `default-src 'self'`,
         scriptSrc,
