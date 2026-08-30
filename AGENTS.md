@@ -247,13 +247,14 @@ Three languages, **one way**: `next-intl` with a **cookie-based** locale (no
 Verify changes by running the app. CI reflects this: it runs lint, typecheck and
 build, nothing else.
 
-> ⚠️ **Open question.** The branch model in §8 says a feature merges to `main`
-> "with tests and closed scenarios". If that means *automated* tests, this
-> paragraph and `.github/workflows/ci.yml` both have to change — the scripts and
-> the tooling are gone (`vitest.config.ts` and the suites were deleted, and the
-> workflow referenced `npm run test` / `npm run e2e` for months after neither
-> existed, which is why CI was permanently red). Decide which it is before the
-> next feature lands.
+**Tests are written on request, at one moment only.** Nothing is tested day to
+day; changes are verified by running the app. When a feature is fully complete
+and about to merge to `main`, the owner asks for test files for it — he
+initiates that, so do not offer, do not ask whether tests are wanted, and do not
+flag CI for having no test step. `vitest.config.ts` and the old suites were
+deleted deliberately; the workflow referenced `npm run test` / `npm run e2e` for
+months after both scripts were gone, which is why CI was permanently red until
+those steps were removed.
 
 **Repo:** `https://github.com/Yazan-Rammaz/ramaaz-root`. Both `dev` and `main`
 are pushed and currently identical. `dev` is the default branch.
