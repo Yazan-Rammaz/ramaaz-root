@@ -16,7 +16,7 @@ import type { VerificationStep } from '@/features/kyc/types/verification';
 import VerificationPage from '@/features/kyc/components/VerificationPage';
 
 import { SystemList } from '@/features/system/components/SystemList';
-import { FaceLivenessScreen } from '@/features/kyc/components/screens/FaceLivenessScreen';
+import { FaceLivenessPreview } from './FaceLivenessPreview';
 
 // The real route components. These have no guards of their own — the session
 // gate lives in the (dashboard) layout, and `no-access` / `forbidden` are
@@ -142,13 +142,10 @@ export const SCREENS: Record<string, () => ReactNode> = {
     'kyc-face-liveness': () => (
         <AuthShell>
             <Screen variant="centered" maxW={430} gutter={0} className="h-full">
-                <FaceLivenessScreen
-                    challengeId="design-preview"
-                    // Never reached without a valid challenge; present because
-                    // the prop is required, and required because in the real
-                    // flow a session with nowhere to go is a bug.
-                    onSession={async () => ({ error: 'Design gallery — no live challenge.' })}
-                />
+                {/* Through a client wrapper — this file is a Server Component,
+                    and the screen needs an `onSession` function, which cannot
+                    cross that boundary as a prop. */}
+                <FaceLivenessPreview />
             </Screen>
         </AuthShell>
     ),
