@@ -89,14 +89,22 @@ function DashboardShell({ children }: { children: ReactNode }) {
  */
 function KycStep({ step }: { step: VerificationStep }) {
     return (
-        <Screen variant="centered" maxW={430} gutter={0} className="h-full">
-            <KycSessionProvider initialUser={FIXTURE_KYC_USER}>
-                <VerificationProvider initialStep={step}>
-                    <SeedVerification />
-                    <VerificationPage />
-                </VerificationProvider>
-            </KycSessionProvider>
-        </Screen>
+        // AuthShell, because the real ones have it. Every KYC step is served
+        // from /login/identity, which lives in the (auth) route group and is
+        // therefore wrapped by that group's layout — the positioned container
+        // and the rdb brand mark over it. The gallery skipped straight to
+        // <Screen>, so it was showing these screens in a shell they never
+        // actually render in: the same markup, one wrapper short.
+        <AuthShell>
+            <Screen variant="centered" maxW={430} gutter={0} className="h-full">
+                <KycSessionProvider initialUser={FIXTURE_KYC_USER}>
+                    <VerificationProvider initialStep={step}>
+                        <SeedVerification />
+                        <VerificationPage />
+                    </VerificationProvider>
+                </KycSessionProvider>
+            </Screen>
+        </AuthShell>
     );
 }
 
@@ -134,9 +142,12 @@ export const SCREENS: Record<string, () => ReactNode> = {
     // are passed, so each step reports "passed" locally and moves on without
     // anything leaving the browser.
     'identity-flow': () => (
-        <Screen variant="centered" maxW={430} gutter={0} className="h-full">
-            <IdentityGate needsEnrollment={false} />
-        </Screen>
+        // Same shell as the route this mirrors — /login/identity, inside (auth).
+        <AuthShell>
+            <Screen variant="centered" maxW={430} gutter={0} className="h-full">
+                <IdentityGate needsEnrollment={false} />
+            </Screen>
+        </AuthShell>
     ),
 
     // ── Dashboard ───────────────────────────────────────────────────────────
