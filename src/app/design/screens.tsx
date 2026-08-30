@@ -17,6 +17,7 @@ import VerificationPage from '@/features/kyc/components/VerificationPage';
 
 import { SystemList } from '@/features/system/components/SystemList';
 import { FaceLivenessPreview } from './FaceLivenessPreview';
+import { LivenessLab } from './LivenessLab';
 
 // The real route components. These have no guards of their own — the session
 // gate lives in the (dashboard) layout, and `no-access` / `forbidden` are
@@ -149,6 +150,9 @@ export const SCREENS: Record<string, () => ReactNode> = {
             </Screen>
         </AuthShell>
     ),
+    // The bench. No AuthShell and no Screen: it is a tool, not a screen of the
+    // product, and dressing it as one would invite it being read as design.
+    'liveness-lab': () => <LivenessLab />,
     'kyc-intro': () => <KycStep step="intro" />,
     'kyc-id-front': () => <KycStep step="id-capture-front" />,
     'kyc-id-back': () => <KycStep step="id-capture-back" />,

@@ -198,6 +198,13 @@ export const DESIGN_CATALOG: DesignEntry[] = [
         note: 'Real Rekognition. The oval is AWS’s and cannot be restyled',
     },
     {
+        slug: 'liveness-lab',
+        title: 'Liveness bench',
+        group: 'Identity',
+        canvas: 'mobile',
+        note: 'Attack the real AWS check, read the score, run again',
+    },
+    {
         slug: 'kyc-intro',
         title: 'Intro',
         group: 'Identity',

@@ -15,3 +15,9 @@ NEST_API_URL="https://staging-backend.ramaaz.store"
 # `vars` entry: a vars entry shadows a secret of the same name, and would commit
 # the value. Unlock a device once at /design/unlock?key=<value>.
 DESIGN_GALLERY_KEY=""
+
+# Unlocks the liveness bench at /design/liveness-lab — runs the real AWS Face
+# Liveness check with no sign-in around it, so a spoof can be attempted over and
+# over. Must match LIVENESS_LAB_SECRET on the ramaaz-kyc worker. Unset on both
+# sides = the routes 404 and the bench is gone. Each run costs one check.
+LIVENESS_LAB_SECRET=""

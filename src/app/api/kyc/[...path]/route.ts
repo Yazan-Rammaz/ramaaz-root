@@ -91,6 +91,40 @@ async function proxy(req: NextRequest): Promise<Response> {
   const contentType = req.headers.get("content-type");
   if (contentType) headers["Content-Type"] = contentType;
 
+  // ── The liveness bench ─────────────────────────────────────────────────────
+  //
+  // `/api/kyc/liveness-lab/*` runs the AWS liveness check on its own, so it can
+  // be attacked repeatedly without walking a whole sign-in between attempts.
+  // Testing anti-spoofing takes dozens of tries, and a bench that costs a full
+  // login per try does not get used.
+  //
+  // Two locks, and the secret never reaches the browser:
+  //
+  //   1. the caller must already be inside the design gallery — in production
+  //      that means holding the `design_gallery` cookie, which is itself a key
+  //      exchange (see app/design/layout.tsx);
+  //   2. this handler adds `X-Liveness-Lab` from OUR secret. The Worker 404s
+  //      those routes without it, and 404s them outright if its own
+  //      `LIVENESS_LAB_SECRET` is unset — which is the production default.
+  //
+  // The bench cannot sign anyone in: it never reads a challenge, never returns
+  // an image, never compares a face and never mints a stepToken. All it can
+  // produce is a status and a number. See the block above the routes in
+  // ramaaz-kyc/src/routes/kyc.ts.
+  if (pathname.includes("/liveness-lab/")) {
+    const secret = process.env.LIVENESS_LAB_SECRET;
+    const unlocked =
+      process.env.NODE_ENV === "development" ||
+      req.cookies.get("design_gallery")?.value === process.env.DESIGN_GALLERY_KEY;
+
+    if (!secret || !unlocked) {
+      // 404, not 403 — the same answer /design gives, and for the same reason:
+      // a 403 confirms there is something here.
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    headers["X-Liveness-Lab"] = secret;
+  }
+
   // Prefer the challenge: during sign-in it is the ONLY credential that exists,
   // and it must go as X-Step-Token rather than a bearer so the Worker commits
   // to the step-scoped route. A stale access cookie must not shadow it.
