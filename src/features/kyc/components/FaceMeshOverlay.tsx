@@ -302,7 +302,15 @@ export function FaceMeshOverlay({
                 const freshness = container.querySelector<HTMLCanvasElement>(
                     '.amplify-liveness-freshness-canvas',
                 );
-                if (countdown || (freshness?.getBoundingClientRect().width ?? 0) > 0) {
+                // The camera itself is the signal that cannot be missed. The two
+                // selectors above are AWS's markup and depend on their class
+                // names surviving a release; when neither matched, the mesh sat
+                // over the black frame after recording stopped, drawn on top of
+                // a face that was no longer there. A released camera track means
+                // the recording is over whatever their DOM is called.
+                const track = (video.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
+                const cameraGone = !track || track.readyState === 'ended' || !video.videoWidth;
+                if (countdown || (freshness?.getBoundingClientRect().width ?? 0) > 0 || cameraGone) {
                     captured = true;
                 }
             }

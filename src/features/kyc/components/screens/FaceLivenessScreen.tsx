@@ -62,6 +62,7 @@ export function FaceLivenessScreen({
     challengeId,
     onSession,
     onPassed,
+    onFaceCaptured,
 }: {
     /** Identifies the sign-in this check belongs to. Not a credential. */
     challengeId: string;
@@ -88,6 +89,17 @@ export function FaceLivenessScreen({
      * Optional: the design gallery and the bench have nothing to commit to.
      */
     onPassed?: () => Promise<{ error?: string } | void>;
+    /**
+     * The frame this check ended on, for the steps that follow.
+     *
+     * The enrolment screens compare the ID document against the face captured
+     * HERE, so the admin never photographs themselves twice — the single-frame
+     * capture has always fed that, and without this the liveness path left the
+     * ID-match screen with no face to compare against at all.
+     *
+     * Presentational, like the still itself: this is not the image AWS judged.
+     */
+    onFaceCaptured?: (frame: string | null) => void;
 }) {
     const t = useTranslations('auth');
 
@@ -176,7 +188,9 @@ export function FaceLivenessScreen({
             // The still goes up first so the checking state has a face to scan
             // rather than a black box for the second or two this takes.
             setSnapshot(shot);
+            onFaceCaptured?.(shot);
             setPhase('checking');
+
             try {
                 const result = await onSession(sessionId);
                 if (result?.error) {
@@ -184,24 +198,40 @@ export function FaceLivenessScreen({
                     setPhase('failed');
                     return;
                 }
-                setPhase('passed');
+            } catch (err) {
+                setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
+                setPhase('failed');
+                return;
+            }
 
-                // Let the success pulse play before committing, because
-                // committing navigates and a redirect never comes back. Matched
-                // to `verdict-burst` in globals.css — change one, change both.
-                await new Promise((resolve) => setTimeout(resolve, 1100));
+            setPhase('passed');
 
+            // Let the success pulse play before committing, because committing
+            // navigates and a redirect never comes back. Matched to
+            // `verdict-burst` in globals.css — change one, change both.
+            await new Promise((resolve) => setTimeout(resolve, 1100));
+
+            try {
                 const committed = await onPassed?.();
                 if (committed?.error) {
                     setError(committed.error);
                     setPhase('failed');
                 }
             } catch (err) {
+                // ⚠️ A Server Action that redirects signals by THROWING, and
+                // that throw IS the success path. Catching it as a failure is
+                // what turned every passed check green and then instantly red.
+                //
+                // Next tags its own control-flow errors with a `digest` — let
+                // those through so the navigation happens. Anything else is a
+                // real commit failure and belongs on screen.
+                const digest = (err as { digest?: unknown } | null)?.digest;
+                if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) throw err;
                 setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
                 setPhase('failed');
             }
         },
-        [onSession, onPassed, sessionId, t],
+        [onSession, onPassed, onFaceCaptured, sessionId, t],
     );
 
     return (

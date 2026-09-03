@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
@@ -93,28 +93,55 @@ export function LivenessCamera({
     const frameRef = useRef<HTMLDivElement>(null);
 
     /**
-     * Freeze the last frame before AWS disposes of its video element.
+     * A rolling copy of the last usable camera frame.
      *
-     * It has to happen inside `onAnalysisComplete` and synchronously: the widget
-     * tears down as soon as the stream ends, and a frame grabbed one tick later
-     * is grabbed from an element that is already gone.
+     * ── Why a rolling copy and not a grab at the end ────────────────────────
+     * Grabbing at `onAnalysisComplete` returns a BLACK frame. By the time that
+     * fires AWS has already stopped the recording and released the camera, so
+     * the video element is still in the DOM but has no picture left in it —
+     * which is exactly what shipped: a black rectangle where the face should be
+     * for the whole checking state.
+     *
+     * So a frame is kept warm throughout. Only the pixels are copied on each
+     * tick; the expensive part — encoding to a data URL — happens once, at the
+     * end, on whatever the last good frame was.
      */
+    const lastFrame = useRef<HTMLCanvasElement | null>(null);
+
+    useEffect(() => {
+        const id = setInterval(() => {
+            const video = frameRef.current?.querySelector('video');
+            if (!video?.videoWidth) return;
+            const canvas = (lastFrame.current ??= document.createElement('canvas'));
+            if (canvas.width !== video.videoWidth) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+            }
+            try {
+                canvas.getContext('2d')?.drawImage(video, 0, 0);
+            } catch {
+                // A tainted canvas would throw. Same-origin stream, so it should
+                // not — and a missing still must never break the check.
+            }
+        }, 400);
+        return () => clearInterval(id);
+    }, []);
+
+    /** Encode the freshest frame we have. Null if we never got one. */
     const grabSnapshot = (): string | null => {
         const video = frameRef.current?.querySelector('video');
-        if (!video?.videoWidth) return null;
+        const canvas = lastFrame.current;
         try {
-            const shot = document.createElement('canvas');
-            shot.width = video.videoWidth;
-            shot.height = video.videoHeight;
-            const ctx = shot.getContext('2d');
-            if (!ctx) return null;
-            ctx.drawImage(video, 0, 0);
+            // Prefer a live frame if there somehow still is one; fall back to
+            // the last one kept warm above, which is the usual case.
+            if (video?.videoWidth && canvas) {
+                canvas.getContext('2d')?.drawImage(video, 0, 0);
+            }
+            if (!canvas?.width) return null;
             // JPEG, not PNG: this is a photograph, and a PNG of a camera frame
             // is several megabytes of base64 held in React state.
-            return shot.toDataURL('image/jpeg', 0.85);
+            return canvas.toDataURL('image/jpeg', 0.85);
         } catch {
-            // A tainted canvas would throw. The stream is same-origin so it
-            // should not — and a missing still must never fail the check.
             return null;
         }
     };

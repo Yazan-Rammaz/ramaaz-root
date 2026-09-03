@@ -128,6 +128,20 @@ export default function VerificationPage({
                             challengeId={challengeId}
                             onSession={onLivenessSession}
                             onPassed={onLivenessPassed}
+                            // The enrolment steps compare the ID against the
+                            // face captured here, so the admin never
+                            // photographs themselves twice. The single-frame
+                            // branch below has always done this; without it the
+                            // liveness path reached the ID-match screen with no
+                            // face to compare against.
+                            onFaceCaptured={(frame) => {
+                                if (!frame) return;
+                                setLivenessResult({
+                                    isLive: true,
+                                    faceImageData: frame,
+                                    timestamp: Date.now(),
+                                });
+                            }}
                         />
                     );
                 }
