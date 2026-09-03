@@ -95,7 +95,7 @@ export function LivenessVerdict({
             {phase === 'checking' && (
                 <span
                     aria-hidden
-                    className="verdict-scan pointer-events-none absolute inset-x-0 top-0 h-64 motion-reduce:hidden"
+                    className="verdict-scan pointer-events-none absolute inset-x-0 top-0 h-64"
                 />
             )}
 
@@ -103,7 +103,7 @@ export function LivenessVerdict({
             {phase === 'passed' && (
                 <span
                     aria-hidden
-                    className="verdict-burst pointer-events-none absolute inset-0 motion-reduce:hidden"
+                    className="verdict-burst pointer-events-none absolute inset-0"
                 />
             )}
 

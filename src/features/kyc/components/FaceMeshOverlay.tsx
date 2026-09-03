@@ -238,6 +238,8 @@ export function FaceMeshOverlay({
         let presence = 0;
         /** Latched once AWS starts recording. See the block below. */
         let captured = false;
+        /** Has the camera ever actually produced frames? See `cameraGone`. */
+        let everLive = false;
         /** Landmark indices of the features to keep clear. */
         let zoneIndices: number[][] | null = null;
 
@@ -308,8 +310,16 @@ export function FaceMeshOverlay({
                 // over the black frame after recording stopped, drawn on top of
                 // a face that was no longer there. A released camera track means
                 // the recording is over whatever their DOM is called.
+                //
+                // ⚠️ `everLive` is what makes that safe. Before the camera opens
+                // the track is absent and `videoWidth` is 0 — which is
+                // indistinguishable from "released" if you only look at the
+                // current state. Latching on it directly ended the mesh at mount
+                // and it never drew at all.
                 const track = (video.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
-                const cameraGone = !track || track.readyState === 'ended' || !video.videoWidth;
+                if (track?.readyState === 'live' && video.videoWidth) everLive = true;
+                const cameraGone =
+                    everLive && (!track || track.readyState === 'ended' || !video.videoWidth);
                 if (countdown || (freshness?.getBoundingClientRect().width ?? 0) > 0 || cameraGone) {
                     captured = true;
                 }

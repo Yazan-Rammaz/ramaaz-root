@@ -105,7 +105,6 @@ export function FaceLivenessScreen({
 
     const [phase, setPhase] = useState<Phase>('preparing');
     const [session, setSession] = useState<StartResponse | null>(null);
-    const [error, setError] = useState<string | null>(null);
     /** The last camera frame, shown while the servers decide. Never judged. */
     const [snapshot, setSnapshot] = useState<string | null>(null);
     /**
@@ -141,9 +140,9 @@ export function FaceLivenessScreen({
                 if (!started?.sessionId) throw new Error('no session id');
                 setSession(started);
                 setPhase('ready');
-            } catch {
+            } catch (err) {
                 if (cancelled) return;
-                setError(t('faceSetupFailed'));
+                console.error('[liveness] could not open a session:', err);
                 setPhase('failed');
             }
         })();
@@ -194,12 +193,12 @@ export function FaceLivenessScreen({
             try {
                 const result = await onSession(sessionId);
                 if (result?.error) {
-                    setError(result.error);
+                    console.error('[liveness] refused:', result.error);
                     setPhase('failed');
                     return;
                 }
             } catch (err) {
-                setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
+                console.error('[liveness] verify threw:', err);
                 setPhase('failed');
                 return;
             }
@@ -214,7 +213,7 @@ export function FaceLivenessScreen({
             try {
                 const committed = await onPassed?.();
                 if (committed?.error) {
-                    setError(committed.error);
+                    console.error('[liveness] commit refused:', committed.error);
                     setPhase('failed');
                 }
             } catch (err) {
@@ -227,11 +226,11 @@ export function FaceLivenessScreen({
                 // real commit failure and belongs on screen.
                 const digest = (err as { digest?: unknown } | null)?.digest;
                 if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) throw err;
-                setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
+                console.error('[liveness] commit threw:', err);
                 setPhase('failed');
             }
         },
-        [onSession, onPassed, onFaceCaptured, sessionId, t],
+        [onSession, onPassed, onFaceCaptured, sessionId],
     );
 
     return (
@@ -295,7 +294,6 @@ export function FaceLivenessScreen({
                             // still and the reason go first: leaving either up
                             // would show the last failure over the new attempt.
                             setSnapshot(null);
-                            setError(null);
                             setPhase('preparing');
                             setAttempt((n) => n + 1);
                         }}
@@ -328,33 +326,22 @@ export function FaceLivenessScreen({
                             // RUNTIME_ERROR covers everything unclassified — so
                             // log the whole object for the cause.
                             console.error('[liveness] detector error', err);
-                            setError(t('faceSetupFailed'));
                             setPhase('failed');
                         }}
                     />
                 )}
             </div>
 
-            {/* The reason, and only when there is one worth reading.
-                Zero-height so it cannot move the frame — same treatment as
-                FaceScanScreen.
+            {/* Nothing is written under the frame.
 
-                The verdict inside the frame is wordless by design, but a backend
-                that refused for a NAMED reason ("no enrolled selfie on file")
-                must still say so: a red ring and a retry icon would send the
-                user round a loop that cannot succeed. Generic failures stay
-                silent and let the ring speak. */}
-            {phase === 'failed' && error && error !== t('faceVerifyFailed') && (
-                <div className="relative h-0 w-350">
-                    <p
-                        role="alert"
-                        className="fz-12 absolute inset-x-0 px-20 text-center leading-normal font-medium text-[#FF3B30]"
-                        style={{ top: rem(16) }}
-                    >
-                        {error}
-                    </p>
-                </div>
-            )}
+                A reason used to print here when the backend named one. It is
+                gone by request: the ring and the retry carry the outcome, and a
+                line of red text appearing under a screen that has just gone
+                green reads as a failure even when it is not.
+
+                The reason is NOT discarded — `error` still holds it and it is
+                logged at the point of failure, so a support call can still be
+                answered. It is simply not on the screen. */}
         </main>
     );
 }
