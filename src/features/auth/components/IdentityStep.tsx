@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import { IdentityGate } from '@/features/kyc/components/IdentityGate';
 import { createKycService } from '@/features/kyc/services';
 import { submitFaceAction, submitIdentityDocumentAction } from '../actions';
@@ -35,6 +36,19 @@ export function IdentityStep({
     needsEnrollment: boolean;
     challengeId: string;
 }) {
+    /**
+     * The step token, parked between verifying and committing.
+     *
+     * Those used to be one call. They are split so the screen can play its
+     * success animation before the commit — because committing REDIRECTS, and a
+     * server action that redirects never returns, so anything the UI wanted to
+     * show afterwards had nowhere to happen.
+     *
+     * A ref, not state: nothing renders from it, and a re-render between the two
+     * halves would drop a single-use credential on the floor.
+     */
+    const stepToken = useRef<string | null>(null);
+
     return (
         <IdentityGate
             needsEnrollment={needsEnrollment}
@@ -87,7 +101,24 @@ export function IdentityStep({
                     };
                 }
 
-                const result = await submitFaceAction(verdict.stepToken);
+                // Verified. Park the token; `onLivenessPassed` spends it once
+                // the screen has shown the result.
+                stepToken.current = verdict.stepToken;
+                return undefined;
+            }}
+            /**
+             * Spend the step token and move to the next stage — after the
+             * success animation, not the moment the verdict lands.
+             *
+             * Cleared BEFORE the call, not after: it is single-use, and a retry
+             * that re-posted a spent token would fail in a way that reads as a
+             * failed face check rather than a spent credential.
+             */
+            onLivenessPassed={async () => {
+                const token = stepToken.current;
+                stepToken.current = null;
+                if (!token) return { error: 'This verification has already been used.' };
+                const result = await submitFaceAction(token);
                 return result?.error ? { error: result.error } : undefined;
             }}
             onCapture={async (frame) => {

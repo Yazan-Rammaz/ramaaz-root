@@ -25,6 +25,7 @@
         "faceCaptureFailed": "تعذّر التقاط الصورة. حاول مرة أخرى.",
         "faceCameraBlocked": "الوصول إلى الكاميرا محظور. اسمح به في المتصفح، ثم افتح رابط الدخول من جديد.",
         "faceVerifyFailed": "فشل التحقق — حاول مرة أخرى",
+        "faceVerified": "تم التحقق من الوجه",
         "deviceTitle": "تحقّق من هذا الجهاز",
         "deviceBody": "حسابك محميّ بمفتاح مرور على هذا الجهاز. أكّد ببصمتك أو وجهك أو رمز الجهاز عندما يطلب المتصفح ذلك.",
         "devicePrompting": "بانتظار جهازك…",
@@ -40,7 +41,10 @@
         "introTerms": "شروط الخدمة",
         "introStart": "ابدأ التحقق من الهوية",
         "introDisagree": "عدم الموافقة",
-        "faceSetupFailed": "تعذّر بدء التحقق من الوجه."
+        "faceSetupFailed": "تعذّر بدء التحقق من الوجه.",
+        "livenessRecording": "تسجيل",
+        "livenessCancel": "إلغاء الفحص",
+        "livenessPhotosensitivity": "يومض هذا الفحص بضوء ملوّن."
     },
     "common": {
         "appName": "Ramaaz Root",

@@ -2,7 +2,9 @@
 
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useTranslations } from 'next-intl';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
+import { restartSignInAction } from '@/features/auth/actions';
 import IntroScreen from './screens/IntroScreen';
 import IDCaptureScreen from './screens/IDCaptureScreen';
 import IDSummaryScreen from './screens/IDSummaryScreen';
@@ -15,11 +17,37 @@ import { FaceLivenessScreen } from './screens/FaceLivenessScreen';
 
 const transition = { duration: 0.35, ease: [0.4, 0, 0.2, 1] as [number, number, number, number] };
 
+/**
+ * The face step cannot run: this sign-in has no challenge id.
+ *
+ * Deliberately offers only "start over". There is nothing to retry here — the
+ * challenge is what the whole step is scoped to, and a fresh access link is the
+ * only thing that produces a new one.
+ */
+function MissingChallenge() {
+    const t = useTranslations('auth');
+    return (
+        <main className="flex h-full flex-col items-center justify-center gap-12 px-24">
+            <p role="alert" className="fz-14 text-center leading-normal font-medium text-[#FF3B30]">
+                {t('faceSetupFailed')}
+            </p>
+            <button
+                type="button"
+                className="fz-14 text-primary leading-none font-semibold underline"
+                onClick={() => void restartSignInAction()}
+            >
+                {t('startOver')}
+            </button>
+        </main>
+    );
+}
+
 export default function VerificationPage({
     onCapture,
     onReverified,
     challengeId,
     onLivenessSession,
+    onLivenessPassed,
     faceVerified = false,
     onEnroll,
 }: {
@@ -57,6 +85,8 @@ export default function VerificationPage({
      * — see the `face-reverify` case below.
      */
     onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
+    /** Commits the verified step, after the success animation. */
+    onLivenessPassed?: () => Promise<{ error?: string } | void>;
 } = {}) {
     const { currentStep, direction, setLivenessResult } = useVerification();
 
@@ -97,8 +127,26 @@ export default function VerificationPage({
                         <FaceLivenessScreen
                             challengeId={challengeId}
                             onSession={onLivenessSession}
+                            onPassed={onLivenessPassed}
                         />
                     );
+                }
+                // ── Half a pair is a broken sign-in, not a weaker one ─────────
+                //
+                // The gallery mounts this with NEITHER, and falls through to the
+                // capture below — that is the fallback's purpose. But the real
+                // flow always passes `onLivenessSession`, so having it WITHOUT a
+                // challenge id means a real sign-in lost its challenge, and
+                // quietly handing that user the single-frame camera would be
+                // downgrading the anti-spoofing check exactly when something has
+                // already gone wrong.
+                //
+                // It would not even work: the Worker now refuses
+                // `liveFaceImageData` for this tenant, so the capture ends in a
+                // generic failure after the user has held still for it. Saying
+                // so up front costs them nothing and tells them what to do.
+                if (onLivenessSession && !challengeId) {
+                    return <MissingChallenge />;
                 }
                 // The capture designed for this flow: one black frame, yellow
                 // corner brackets, automatic capture once the local gate is

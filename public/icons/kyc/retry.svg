@@ -1,0 +1,15 @@
+<!--
+  PLACEHOLDER — not an XD export.
+
+  /public/icons is meant to hold icons exported from the XD file (AGENTS.md §5),
+  and the set had no retry glyph when the failed-verification screen needed one.
+  This is a plain refresh arrow drawn to the same 24px box as the rest, single
+  colour so `<Icon mask />` can recolour it. Replace it with the real export and
+  nothing else has to change.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+     fill="none" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round">
+  <path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01" />
+  <polyline points="20.5 4 20.5 9.5 15 9.5" />
+</svg>

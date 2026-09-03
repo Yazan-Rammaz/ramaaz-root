@@ -397,3 +397,61 @@ body {
     box-shadow: 0 0 1.5rem rgba(52, 199, 89, 0.5);
     animation: face-scanline 1.4s ease-in-out infinite alternate;
 }
+
+/* =============================================================================
+   The verdict, after the liveness stream ends
+   -----------------------------------------------------------------------------
+   Three states over one frozen frame of the user's own face. No copy on any of
+   them: the colour and the motion carry it, which is what the design asks for
+   and what survives translation.
+   ========================================================================== */
+
+/* Scanning — while the WebSocket result and the face comparison are fetched.
+   Deliberately the same bar as `.face-scanline` above rather than a second
+   idiom: that one already means "hold still, something else is working", and
+   this is the same moment. It is repeated here only to run over the still. */
+@keyframes verdict-scan {
+    from { transform: translateY(0); }
+    to   { transform: translateY(24rem); }
+}
+
+.verdict-scan {
+    background: linear-gradient(
+        to bottom,
+        rgba(126, 205, 232, 0) 0%,
+        rgba(126, 205, 232, 0.35) 45%,
+        rgba(210, 245, 255, 0.9) 50%,
+        rgba(126, 205, 232, 0.35) 55%,
+        rgba(126, 205, 232, 0) 100%
+    );
+    box-shadow: 0 0 1.5rem rgba(126, 205, 232, 0.55);
+    animation: verdict-scan 1.5s ease-in-out infinite alternate;
+}
+
+/* Success — one pulse of light out of the centre, over the face, then gone.
+   Scale and fade together so it reads as light leaving the frame rather than a
+   circle growing in it. */
+@keyframes verdict-burst {
+    0%   { transform: scale(0.2); opacity: 0; }
+    18%  { opacity: 0.85; }
+    100% { transform: scale(2.4); opacity: 0; }
+}
+
+.verdict-burst {
+    background: radial-gradient(
+        circle,
+        rgba(52, 199, 89, 0.55) 0%,
+        rgba(52, 199, 89, 0.28) 42%,
+        rgba(52, 199, 89, 0) 70%
+    );
+    animation: verdict-burst 1.1s ease-out forwards;
+}
+
+/* The frame's own edge carries the verdict. Inset so it reads as a ring on the
+   picture rather than a border added around it — the frame is `overflow:
+   hidden`, so an outer ring would be clipped away. */
+.verdict-ring {
+    box-shadow:
+        inset 0 0 0 0.1875rem var(--verdict-color),
+        inset 0 0 1.25rem color-mix(in srgb, var(--verdict-color) 45%, transparent);
+}

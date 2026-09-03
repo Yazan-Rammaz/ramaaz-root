@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
-import { cn } from '@/lib/utils/cn';
+import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useFaceGate } from '@/features/kyc/hooks/useFaceGate';
 import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
@@ -73,16 +73,6 @@ const CAPTURE_HOLD_MS = 2000;
 
 /** How long the red frame holds before the camera reopens. */
 const FAILURE_HOLD_MS = 2000;
-
-/**
- * Radius on the elbow of each corner bracket, in XD pixels.
- *
- * With 6-wide arms this leaves an inner radius of 2, which is what keeps the
- * bend reading as a bend rather than a mitre. Raising it past the arm width
- * would round the inside faster than the outside and the corner starts to look
- * like a comma.
- */
-const BRACKET_RADIUS = 8;
 
 /**
  * The title block's height in XD pixels, and its distance from the frame.
@@ -372,42 +362,13 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                     the hold completes: the iOS Face ID tell that the device has
                     locked on, rather than a spinner that means nothing.
 
-                    The radius is the LOGICAL corner property rather than a
-                    utility class, because there isn't one to use: this project's
-                    radius utility is `rad-*`, which sets all four corners, and
-                    Tailwind's per-corner logical classes (`rounded-ss-*` and
-                    friends) don't read the XD spacing scale. Setting one corner
-                    matters — it is the elbow where the two borders actually
-                    meet, and rounding the other three tapers the open ends of
-                    each arm to a point. Logical means it mirrors in RTL on its
-                    own (AGENTS.md §9), so `start-start` follows `start-0`. */}
-                {(
-                    [
-                        ['top-0 start-0', 'border-t-6 border-s-6', 'borderStartStartRadius'],
-                        ['top-0 end-0', 'border-t-6 border-e-6', 'borderStartEndRadius'],
-                        ['bottom-0 start-0', 'border-b-6 border-s-6', 'borderEndStartRadius'],
-                        ['bottom-0 end-0', 'border-b-6 border-e-6', 'borderEndEndRadius'],
-                    ] as const
-                ).map(([pos, edges, corner]) => {
-                    const style: React.CSSProperties = {
-                        borderColor: bracketColor,
-                        [corner]: rem(BRACKET_RADIUS),
-                        margin: rem(active ? 34 : 22),
-                        opacity: active ? 1 : 0.85,
-                    };
-                    return (
-                        <span
-                            key={pos}
-                            aria-hidden
-                            className={cn(
-                                'absolute h-18 w-18 transition-all duration-500 ease-out motion-reduce:transition-none',
-                                pos,
-                                edges,
-                            )}
-                            style={style}
-                        />
-                    );
-                })}
+                    Shared with the liveness frame — see CornerBrackets for why
+                    the elbow radius is an inline logical property. */}
+                <CornerBrackets
+                    color={bracketColor}
+                    inset={active ? 34 : 22}
+                    opacity={active ? 1 : 0.85}
+                />
 
                 {/* Preparing — camera opening, or the landmarker model still on
                     the wire. Three pulsing dots, no words: the frame carries no

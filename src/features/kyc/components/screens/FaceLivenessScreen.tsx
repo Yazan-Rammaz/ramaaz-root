@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
-import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
-import '@aws-amplify/ui-react/styles.css';
 
 import { Icon } from '@/components/ui/Icon';
+import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
+import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
+import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
-import { restartSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -34,13 +33,11 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * compares that. Even a tampered client cannot submit a picture of its
  * choosing, which the single-frame flow could never prevent.
  *
- * ── What could not be matched to the design ─────────────────────────────────
- * The oval is AWS's and cannot be restyled. `FaceLivenessDetector` renders its
- * own camera surface and face guide, and exposes only two replaceable slots
- * (the photosensitivity warning and the error view) plus a flag to skip its
- * instruction screen. So the title block, spacing and colours below are ours;
- * everything inside the frame is theirs. That trade was made deliberately —
- * see the note in the design gallery entry.
+ * ── What is ours and what is theirs ─────────────────────────────────────────
+ * The title block and spacing below are ours; inside the frame, everything
+ * except the camera surface and the oval is restyled by `LivenessCamera`. The
+ * oval stays AWS's on purpose — it is drawn from the stream geometry that the
+ * face-fit test also uses, so a restyled one would stop describing the test.
  *
  * ── Credentials in the browser ──────────────────────────────────────────────
  * Unavoidable: the component signs its own WebSocket to AWS and no server can
@@ -50,49 +47,6 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * exception to the rule that the browser only ever talks to our own origin —
  * `connect-src` in middleware.ts names the streaming host for that reason.
  */
-
-/**
- * `FaceLivenessDetectorCore`, not `FaceLivenessDetector`.
- *
- * They are the same component with different credential stories. The plain one
- * expects Amplify Auth — a Cognito identity pool — and its config type
- * explicitly `Omit`s `credentialProvider`, so it cannot be handed credentials
- * from elsewhere. Core exists for exactly our case: our own Worker mints them,
- * no Cognito, and therefore no `Amplify.configure()` at all.
- *
- * ── The two model files, and why they are ours ──────────────────────────────
- * Core's defaults fetch its TensorFlow WASM backend from cdn.jsdelivr.net and
- * its Blazeface model from tfhub.dev. Both are blocked here: `script-src` and
- * `connect-src` are `'self'`, deliberately, and a sign-in that depends on two
- * third-party CDNs staying up is a sign-in with two extra ways to fail. So they
- * are vendored into /public/vendor by scripts/sync-vendor.mjs — the same
- * treatment opencv.js and MediaPipe already get — and pointed at below.
- */
-const TFJS_WASM_PATH = '/vendor/tfjs-wasm/';
-const BLAZEFACE_MODEL_URL = '/vendor/blazeface/model.json';
-
-/** The one place AWS's own palette is bent toward ours. */
-const livenessTheme = createTheme({
-    name: 'root-liveness',
-    tokens: {
-        colors: {
-            background: { primary: { value: '#000000' } },
-            font: { primary: { value: '#FFFFFF' } },
-            brand: {
-                primary: {
-                    // The action blue, so its buttons are not AWS orange.
-                    10: { value: '#EAF1FC' },
-                    80: { value: '#3066CC' },
-                    90: { value: '#2856AE' },
-                    100: { value: '#1F4693' },
-                },
-            },
-        },
-        components: {
-            button: { primary: { backgroundColor: { value: '#3066CC' } } },
-        },
-    },
-});
 
 type Phase = 'preparing' | 'ready' | 'checking' | 'passed' | 'failed';
 
@@ -107,6 +61,7 @@ type Credentials = {
 export function FaceLivenessScreen({
     challengeId,
     onSession,
+    onPassed,
 }: {
     /** Identifies the sign-in this check belongs to. Not a credential. */
     challengeId: string;
@@ -122,12 +77,40 @@ export function FaceLivenessScreen({
      * could be made to send can decide who is compared.
      */
     onSession: (sessionId: string) => Promise<{ error?: string } | void>;
+    /**
+     * Commit the verified step and move on. Called once the success animation
+     * has played, NOT the moment the verdict lands.
+     *
+     * Split from `onSession` for one reason: committing navigates away, and a
+     * server action that redirects never returns — so anything the screen wanted
+     * to show after a pass had nowhere to happen. Verify, show, then commit.
+     *
+     * Optional: the design gallery and the bench have nothing to commit to.
+     */
+    onPassed?: () => Promise<{ error?: string } | void>;
 }) {
     const t = useTranslations('auth');
 
     const [phase, setPhase] = useState<Phase>('preparing');
     const [session, setSession] = useState<StartResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
+    /** The last camera frame, shown while the servers decide. Never judged. */
+    const [snapshot, setSnapshot] = useState<string | null>(null);
+    /**
+     * Bumped to run the whole check again on the SAME challenge.
+     *
+     * A failed face check does not burn the challenge — the backend allows
+     * repeat attempts — so the retry re-arms the camera rather than sending the
+     * user back for a fresh access link.
+     *
+     * ⚠️ Unlimited, deliberately and temporarily. The backend is to report how
+     * many attempts remain; until it does there is nothing to count down from,
+     * and inventing a client-side limit would lock people out of a check the
+     * server was still willing to run. When that number arrives, this is where
+     * it goes — and note that every attempt opens a NEW AWS Face Liveness
+     * session, which is billed.
+     */
+    const [attempt, setAttempt] = useState(0);
 
     /**
      * Open a session and fetch credentials before rendering the detector.
@@ -156,7 +139,9 @@ export function FaceLivenessScreen({
         return () => {
             cancelled = true;
         };
-    }, [challengeId, t]);
+        // `attempt` is the retry trigger: AWS liveness sessions are single-use,
+        // so going again means opening a new one, not reusing the last id.
+    }, [challengeId, attempt, t]);
 
     /**
      * Handed to AWS's SDK, which calls it whenever it needs to sign. Fetching
@@ -185,22 +170,39 @@ export function FaceLivenessScreen({
     // plain value does not.
     const sessionId = session?.sessionId ?? null;
 
-    const handleComplete = useCallback(async () => {
-        if (!sessionId) return;
-        setPhase('checking');
-        try {
-            const result = await onSession(sessionId);
-            if (result?.error) {
-                setError(result.error);
+    const handleComplete = useCallback(
+        async (shot: string | null) => {
+            if (!sessionId) return;
+            // The still goes up first so the checking state has a face to scan
+            // rather than a black box for the second or two this takes.
+            setSnapshot(shot);
+            setPhase('checking');
+            try {
+                const result = await onSession(sessionId);
+                if (result?.error) {
+                    setError(result.error);
+                    setPhase('failed');
+                    return;
+                }
+                setPhase('passed');
+
+                // Let the success pulse play before committing, because
+                // committing navigates and a redirect never comes back. Matched
+                // to `verdict-burst` in globals.css — change one, change both.
+                await new Promise((resolve) => setTimeout(resolve, 1100));
+
+                const committed = await onPassed?.();
+                if (committed?.error) {
+                    setError(committed.error);
+                    setPhase('failed');
+                }
+            } catch (err) {
+                setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
                 setPhase('failed');
-                return;
             }
-            setPhase('passed');
-        } catch (err) {
-            setError(err instanceof Error && err.message ? err.message : t('faceVerifyFailed'));
-            setPhase('failed');
-        }
-    }, [onSession, sessionId, t]);
+        },
+        [onSession, onPassed, sessionId, t],
+    );
 
     return (
         <main className="flex h-full flex-col items-center justify-center">
@@ -215,10 +217,22 @@ export function FaceLivenessScreen({
                         {t('liveFaceDetection')}
                     </span>
                 </div>
+                {/* The check flashes coloured light at you. AWS puts this on the
+                    start screen we skip, so it belongs here — before it starts,
+                    and where it can still be read. */}
+                <p
+                    className="fz-11 text-center leading-none font-medium text-[#707070]"
+                    style={{ marginTop: rem(8) }}
+                >
+                    {t('livenessPhotosensitivity')}
+                </p>
             </div>
 
             {/* Same 350 x 400 footprint as the frame it replaces, so the page
-                rhythm is unchanged even though its contents are AWS's. */}
+                rhythm is unchanged even though its contents are AWS's.
+
+                No border: the camera fills it edge to edge, so the picture is
+                the edge. */}
             <div
                 className="relative h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
                 style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
@@ -238,52 +252,77 @@ export function FaceLivenessScreen({
                     </span>
                 )}
 
-                {phase !== 'preparing' && phase !== 'failed' && session && (
-                    <ThemeProvider theme={livenessTheme}>
-                        <FaceLivenessDetectorCore
-                            sessionId={session.sessionId}
-                            region={session.region}
-                            // AWS's instruction screen duplicates the caption
-                            // above and adds a tap nobody needs.
-                            disableStartScreen
-                            config={{
-                                credentialProvider,
-                                binaryPath: TFJS_WASM_PATH,
-                                faceModelUrl: BLAZEFACE_MODEL_URL,
-                            }}
-                            onAnalysisComplete={handleComplete}
-                            onError={() => {
-                                setError(t('faceSetupFailed'));
-                                setPhase('failed');
-                            }}
-                        />
-                    </ThemeProvider>
+                {/* Once the stream ends the camera is gone and the verdict owns
+                    the frame — the still, the scan over it, then red or green.
+                    Rendered ABOVE the camera in the tree so the swap is one
+                    element appearing rather than two states racing. */}
+                {(phase === 'checking' || phase === 'passed' || phase === 'failed') && (
+                    <LivenessVerdict
+                        phase={phase}
+                        snapshot={snapshot}
+                        onRetry={() => {
+                            // Back to the camera on the same challenge. The
+                            // still and the reason go first: leaving either up
+                            // would show the last failure over the new attempt.
+                            setSnapshot(null);
+                            setError(null);
+                            setPhase('preparing');
+                            setAttempt((n) => n + 1);
+                        }}
+                    />
+                )}
+
+                {/* The same brackets the single-frame capture uses, so the two
+                    face frames read as one screen rather than two.
+
+                    Only while the camera is live: once the verdict takes the
+                    frame it carries its own ring, and two coloured outlines at
+                    once would be saying the same thing twice.
+
+                    `z-2` because the mesh canvas inside the widget sits at z-1
+                    and would otherwise paint over them. */}
+                {(phase === 'preparing' || phase === 'ready') && (
+                    <CornerBrackets color="#FFEB00" inset={22} className="z-2" />
+                )}
+
+                {phase === 'ready' && session && (
+                    <LivenessCamera
+                        sessionId={session.sessionId}
+                        region={session.region}
+                        credentialProvider={credentialProvider}
+                        onAnalysisComplete={handleComplete}
+                        onError={(err) => {
+                            // The screen shows one fixed line by design, so
+                            // without this a failure here leaves no trace
+                            // anywhere. `state` is only a category —
+                            // RUNTIME_ERROR covers everything unclassified — so
+                            // log the whole object for the cause.
+                            console.error('[liveness] detector error', err);
+                            setError(t('faceSetupFailed'));
+                            setPhase('failed');
+                        }}
+                    />
                 )}
             </div>
 
-            {/* The only words on the screen, and only when something is wrong.
+            {/* The reason, and only when there is one worth reading.
                 Zero-height so it cannot move the frame — same treatment as
-                FaceScanScreen. */}
-            {phase === 'failed' && (
+                FaceScanScreen.
+
+                The verdict inside the frame is wordless by design, but a backend
+                that refused for a NAMED reason ("no enrolled selfie on file")
+                must still say so: a red ring and a retry icon would send the
+                user round a loop that cannot succeed. Generic failures stay
+                silent and let the ring speak. */}
+            {phase === 'failed' && error && error !== t('faceVerifyFailed') && (
                 <div className="relative h-0 w-350">
-                    <div
-                        className="absolute inset-x-0 flex flex-col items-center gap-12"
+                    <p
+                        role="alert"
+                        className="fz-12 absolute inset-x-0 px-20 text-center leading-normal font-medium text-[#FF3B30]"
                         style={{ top: rem(16) }}
                     >
-                        <p
-                            role="alert"
-                            className="fz-12 px-20 text-center leading-normal font-medium text-[#FF3B30]"
-                        >
-                            {error ?? t('faceVerifyFailed')}
-                        </p>
-                        <button
-                            type="button"
-                            className="fz-14 text-primary leading-none font-semibold underline"
-                            onClick={() => void restartSignInAction()}
-                        >
-                            {t('startOver')}
-                        </button>
-                    </div>
+                        {error}
+                    </p>
                 </div>
             )}
         </main>

@@ -25,6 +25,7 @@
         "faceCaptureFailed": "Görüntü alınamadı. Tekrar deneyin.",
         "faceCameraBlocked": "Kamera erişimi engellendi. Tarayıcınızda izin verin, ardından erişim bağlantınızı yeniden açın.",
         "faceVerifyFailed": "Doğrulama başarısız — tekrar deneyin",
+        "faceVerified": "Yüz doğrulandı",
         "deviceTitle": "Bu Cihazı Doğrula",
         "deviceBody": "Hesabınız bu cihazdaki bir geçiş anahtarıyla korunuyor. Tarayıcınız istediğinde parmak izinizle, yüzünüzle veya cihaz PIN’inizle onaylayın.",
         "devicePrompting": "Cihazınız bekleniyor…",
@@ -40,7 +41,10 @@
         "introTerms": "Hizmet Şartları",
         "introStart": "Kimlik Doğrulamayı Başlat",
         "introDisagree": "Kabul Etmiyorum",
-        "faceSetupFailed": "Yüz kontrolü başlatılamadı."
+        "faceSetupFailed": "Yüz kontrolü başlatılamadı.",
+        "livenessRecording": "Kayıt",
+        "livenessCancel": "Kontrolü iptal et",
+        "livenessPhotosensitivity": "Bu kontrol renkli ışık yanıp söner."
     },
     "common": {
         "appName": "Ramaaz Root",

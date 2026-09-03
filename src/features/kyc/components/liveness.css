@@ -1,0 +1,264 @@
+/*
+ * Amazon's Face Liveness widget, dressed in our design.
+ *
+ * ── Why a stylesheet and not the theme ──────────────────────────────────────
+ * `ThemeProvider` reaches the Amplify primitives (colours, radii, fonts) but
+ * the liveness widget's own chrome — the hint toast, the Rec badge, the cancel
+ * button, the oval-match bar — is styled by fixed rules in
+ * `@aws-amplify/ui-react/styles.css`, and exposes exactly ONE custom property
+ * (`--amplify-components-liveness-camera-module-background-color`). Everything
+ * else has to be overridden by class name. So: theme for what the theme can
+ * reach, this file for the rest.
+ *
+ * Every rule is scoped under `.rz-liveness`, which `LivenessCamera` puts on the
+ * wrapper. Nothing here leaks to another Amplify component.
+ *
+ * ── What is NOT touched, and must not be ────────────────────────────────────
+ * The oval itself. It is drawn to a canvas whose geometry comes from the video
+ * stream, and the face-fit test that decides whether you are inside it uses the
+ * same numbers. Restyle the oval and the guide stops describing the test.
+ *
+ * The one thing done to that box is CROPPING it (see the video-anchor rule),
+ * which is safe precisely because the canvas and the video are the same box:
+ * crop both together and the oval still sits exactly where the test expects.
+ * Scaling only one of them, or stretching either, would break that.
+ */
+
+/* ── Fill our frame ─────────────────────────────────────────────────────────
+ *
+ * Amplify's wrapper chain sizes to its content, so in a fixed 350x400 frame the
+ * camera ends up letterboxed in the middle of a box that itself overflows.
+ *
+ * Pinning it with percentage heights does NOT work: between our wrapper and the
+ * camera sit four more elements — a class-less div, `.liveness-detector`, an
+ * `.amplify-flex`, and `.liveness-detector-check` — so a `height: 100%` chain
+ * has to be unbroken through all of them, and any one of them changing name in
+ * an Amplify release silently collapses the frame to 32px. That is exactly what
+ * the first attempt did.
+ *
+ * So the camera module is taken out of the flow and pinned to our frame
+ * directly. Whatever the wrappers do in between stops mattering.
+ */
+.rz-liveness .amplify-liveness-camera-module {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    /* A 1px neutral hairline that reads as a seam inside a black frame. */
+    border: 0;
+    background-color: #000;
+    /* The crop below happens here. */
+    overflow: hidden;
+}
+
+/*
+ * `.liveness-detector-check` is `position: relative`, which makes IT the
+ * containing block for the absolutely-positioned camera above — and it is only
+ * as tall as its own content, so `inset: 0` resolved against a 0-tall box and
+ * the frame rendered solid black. Taking it out of the positioning chain is
+ * what lets the camera resolve against our frame instead.
+ *
+ * `!important` is load-bearing here and is the only one in this file: Amplify
+ * sets that position as an INLINE style (`<Flex position="relative">`), and an
+ * inline style beats any selector. Without it this rule silently does nothing
+ * and the symptom is a black rectangle, not a layout that looks slightly off.
+ */
+.rz-liveness .liveness-detector-check {
+    position: static !important;
+}
+
+/*
+ * ⚠️ On a phone, Amplify does not merely restyle — it RELOCATES.
+ *
+ * `isMobileScreen()` is a user-agent test (`/Android|iPhone|iPad/`), not a
+ * width test, so it cannot be reproduced by narrowing a desktop window. When it
+ * is true the widget adds `--mobile` variants that are `position: fixed`, and
+ * the camera leaves our frame to cover the whole viewport — title, spacing and
+ * rounded corners included. Everything else in this file would then be styling
+ * a box nobody sees.
+ *
+ * These put it back. The base-class rules above already outrank
+ * `--mobile` on specificity, but stating it is the difference between a
+ * deliberate override and an accident that survives until the next release.
+ */
+.rz-liveness .amplify-liveness-camera-module--mobile {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: auto;
+}
+
+.rz-liveness .amplify-liveness-oval-canvas,
+.rz-liveness .amplify-liveness-oval-canvas--mobile {
+    position: absolute;
+}
+
+/* ── The oval canvas: hidden entirely ───────────────────────────────────────
+ *
+ * AWS paints two things into this canvas — an opaque surround with the oval cut
+ * out of it, and the oval's own stroke. Both are gone on request: the surround
+ * because it filled the frame with white mid-check, the ring because the mesh
+ * overlay is the guide now.
+ *
+ * `opacity: 0` rather than `display: none`, and the difference matters. The
+ * painter reads this element's `getBoundingClientRect()` to size its backing
+ * store and to place the oval; a `display: none` element measures 0x0, so
+ * hiding it that way feeds zeroes into their drawing code. Transparent keeps
+ * the layout — and therefore their maths — exactly as it was.
+ *
+ * Nothing measured is lost either way: this canvas is presentational. The
+ * face-fit test runs on the video stream, not on these pixels, so the oval still
+ * exists and still has to be filled — it is simply not drawn. The hint text and
+ * the fit bar at the foot are what tell the user where to move.
+ *
+ * ⚠️ The white surround was ALSO the lamp. The challenge flashes light at the
+ * face and the screen provides it, which is why AWS hardcoded that fill rather
+ * than exposing a token. Hiding it lowers how much light this screen throws, and
+ * what it lit was the anti-spoofing measurement. Not a guess either way — the
+ * bench prints the confidence, so run a real face with this rule and without it
+ * in the same room. If the score drops, this line is why.
+ */
+.rz-liveness .amplify-liveness-oval-canvas canvas {
+    opacity: 0;
+}
+
+/*
+ * Cover the frame instead of letterboxing inside it.
+ *
+ * Amplify sets `aspect-ratio: <stream ratio>` inline on this element and lets
+ * it run at width:100%, so a 4:3 camera in a 350-wide frame is 263 tall and
+ * leaves 137px of black. Driving it from the HEIGHT instead makes it 533 wide,
+ * and the overflow above trims the sides — the camera fills the frame, nothing
+ * is stretched, and the oval crops with the picture because it is the same box.
+ *
+ * `width: auto` is what lets the inline aspect-ratio do the work; setting both
+ * dimensions would override it and stretch the canvas.
+ */
+.rz-liveness .amplify-liveness-video-anchor {
+    height: 100%;
+    width: auto;
+}
+
+/* ── Type ───────────────────────────────────────────────────────────────────
+ * Amplify ships its own font stack. Ours is Quicksand, everywhere.
+ */
+.rz-liveness,
+.rz-liveness .amplify-text,
+.rz-liveness .amplify-button {
+    font-family: var(--font-app-sans), sans-serif;
+}
+
+/* ── The hint toast ─────────────────────────────────────────────────────────
+ *
+ * Ships at `--amplify-font-sizes-xxl` (32px) on AWS teal, filling a third of
+ * the frame. Ours: a small dark pill over the picture, same 14/medium as the
+ * caption above the frame.
+ *
+ * Sizes are in rem so they ride the XD-pixel scale like everything else —
+ * 0.0625rem = 1 XD px (AGENTS.md §1). Raw px would not scale with the canvas.
+ */
+/* ── The hint sits at the FOOT of the frame ─────────────────────────────────
+ *
+ * Ships near the top, where it lands over the forehead — the one part of the
+ * picture the user is trying to line up inside the oval. At the bottom it is
+ * still in view while they look at the camera, and covers nothing that matters.
+ *
+ * `margin-top: auto`, not `position: absolute`: the overlay is already a
+ * full-height column flex, so handing the free space to the hint's top margin
+ * pushes it and the fit bar after it to the foot as a pair, in their own DOM
+ * order, with no positioning to keep in sync. The `--mobile` variant sets its
+ * own margin and has to be named or it wins on a phone — which is the only
+ * place this screen actually runs.
+ */
+.rz-liveness .amplify-liveness-hint,
+.rz-liveness .amplify-liveness-hint--mobile {
+    margin-top: auto;
+}
+
+/* 12 from every edge and 12 between the hint and the fit bar — the same spacing
+   the rest of this flow uses. AWS ships `--amplify-space-large` padding and a
+   16 gap. The hidden Rec and cancel containers are `display: none`, so they
+   take no part in the gap. */
+.rz-liveness .amplify-liveness-overlay {
+    padding: 0.75rem;
+    gap: 0.75rem;
+}
+
+.rz-liveness .amplify-liveness-toast,
+.rz-liveness .amplify-liveness-toast--primary,
+.rz-liveness .amplify-liveness-toast--large,
+.rz-liveness .amplify-liveness-toast--medium {
+    background-color: rgb(0 0 0 / 0.62);
+    /* The pill is over live video, which can be any colour. */
+    backdrop-filter: blur(0.5rem);
+    -webkit-backdrop-filter: blur(0.5rem);
+    font-size: 0.875rem; /* 14 */
+    font-weight: 500;
+    line-height: 1.25;
+    padding: 0.5rem 0.875rem; /* 8 / 14 */
+    border-radius: 0.75rem; /* 12 */
+    max-width: 17.5rem; /* 280 */
+}
+
+.rz-liveness .amplify-liveness-toast--error {
+    background-color: rgb(255 59 48 / 0.9);
+}
+
+.rz-liveness .amplify-liveness-toast__message,
+.rz-liveness .amplify-liveness-toast--primary .amplify-liveness-toast__message {
+    color: #fff;
+    font-size: inherit;
+    font-weight: inherit;
+}
+
+/* ── The Rec badge and the cancel button ────────────────────────────────────
+ *
+ * Both hidden: the frame is small and the design has neither.
+ *
+ * Nothing depends on the cancel control. It aborts the stream and returns the
+ * widget to its error view, which our screens never show — they unmount the
+ * detector on error and offer "start over" themselves. Leaving is the back
+ * button, as on every other step of this flow.
+ */
+.rz-liveness .amplify-liveness-recording-icon-container,
+.rz-liveness .amplify-liveness-cancel-container {
+    display: none;
+}
+
+/* ── The oval-match bar ─────────────────────────────────────────────────────
+ * White track, AWS-primary fill. Ours is the action blue on a dark track, and
+ * slimmer — it is a progress hint, not a control.
+ */
+.rz-liveness .amplify-liveness-match-indicator__bar {
+    height: 0.5rem; /* 8 */
+    border-radius: 999rem;
+    border: 0;
+    background: rgb(255 255 255 / 0.28);
+}
+
+.rz-liveness .amplify-liveness-match-indicator__bar:after,
+.rz-liveness .amplify-liveness-match-indicator__pin:after {
+    background: #3066cc;
+}
+
+/* ── Loaders ────────────────────────────────────────────────────────────────
+ * Amplify's loader is its brand orange by default; the theme recolours the
+ * filled part, but the track stays light grey on black.
+ */
+.rz-liveness .amplify-loader {
+    stroke: rgb(255 255 255 / 0.25);
+    fill: #3066cc;
+}
+
+/* ── The photosensitivity warning ───────────────────────────────────────────
+ *
+ * Its default is a full-width blue alert ABOVE the camera, inside the frame —
+ * 152px of the 400 we have, which is what pushed the picture out of the bottom
+ * of the box. `LivenessCamera` replaces the component itself with a compact
+ * line; this keeps any residue from taking part in the layout.
+ */
+.rz-liveness .amplify-liveness-start-screen-warning {
+    display: none;
+}

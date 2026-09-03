@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
-import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
-import '@aws-amplify/ui-react/styles.css';
+
+import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
+import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 
 /**
  * The liveness bench — attack the AWS check, read the score, go again.
@@ -33,19 +33,6 @@ import '@aws-amplify/ui-react/styles.css';
  * Record the confidence for each attack. A live face should sit high; the gap
  * between that and your best spoof is the margin a threshold has to live in.
  */
-
-const theme = createTheme({
-    name: 'liveness-lab',
-    tokens: {
-        colors: {
-            background: { primary: { value: '#000000' } },
-            font: { primary: { value: '#FFFFFF' } },
-        },
-    },
-});
-
-const TFJS_WASM_PATH = '/vendor/tfjs-wasm/';
-const BLAZEFACE_MODEL_URL = '/vendor/blazeface/model.json';
 
 type Session = { sessionId: string; region: string };
 type Result = {
@@ -145,29 +132,41 @@ export function LivenessLab() {
             <p className="fz-12 mt-4 leading-normal text-[#707070]">
                 Runs the real AWS check with no sign-in around it. Cannot sign anyone in — it
                 returns a score and nothing else. Each run costs one Face Liveness check.
+                The check flashes coloured light.
             </p>
 
             <div
                 className="relative mt-16 h-400 w-350 shrink-0 self-center overflow-hidden rad-20 bg-black"
             >
+                {/* Same brackets as the real screen, so what is judged here is
+                    what ships rather than a stripped-down cousin. */}
+                {phase === 'streaming' && (
+                    <CornerBrackets color="#FFEB00" inset={22} className="z-2" />
+                )}
+
                 {phase === 'streaming' && session && (
-                    <ThemeProvider theme={theme}>
-                        <FaceLivenessDetectorCore
-                            sessionId={session.sessionId}
-                            region={session.region}
-                            disableStartScreen
-                            config={{
-                                credentialProvider,
-                                binaryPath: TFJS_WASM_PATH,
-                                faceModelUrl: BLAZEFACE_MODEL_URL,
-                            }}
-                            onAnalysisComplete={onComplete}
-                            onError={(err) => {
-                                setError(String(err?.state ?? 'detector error'));
-                                setPhase('error');
-                            }}
-                        />
-                    </ThemeProvider>
+                    <LivenessCamera
+                        sessionId={session.sessionId}
+                        region={session.region}
+                        credentialProvider={credentialProvider}
+                        onAnalysisComplete={onComplete}
+                        onError={(err) => {
+                            // `state` alone is a category, not a cause:
+                            // RUNTIME_ERROR covers everything the detector did
+                            // not classify, so on its own it says only
+                            // "something threw". The message underneath is the
+                            // part worth reading, and the console keeps the
+                            // whole object for the stack.
+                            console.error('[liveness-lab] detector error', err);
+                            const detail = err?.error?.message ?? err?.error?.name ?? '';
+                            setError(
+                                [err?.state ?? 'detector error', detail]
+                                    .filter(Boolean)
+                                    .join(' — '),
+                            );
+                            setPhase('error');
+                        }}
+                    />
                 )}
 
                 {phase !== 'streaming' && (

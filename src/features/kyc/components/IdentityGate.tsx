@@ -44,6 +44,7 @@ export function IdentityGate({
     onEnroll,
     challengeId,
     onLivenessSession,
+    onLivenessPassed,
 }: {
     /** True when this admin has never completed ID enrolment. */
     needsEnrollment: boolean;
@@ -55,6 +56,8 @@ export function IdentityGate({
     challengeId?: string;
     /** Submits a finished AWS liveness session — see VerificationPage. */
     onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
+    /** Commits the verified step. See FaceLivenessScreen's onPassed. */
+    onLivenessPassed?: () => Promise<{ error?: string } | void>;
 }) {
     // ── Who moves the flow off the face check ───────────────────────────────
     // The SERVER does, and `needsEnrollment` is how it says so: a passed face
@@ -118,6 +121,7 @@ export function IdentityGate({
                 <VerificationPage
                     challengeId={challengeId}
                     onLivenessSession={onLivenessSession}
+                    onLivenessPassed={onLivenessPassed}
                     onCapture={onCapture}
                     onReverified={handleReverified}
                     faceVerified={wantsEnrolling}

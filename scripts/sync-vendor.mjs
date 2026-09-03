@@ -22,7 +22,15 @@
  *
  * Run manually with:  npm run sync:vendor
  */
-import { mkdirSync, readdirSync, copyFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
+import {
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    copyFileSync,
+    existsSync,
+    statSync,
+    writeFileSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,6 +81,8 @@ const BLAZEFACE_BASE =
     'https://tfhub.dev/tensorflow/tfjs-model/blazeface/1/default/1/model.json?tfjs-format=file';
 /** ~64 KB of JSON; anything much smaller is an error page. */
 const BLAZEFACE_MIN_BYTES = 20 * 1024;
+/** The one shard is ~192 KB. An error page is a few KB. */
+const BLAZEFACE_SHARD_MIN_BYTES = 100 * 1024;
 
 // ── MediaPipe: copy from node_modules ───────────────────────────────────────
 function syncMediapipe() {
@@ -186,9 +196,35 @@ function syncTfjsWasm() {
 async function syncBlazeface() {
     const dest = join(vendor, 'blazeface');
     const manifestPath = join(dest, 'model.json');
+
+    // The manifest ALONE is not proof of a working model, and treating it as
+    // proof is what shipped a broken one: the weight shard was an HTML error
+    // page, the manifest beside it was perfectly valid, and this function then
+    // skipped the download on every subsequent install. Check the shards it
+    // names as well — see the note on the query string below for how they came
+    // to be HTML in the first place.
+    const shardsOnDisk = (path) => {
+        try {
+            return JSON.parse(readFileSync(path, 'utf8')).weightsManifest?.flatMap(
+                (w) => w.paths ?? [],
+            );
+        } catch {
+            return undefined;
+        }
+    };
     if (existsSync(manifestPath) && statSync(manifestPath).size >= BLAZEFACE_MIN_BYTES) {
-        console.log('[sync-vendor] blazeface: already present, skipping');
-        return true;
+        const shards = shardsOnDisk(manifestPath);
+        const complete =
+            shards?.length &&
+            shards.every((s) => {
+                const p = join(dest, s);
+                return existsSync(p) && statSync(p).size >= BLAZEFACE_SHARD_MIN_BYTES;
+            });
+        if (complete) {
+            console.log('[sync-vendor] blazeface: already present, skipping');
+            return true;
+        }
+        console.log('[sync-vendor] blazeface: weights missing or truncated, re-downloading …');
     }
     mkdirSync(dest, { recursive: true });
     console.log('[sync-vendor] blazeface: downloading …');
@@ -209,10 +245,25 @@ async function syncBlazeface() {
 
         const base = new URL(BLAZEFACE_BASE);
         for (const shard of shards) {
-            const url = new URL(shard, base).toString();
-            const bin = await fetch(url, { redirect: 'follow' });
+            // ⚠️ `?tfjs-format=file` must be carried onto the shard, and
+            // `new URL(shard, base)` drops it. Without it tfhub answers 200
+            // with its HTML landing page — not a 404 — so `bin.ok` is true and
+            // 5 KB of `<!DOCTYPE html>` gets written where the weights belong.
+            // tfjs then fails to parse them and Amplify reports the useless
+            // "error loading the blazeface model … ensure it is a fully
+            // qualified url", which sends you looking at the URL you pass the
+            // component rather than at the file on disk.
+            const url = new URL(shard, base);
+            url.search = base.search;
+            const bin = await fetch(url.toString(), { redirect: 'follow' });
             if (!bin.ok) throw new Error(`${shard} HTTP ${bin.status}`);
-            writeFileSync(join(dest, shard), Buffer.from(await bin.arrayBuffer()));
+            const bytes = Buffer.from(await bin.arrayBuffer());
+            if (bytes.length < BLAZEFACE_SHARD_MIN_BYTES) {
+                throw new Error(
+                    `${shard} was ${bytes.length} bytes — probably an error page, not weights`,
+                );
+            }
+            writeFileSync(join(dest, shard), bytes);
         }
         console.log(`[sync-vendor] blazeface: model.json + ${shards.length} shard(s)`);
         return true;

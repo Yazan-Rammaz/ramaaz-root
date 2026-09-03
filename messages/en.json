@@ -25,6 +25,7 @@
         "faceCaptureFailed": "Could not capture that. Try again.",
         "faceCameraBlocked": "Camera access is blocked. Allow it in your browser, then open your access link again.",
         "faceVerifyFailed": "Verification failed — try again",
+        "faceVerified": "Face verified",
         "deviceTitle": "Verify This Device",
         "deviceBody": "Your account is protected by a passkey on this device. Confirm with your fingerprint, face or device PIN when your browser asks.",
         "devicePrompting": "Waiting for your device…",
@@ -40,7 +41,10 @@
         "introTerms": "Terms Of Services",
         "introStart": "Start Identity Verification",
         "introDisagree": "Disagree",
-        "faceSetupFailed": "Could not start the face check."
+        "faceSetupFailed": "Could not start the face check.",
+        "livenessRecording": "Rec",
+        "livenessCancel": "Cancel the check",
+        "livenessPhotosensitivity": "This check flashes coloured light."
     },
     "common": {
         "appName": "Ramaaz Root",
