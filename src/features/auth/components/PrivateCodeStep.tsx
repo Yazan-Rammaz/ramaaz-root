@@ -53,36 +53,22 @@ export function PrivateCodeStep() {
         kickstartLandmarker();
     }, []);
 
-    if (dead) {
-        return (
-            <div className="flex flex-col items-center gap-16">
-                <p
-                    role="alert"
-                    className="fz-14 px-20 text-center leading-normal font-medium text-red-500"
-                >
-                    {error ?? t('expired')}
-                </p>
-                <button
-                    type="button"
-                    className="fz-14 text-primary leading-none font-semibold underline"
-                    onClick={() => void restartSignInAction()}
-                >
-                    {t('startOver')}
-                </button>
-            </div>
-        );
-    }
-
     return (
         <div className="flex flex-col">
             <AuthCodeField
                 placeholder={t('privateCodePlaceholder')}
                 ariaLabel={t('privateCodePlaceholder')}
                 revealArrowAt={1}
+                // The moment they touch the code, the message about the LAST
+                // one stops being true — so it goes, and stays gone until the
+                // server refuses something again. Nothing else brings it back:
+                // no timer, no re-render, no blur.
+                onValueChange={() => setError(null)}
                 onSubmit={async (value) => {
                     setError(null);
                     // A correct code redirects inside the action, so only a
-                    // failure comes back here.
+                    // failure comes back here. Whatever the backend said is
+                    // shown verbatim — it is the only party that knows why.
                     const result = await submitPrivateCodeAction(value);
                     if (!result?.error) return;
                     if (result.restart) setDead(true);
@@ -90,14 +76,47 @@ export function PrivateCodeStep() {
                 }}
             />
 
-            {/* Height reserved so the layout does not jump as errors appear. */}
-            <p
-                role="alert"
-                className="fz-12 min-h-16 w-full px-20 text-start leading-none font-medium text-red-500"
-                style={{ marginTop: rem(12) }}
-            >
-                {error ?? ''}
-            </p>
+            {/*
+              The error's own strip, and it CANNOT move anything.
+
+              Reserving a min-height was not enough. This block is centred in
+              the viewport by the screen around it, so a message long enough to
+              wrap grew the block and shifted the heading, the subtitle and the
+              field itself upward — the layout jumped at the exact moment the
+              user was reading. The strip is now a fixed 16 with the text taken
+              out of flow inside it, so a message of any length renders into the
+              empty space below the field and displaces nothing.
+
+              The height and the 12 above it are the space the screen already
+              reserved, unchanged, so nothing moves compared to before either.
+            */}
+            <div className="relative h-16 w-full" style={{ marginTop: rem(12) }}>
+                <p
+                    role="alert"
+                    className="fz-12 absolute inset-x-0 top-0 px-20 text-center leading-none font-medium text-red-500"
+                >
+                    {error ?? ''}
+                </p>
+
+                {/*
+                  Only when the SEQUENCE is gone (CHALLENGE_INVALID), and even
+                  then the field above stays where it is and stays usable. This
+                  is an extra way out, never a replacement for the input.
+
+                  Out of flow like the message, and below it, so appearing costs
+                  nothing in layout.
+                */}
+                {dead && (
+                    <button
+                        type="button"
+                        className="fz-12 text-primary absolute inset-x-0 px-20 text-start leading-none font-semibold underline"
+                        style={{ top: rem(20) }}
+                        onClick={() => void restartSignInAction()}
+                    >
+                        {t('startOver')}
+                    </button>
+                )}
+            </div>
         </div>
     );
 }

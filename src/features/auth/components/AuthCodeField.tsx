@@ -23,6 +23,17 @@ type Props = {
   nextHref?: string;
   /** Called with the value on submit — overrides nextHref navigation. */
   onSubmit?: (value: string) => void | Promise<void>;
+  /**
+   * Every keystroke. Exists so the caller can retire a stale error the moment
+   * the user starts a new attempt — a message about the code they just typed
+   * is wrong the instant they begin changing it, and leaving it up until the
+   * next submit means they retype the whole code under a red line accusing
+   * them of something they are already fixing.
+   *
+   * Deliberately not `onChange`: this hands over the VALUE, not the event, and
+   * the field keeps owning its own state.
+   */
+  onValueChange?: (value: string) => void;
   maxLength?: number;
   /** Mask the typed value (password step). */
   secret?: boolean;
@@ -40,6 +51,7 @@ export function AuthCodeField({
   revealArrowAt,
   nextHref,
   onSubmit,
+  onValueChange,
   maxLength,
   secret = false,
   defaultValue = "",
@@ -97,7 +109,10 @@ export function AuthCodeField({
       <input
         ref={inputRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          onValueChange?.(e.target.value);
+        }}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={(e) => {

@@ -54,7 +54,50 @@ export type ChallengeState = {
    * the countdown. Authoritative — do not compute a deadline locally.
    */
   challengeExpiresAt?: string;
+  /**
+   * The access-link token that opened this challenge. Two jobs:
+   *
+   *  1. It makes `/enter/<token>` IDEMPOTENT — `openLink` compares the incoming
+   *     token against this one and resumes instead of re-opening.
+   *  2. It is the ONLY thing that can open a new challenge, which is what
+   *     `restartSignInAction` needs to actually restart anything.
+   *
+   * ── Why the token and not a hash of it ──────────────────────────────────────
+   * This held a SHA-256 first, on the reasoning that the link token is reusable
+   * for the life of the link while the challenge token beside it dies in ten
+   * minutes — so it is the more valuable of the two and the one worth not
+   * keeping. That reasoning was sound for job 1, which only ever asks "is this
+   * the same link?", and a hash answers that perfectly.
+   *
+   * It cannot do job 2. A hash is one-way, so "start over" had nothing to
+   * re-open and could only clear the challenge and bounce to /login — which
+   * redirects to /no-access the moment there is no challenge, making that button
+   * a guaranteed dead end.
+   *
+   * So the token is stored. The exposure is real but small and bounded: the
+   * cookie is httpOnly, Secure in production, SameSite=lax, and expires with the
+   * challenge at CHALLENGE_MAX_AGE (10 minutes). The same browser already holds
+   * this token in its history, and the message it came from is still sitting in
+   * WhatsApp. Nothing reads it back out to the client — `restartSignInAction`
+   * spends it server-side and never puts it in a URL.
+   */
+  linkToken?: string;
 };
+
+/**
+ * Is this challenge still inside its own deadline?
+ *
+ * `challenge_expires_at` is the server's, and authoritative. An absent or
+ * unparseable value is treated as LIVE deliberately: the cookie's own
+ * `CHALLENGE_MAX_AGE` already retires it at ten minutes, and guessing "dead"
+ * here would throw away a working sign-in over a date format.
+ */
+export function challengeIsLive(state: ChallengeState): boolean {
+  if (!state.challengeToken) return false;
+  if (!state.challengeExpiresAt) return true;
+  const deadline = Date.parse(state.challengeExpiresAt);
+  return Number.isNaN(deadline) || deadline > Date.now();
+}
 
 export async function readChallenge(): Promise<ChallengeState> {
   const raw = (await cookies()).get(COOKIE)?.value;
@@ -111,7 +154,15 @@ export class UnknownStageError extends Error {
  *
  * @returns never — it always either redirects or throws.
  */
-export async function applyStage(result: StepResponse): Promise<never> {
+export async function applyStage(
+  result: StepResponse,
+  /**
+   * Only `openLink` passes this — it is the one caller that knows which access
+   * link is in play. Every later step omits it and the stored value is carried
+   * forward, exactly as `challengeId` is.
+   */
+  linkToken?: string,
+): Promise<never> {
   // The end of the flow: this is the only response that carries tokens.
   if (result.stage === STAGES.completed) {
     if (!result.tokens) {
@@ -148,6 +199,11 @@ export async function applyStage(result: StepResponse): Promise<never> {
     challengeToken: result.challenge_token,
     challengeId: result.challenge_id ?? current.challengeId,
     challengeExpiresAt: result.challenge_expires_at,
+    // Carried forward for the same reason as challengeId, and it MUST be: drop
+    // it at the first step and `/enter/<token>` stops being idempotent — and
+    // "start over" stops working — the moment the administrator types their
+    // private code, which is precisely when they most need both.
+    linkToken: linkToken ?? current.linkToken,
   });
 
   redirect(next);
@@ -201,6 +257,51 @@ export async function setSignInError(message: string) {
 
 export async function readSignInError(): Promise<string | null> {
   return (await cookies()).get(ERROR_COOKIE)?.value ?? null;
+}
+
+/**
+ * The link token of the attempt that just failed, so /no-access can offer the
+ * one thing that could help: opening it again.
+ *
+ * Separate from the challenge cookie because the two do not survive together —
+ * by the time anyone sees /no-access the challenge is usually gone, which is
+ * precisely WHY they are seeing it. This outlives it by a few seconds, long
+ * enough to render one link.
+ *
+ * Written only where the token is actually known (the `/enter` handler and
+ * `restartSignInAction`). Everywhere else /no-access shows no link at all,
+ * which is correct: a browser that never held a link has nothing to re-open,
+ * and a "try again" that cannot work is worse than silence.
+ */
+const LAST_LINK_COOKIE = "root_last_link";
+
+/**
+ * ⚠️ NOT `ERROR_MAX_AGE`, which is what this used to borrow.
+ *
+ * Thirty seconds is right for a message about something that just happened. It
+ * is useless for this: the commonest reason to need the link again is a
+ * challenge that ran out, and a challenge runs for TEN MINUTES. The cookie
+ * expired nineteen times over before the thing it was there to rescue had even
+ * failed, so /no-access had nothing to offer in exactly the case it was built
+ * for.
+ *
+ * It outlives the challenge by a little, so the link is still there at the
+ * moment the challenge dies.
+ */
+const LAST_LINK_MAX_AGE = CHALLENGE_MAX_AGE + 60;
+
+export async function setLastLink(token: string) {
+  (await cookies()).set(LAST_LINK_COOKIE, token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+    path: "/",
+    maxAge: LAST_LINK_MAX_AGE,
+  });
+}
+
+export async function readLastLink(): Promise<string | null> {
+  return (await cookies()).get(LAST_LINK_COOKIE)?.value ?? null;
 }
 
 /**

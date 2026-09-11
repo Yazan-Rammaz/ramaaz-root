@@ -420,6 +420,23 @@ export const stepResponseSchema = z.object({
    * rejects more than three fractional digits, which would fail every sign-in.
    */
   challenge_expires_at: z.string().optional(),
+  /**
+   * The face captured during this sign-in's liveness check, base64, as the
+   * backend stored it when `/v1/auth/face` recorded it.
+   *
+   * Returned on `/v1/auth/link` when the stage is ID_DOCUMENT_REQUIRED, so a
+   * refresh part-way through enrolment has a face to show rather than a grey
+   * placeholder — and so nobody is asked to photograph themselves a second
+   * time. See docs/kyc/step-restore.md.
+   *
+   * ⚠️ NOT evidence, in either direction. It is the still the screen showed,
+   * chosen by the browser; the image AWS judged is one it holds itself. Render
+   * it, and never let anything downstream read it as proof of anything.
+   *
+   * Optional because the backend does not return it yet, and because it is
+   * absent on every stage but that one.
+   */
+  faceCapturedPhoto: z.string().optional(),
   tokens: wireTokensSchema.optional(),
 });
 export type StepResponse = z.infer<typeof stepResponseSchema>;

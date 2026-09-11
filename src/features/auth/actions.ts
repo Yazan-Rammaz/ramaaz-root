@@ -7,18 +7,22 @@ import {
   applyStage,
   clearChallenge,
   readChallenge,
+  setLastLink,
+  setSignInError,
   UnknownStageError,
 } from "@/lib/auth/challenge";
+import { openLink } from "@/lib/auth/link";
 import { clearAuthCookies } from "@/lib/auth/cookies";
 import {
   AUTH_PATHS,
   deviceOptionsResponseSchema,
+  ERROR_CODES,
   stepResponseSchema,
   type DeviceRequest,
   type EvidenceRequest,
   type PrivateCodeRequest,
 } from "@/lib/auth/endpoints";
-import { isChallengeDead, signInError } from "@/lib/auth/errors";
+import { errorCode, isChallengeDead, signInError } from "@/lib/auth/errors";
 import { privateCodeSchema } from "./schema";
 
 /**
@@ -81,10 +85,22 @@ export async function submitPrivateCodeAction(
     // alerts the other root administrators — somebody holding a link and
     // guessing is the shape of a forwarded link. It is still just a retry.
     // A dead challenge is not: only a fresh start recovers.
+    //
+    // ⚠️ `CHALLENGE_INVALID` ONLY — deliberately NOT `isChallengeDead`, which
+    // also counts `UNAUTHENTICATED`.
+    //
+    // The private code lives 50 seconds (PRIVATE_CODE_TTL), which is shorter
+    // than WhatsApp delivery often takes, so "that code is not valid, get a new
+    // one" is the NORMAL outcome here rather than an exceptional one. Treating
+    // it as a dead challenge tore the input off the screen and left "start
+    // over" as the only move — when the right move is to message the number
+    // again and type the new code into the same challenge, which is still
+    // perfectly alive. The sequence survives a wrong code; it is only
+    // CHALLENGE_INVALID that says the sequence itself is gone.
     return {
       ok: false,
       error: signInError(error, "That code is not correct"),
-      restart: isChallengeDead(error),
+      restart: errorCode(error) === ERROR_CODES.challengeInvalid,
     };
   }
 
@@ -108,7 +124,28 @@ export async function submitPrivateCodeAction(
  * `docs/kyc-integration.md`. What reaches `/v1/auth/face` is the Worker's
  * signed verdict, so no biometric ever touches the auth path.
  */
-export async function submitFaceAction(stepToken: string): Promise<ActionState> {
+export async function submitFaceAction(
+  stepToken: string,
+  /**
+   * The still the check ended on, base64, and the scores that went with it.
+   *
+   * ⚠️ Read what this is and is NOT before changing it. It is the frame the
+   * screen SHOWED — presentational, chosen by the browser, and not the image
+   * anything was judged against. AWS judged a video it holds itself, and the
+   * Worker fetched the reference from AWS rather than from us; that is the
+   * property which makes a tampered client unable to choose who gets compared,
+   * and it is worth more than any score.
+   *
+   * So this travels as a RECORD, never as evidence. The backend stores it so
+   * `/login/identity` has a face to show after a refresh — see
+   * docs/kyc/step-restore.md — and nothing downstream may treat it as proof.
+   */
+  record?: {
+    faceCapturedPhoto: string | null;
+    faceMatchScore?: number;
+    livenessConfidence?: number;
+  },
+): Promise<ActionState> {
   if (!stepToken) return { ok: false, error: "No verification proof" };
 
   const challenge = await readChallenge();
@@ -125,7 +162,22 @@ export async function submitFaceAction(stepToken: string): Promise<ActionState> 
       // live face against the stored photo and committing the scores over its
       // own signed channel — so the backend can trust it without ever seeing an
       // image, which is why no biometric touches the auth path.
-      evidence: { step_token: stepToken },
+      evidence: {
+        step_token: stepToken,
+        // Recorded alongside the proof, not as part of it — see the note on
+        // `record` above. Omitted entirely when absent rather than sent as
+        // null, so a backend that does not know these fields sees the exact
+        // payload it always did.
+        ...(record?.faceCapturedPhoto
+          ? { faceCapturedPhoto: record.faceCapturedPhoto }
+          : {}),
+        ...(record?.faceMatchScore !== undefined
+          ? { faceMatchScore: record.faceMatchScore }
+          : {}),
+        ...(record?.livenessConfidence !== undefined
+          ? { livenessConfidence: record.livenessConfidence }
+          : {}),
+      },
     } satisfies EvidenceRequest);
 
     result = stepResponseSchema.parse(raw);
@@ -272,15 +324,71 @@ export async function submitIdentityDocumentAction(
 }
 
 /**
- * Abandon a half-finished sign-in.
+ * The challenge is gone — stop, and say so.
  *
- * The only recovery from a burned challenge. It does not "retry" anything: the
- * administrator must open their access link again, because that is the only
- * thing that can open a new challenge.
+ * For the failures where retrying is not merely unlikely to work but CANNOT:
+ * a 401 from a step route means the challenge behind it has expired, been
+ * spent, or burned through its five attempts. The backend will answer the same
+ * way every time, so a screen that keeps offering "try again" is inviting
+ * somebody to press a button that has already been decided against.
+ *
+ * Lands on /no-access, which is where a dead sign-in belongs — and because the
+ * link token is carried over first, that screen can offer to open the SAME link
+ * again, which is the one thing that does work.
+ */
+export async function expireSignInAction(): Promise<void> {
+  const { linkToken } = await readChallenge();
+
+  await clearChallenge();
+  if (linkToken) await setLastLink(linkToken);
+
+  await setSignInError(
+    "This sign-in expired. Open your access link again to restart.",
+  );
+  redirect("/no-access");
+}
+
+/**
+ * Start the sign-in over on a burned challenge.
+ *
+ * ── What it used to do, and why that could only fail ─────────────────────────
+ * `clearChallenge()` then `redirect("/login")`. But /login redirects to
+ * /no-access the instant there is no challenge token — so clearing one and then
+ * going there is a guaranteed trip to the refusal screen. Every press of a
+ * button labelled "Open your access link again" landed on "You don't have
+ * access", which is both wrong and the single most alarming thing this app can
+ * tell somebody mid-sign-in.
+ *
+ * ── What it does now ─────────────────────────────────────────────────────────
+ * Actually re-opens the link. The access-link token is the only thing that can
+ * mint a new challenge, and `ChallengeState.linkToken` is holding it, so this
+ * spends it exactly as the original tap did.
+ *
+ * The clear happens FIRST and is load-bearing: `openLink` short-circuits when it
+ * finds a live challenge for the same token, and a challenge burned by failed
+ * attempts is not expired by the clock — so leaving it would resume the dead
+ * sequence and the button would appear to do nothing at all.
+ *
+ * The token never goes near a URL here. /enter/<token> would have worked too,
+ * but a redirect puts it in history a second time for no gain when the server
+ * can simply spend it in place.
  */
 export async function restartSignInAction(): Promise<void> {
+  const { linkToken } = await readChallenge();
+
   await clearChallenge();
-  redirect("/login");
+
+  // Nothing to re-open — an older cookie from before the token was stored, or a
+  // challenge that never came from a link at all. There is genuinely no way
+  // forward from here but a fresh link, so say so rather than loop.
+  if (!linkToken) redirect("/no-access");
+
+  // Redirects on success, exactly as the first open did.
+  const { error } = await openLink(linkToken);
+  await setSignInError(error);
+  // So /no-access can offer this same link again — see setLastLink.
+  await setLastLink(linkToken);
+  redirect("/no-access");
 }
 
 export async function logoutAction() {
