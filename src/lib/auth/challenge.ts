@@ -9,7 +9,7 @@ import {
   STAGE_ROUTES,
   type StepResponse,
 } from "@/lib/auth/endpoints";
-import { setAuthCookies } from "@/lib/auth/cookies";
+import { setAuthCookies, setSessionUser } from "@/lib/auth/cookies";
 
 /**
  * The sign-in challenge — the whole client side of the auth state machine.
@@ -82,6 +82,18 @@ export type ChallengeState = {
    * spends it server-side and never puts it in a URL.
    */
   linkToken?: string;
+  /**
+   * Where the face captured earlier in THIS sign-in is stored.
+   *
+   * A URL, so it fits here — the image is ~300KB and a cookie holds 4KB. It is
+   * what makes a refresh on the ID step keep the face: the captured frame is
+   * React state and does not survive a reload, and nobody should be asked to
+   * photograph themselves twice for one sign-in.
+   *
+   * Never handed to the browser as-is. `/api/face-capture` reads it here and
+   * fetches server-side, so the URL stays on this side of the BFF.
+   */
+  faceCaptureUrl?: string;
 };
 
 /**
@@ -168,7 +180,7 @@ export async function applyStage(
     if (!result.tokens) {
       throw new Error("The server reported COMPLETED without issuing tokens");
     }
-    const { access_token, refresh_token, expires_in } = result.tokens;
+    const { access_token, refresh_token, expires_in, user } = result.tokens;
     await setAuthCookies({
       accessToken: access_token,
       refreshToken: refresh_token,
@@ -176,6 +188,12 @@ export async function applyStage(
       // The refresh token never expires; only the cookie ceiling applies.
       refreshMaxAge: REFRESH_MAX_AGE,
     });
+    // ⚠️ The ONLY moment the signed-in user is known.
+    //
+    // `GET /v1/me` does not work, so nothing can ask again later. This response
+    // carries the full user and it is the last chance to keep it — miss it and
+    // every protected page decides nobody is signed in. See the USER cookie.
+    await setSessionUser(user, REFRESH_MAX_AGE);
     await clearChallenge();
     redirect("/dashboard");
   }
@@ -204,6 +222,9 @@ export async function applyStage(
     // "start over" stops working — the moment the administrator types their
     // private code, which is precisely when they most need both.
     linkToken: linkToken ?? current.linkToken,
+    // Carried forward like challengeId: the backend sends it on the response
+    // that first knows about it, and every later step would otherwise drop it.
+    faceCaptureUrl: result.face_capture_url ?? current.faceCaptureUrl,
   });
 
   redirect(next);

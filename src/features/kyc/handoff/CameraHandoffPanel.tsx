@@ -116,16 +116,11 @@ export function CameraHandoffPanel({
      *
      * Never subscribes: a device does not stop being a phone.
      */
-    const handheld = useSyncExternalStore(
-        NEVER_CHANGES,
-        isHandheldDevice,
-        () => true,
-    );
+    const handheld = useSyncExternalStore(NEVER_CHANGES, isHandheldDevice, () => true);
 
     useEffect(() => {
         void detectCameraTrouble().then(setTrouble);
     }, []);
-
 
     /**
      * Mirror the check's guidance to the phone while the hand-off is live.
@@ -135,20 +130,26 @@ export function CameraHandoffPanel({
      * and during the check the user is looking at their phone, because that is
      * where the camera is. They get corrected by a screen behind them.
      *
-     * Read from the DOM rather than from a callback because Amplify exposes no
-     * hook for the current hint; `.amplify-liveness-hint` is the node it renders
-     * them into. That makes this the most brittle thing in the hand-off, so it
-     * fails SILENTLY: no node, no hints, and the video still works.
+     * ⚠️ It watches the FRAME, not the hint node, and that is the fix rather
+     * than a detail. Looking the hint up once — `querySelector` then bail if
+     * null — could never work here: going live REMOUNTS the AWS widget (that is
+     * what `onLive` is for), so at the instant this effect runs the hint node
+     * does not exist yet. It bailed every time and no hint was ever sent.
+     *
+     * The frame outlives the widget inside it, so observing that catches the
+     * node appearing and every later change to it.
+     *
+     * Amplify exposes no hook for the current hint, so this reads the DOM —
+     * making it the most brittle thing in the hand-off. It fails SILENTLY: no
+     * node, no hints, and the video still works.
      */
     useEffect(() => {
-        if (phase !== 'live') return;
-
-        const node = document.querySelector('.amplify-liveness-hint');
-        if (!node) return;
+        if (phase !== 'live' || !frameEl) return;
 
         let last = '';
         const push = () => {
-            const text = (node.textContent ?? '').trim();
+            const node = frameEl.querySelector('.amplify-liveness-hint');
+            const text = (node?.textContent ?? '').trim();
             if (text && text !== last) {
                 last = text;
                 sendHint(text);
@@ -157,9 +158,13 @@ export function CameraHandoffPanel({
 
         push();
         const observer = new MutationObserver(push);
-        observer.observe(node, { childList: true, subtree: true, characterData: true });
+        observer.observe(frameEl, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+        });
         return () => observer.disconnect();
-    }, [phase, sendHint]);
+    }, [phase, sendHint, frameEl]);
 
     // Once per transition into `live`, never on a re-render. Re-arming twice
     // would open a second AWS liveness session — billed, and single-use.
@@ -202,26 +207,26 @@ export function CameraHandoffPanel({
     const stuck = trouble === 'no-camera' || trouble === 'denied';
 
     const control =
-        phase === 'live' ? (
-            {
-                icon: 'kyc/camera_desktop',
-                title: "Switch back to this computer's camera",
-                onClick: stop,
-                label: null as string | null,
-            }
-        ) : phase === 'idle' ? (
-            {
-                icon: 'kyc/camera_phone',
-                title: "Use your phone's camera",
-                onClick: () => void start(facing),
-                label:
-                    trouble === 'no-camera'
-                        ? 'No camera here — use your phone'
-                        : trouble === 'denied'
-                          ? 'Camera blocked — use your phone'
-                          : null,
-            }
-        ) : null;
+        phase === 'live'
+            ? {
+                  icon: 'kyc/camera_desktop',
+                  title: "Switch back to this computer's camera",
+                  onClick: stop,
+                  label: null as string | null,
+              }
+            : phase === 'idle'
+              ? {
+                    icon: 'kyc/camera_phone',
+                    title: "Use your phone's camera",
+                    onClick: () => void start(facing),
+                    label:
+                        trouble === 'no-camera'
+                            ? 'No camera here — use your phone'
+                            : trouble === 'denied'
+                              ? 'Camera blocked — use your phone'
+                              : null,
+                }
+              : null;
 
     // ── The overlay, portalled INTO the frame ───────────────────────────────
     //
@@ -229,7 +234,10 @@ export function CameraHandoffPanel({
     // is null and the frame shows the phone's camera, drawn by the capture
     // screen exactly as it draws a local one.
     const overlayNeeded =
-        phase === 'preparing' || phase === 'waiting' || phase === 'connecting' || phase === 'failed';
+        phase === 'preparing' ||
+        phase === 'waiting' ||
+        phase === 'connecting' ||
+        phase === 'failed';
 
     const overlay =
         overlayNeeded && frameEl
@@ -303,22 +311,34 @@ export function CameraHandoffPanel({
             {overlay}
 
             {control && (
-                <div
-                    className="absolute top-24 end-24 z-40 flex items-center gap-8"
-                    style={style}
-                >
+                <div className="absolute top-20 end-20 z-40 flex items-center gap-8" style={style}>
                     {/* Visible ONLY when the icon is the only way forward. */}
-                    {control.label && (
+                    {/* {control.label && (
                         <span className="fz-12 leading-none font-medium text-[#707070]">
                             {control.label}
                         </span>
-                    )}
+                    )} */}
+                    {/*
+                      A real button, with a size and an edge.
+
+                      It was a bare <Icon> with no padding and no bounds: the
+                      target was a 22px glyph with transparent gaps, so where it
+                      began and ended was a matter of opinion, and the <p> it sat
+                      in stretched the row far wider than anything clickable.
+                      A bordered 40px box states its own hit area — and at that
+                      size it is a deliberate press rather than something you
+                      find by accident.
+                    */}
                     <button
                         type="button"
                         onClick={control.onClick}
                         title={control.title}
                         aria-label={control.title}
-                        className={stuck ? 'text-primary' : 'text-[#707070]'}
+                        className={`flex h-40 w-40 shrink-0 items-center justify-center rad-12 border bg-white/90 transition-colors ${
+                            stuck
+                                ? 'text-primary border-primary'
+                                : 'text-[#5D5C5D] border-[#5D5C5D]/40 hover:text-primary hover:border-primary'
+                        }`}
                     >
                         <Icon name={control.icon} size={22} mask />
                     </button>

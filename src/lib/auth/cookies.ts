@@ -21,6 +21,25 @@ import { isProd } from "@/lib/env";
  */
 const ACCESS = "root_at";
 const REFRESH = "root_rt";
+/**
+ * Who is signed in, as the backend described them at sign-in.
+ *
+ * ⚠️ This exists because `GET /v1/me` DOES NOT WORK. That endpoint was the
+ * authoritative session read, and with it gone `getSession()` had no way to
+ * answer "who is this" — so every protected page decided nobody was signed in
+ * and bounced to /login.
+ *
+ * The COMPLETED response already carries the whole user (`tokens.user`), so it
+ * is kept here rather than re-fetched. Same protections as the tokens beside
+ * it: httpOnly, Secure in production, SameSite=lax, and cleared together.
+ *
+ * NOT a credential and not a permission. It decides what a screen RENDERS and
+ * nothing else — every real rule is enforced by the backend on a request that
+ * carries the access token, and a forged cookie would get a 401 there. That was
+ * already the rule (AGENTS.md §3: "Frontend RBAC is for rendering only"), which
+ * is what makes this substitution acceptable rather than merely convenient.
+ */
+const USER = "root_user";
 
 const base = {
   httpOnly: true,
@@ -42,10 +61,33 @@ export async function setAuthCookies(opts: {
   store.set(REFRESH, opts.refreshToken, { ...base, maxAge: opts.refreshMaxAge });
 }
 
+/**
+ * Remember the signed-in user. See the note on USER above.
+ *
+ * Given the REFRESH token's lifetime, not the access token's: the access cookie
+ * expires every 15 minutes and is replaced by silent refresh, and a user
+ * snapshot that vanished with it would log the administrator out of the UI
+ * while their session was still perfectly alive.
+ */
+export async function setSessionUser(user: unknown, maxAge: number) {
+  (await cookies()).set(USER, JSON.stringify(user), { ...base, maxAge });
+}
+
+export async function readSessionUser<T>(): Promise<T | null> {
+  const raw = (await cookies()).get(USER)?.value;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
 export async function clearAuthCookies() {
   const store = await cookies();
   store.delete(ACCESS);
   store.delete(REFRESH);
+  store.delete(USER);
 }
 
 export async function getAccessToken() {
@@ -56,4 +98,4 @@ export async function getRefreshToken() {
   return (await cookies()).get(REFRESH)?.value ?? null;
 }
 
-export const AUTH_COOKIE_NAMES = { ACCESS, REFRESH } as const;
+export const AUTH_COOKIE_NAMES = { ACCESS, REFRESH, USER } as const;

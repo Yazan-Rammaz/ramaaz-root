@@ -7,7 +7,6 @@ import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
 import '@aws-amplify/ui-react/styles.css';
 
 import { TFJS_WASM_PATH, blazefaceModelUrl } from '@/features/kyc/config/liveness';
-import { FaceMeshOverlay } from './FaceMeshOverlay';
 import './liveness.css';
 
 /**
@@ -206,10 +205,10 @@ export function LivenessCamera({
                 />
             </ThemeProvider>
 
-            {/* Outside the ThemeProvider and after the widget on purpose: it is
-                a sibling that paints over AWS's camera and touches nothing of
-                theirs. Delete this line and the check is unchanged. */}
-            <FaceMeshOverlay containerRef={frameRef} />
+            {/* The face-mesh overlay was removed by request — it drew a second
+                ML model's landmarks over AWS's camera and did not read well.
+                It was always a sibling that touched nothing of theirs, so its
+                removal changes the check in no way. `git log` has it. */}
         </div>
     );
 }

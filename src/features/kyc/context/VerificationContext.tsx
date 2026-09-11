@@ -14,6 +14,19 @@ interface VerificationContextType {
     completedSteps: Set<VerificationStep>;
     attemptCounts: Record<string, number>;
     livenessResult: LivenessResult | null;
+    /**
+     * The face captured earlier in this sign-in, served by /api/face-capture.
+     *
+     * ⚠️ DISPLAY ONLY, and the distinction is load-bearing. `livenessResult`
+     * holds the actual captured BYTES and is what the enrolment posts; this is
+     * a URL to a picture of the same face, and posting it would send a link
+     * where an image was expected.
+     *
+     * It exists because the bytes die with the page. After a refresh the
+     * screens can still SHOW the face — which is all they need it for — while
+     * the submit correctly still waits on a real capture.
+     */
+    storedFaceSrc: string | null;
     idDocument: IDDocument | null;
     matchResult: MatchResult | null;
     selfieCapture: string | null;
@@ -37,6 +50,7 @@ const MAX_ATTEMPTS = 10;
 export function VerificationProvider({
     children,
     initialStep = 'intro',
+    hasStoredFace = false,
 }: {
     children: React.ReactNode;
     /**
@@ -45,12 +59,20 @@ export function VerificationProvider({
      * the server knows whether this admin is already enrolled.
      */
     initialStep?: VerificationStep;
+    /**
+     * Whether the backend is holding a face from earlier in this sign-in
+     * (`face_capture_url` on the challenge). A boolean, not the URL: the URL is
+     * the backend's and stays server-side — the page only has to say whether
+     * there is one to fetch.
+     */
+    hasStoredFace?: boolean;
 }) {
     const [currentStep, setCurrentStep] = useState<VerificationStep>(initialStep);
     const [direction, setDirection] = useState<1 | -1>(1);
     const [completedSteps, setCompletedSteps] = useState<Set<VerificationStep>>(new Set());
     const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
     const [livenessResult, setLivenessResult] = useState<LivenessResult | null>(null);
+    const storedFaceSrc = hasStoredFace ? '/api/face-capture' : null;
     const [idDocument, setIdDocument] = useState<IDDocument | null>(null);
     const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
     const [selfieCapture, setSelfieCapture] = useState<string | null>(null);
@@ -159,6 +181,7 @@ export function VerificationProvider({
                 completedSteps,
                 attemptCounts,
                 livenessResult,
+                storedFaceSrc,
                 idDocument,
                 matchResult,
                 goTo,

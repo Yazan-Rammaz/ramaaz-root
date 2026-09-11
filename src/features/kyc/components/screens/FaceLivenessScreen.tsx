@@ -8,10 +8,14 @@ import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
+import { isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
-import { isChallengeExpired } from '@/features/kyc/services/httpKycService';
-import { expireSignInAction } from '@/features/auth/actions';
+import {
+    isChallengeExpired,
+    KycHttpError,
+} from '@/features/kyc/services/httpKycService';
+import { restartSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -108,6 +112,27 @@ type Phase =
  * renders.
  */
 const PASSED = new Map<string, string | null>();
+
+/**
+ * What to put on screen when the check could not RUN.
+ *
+ * Prefers whatever the service actually said. The generic line is a fallback
+ * for a failure with no message at all, not the default — "Could not start the
+ * face check" for every cause is what made a retry that failed again look
+ * inexplicable, both to the administrator and to whoever they reported it to.
+ *
+ * `KycHttpError` carries the status, so a transport failure and a refusal read
+ * differently instead of collapsing into one sentence.
+ */
+function noticeFor(err: unknown, fallback: string): string {
+    if (err instanceof KycHttpError) {
+        // The label `unwrap` prepends is for logs, not for a person.
+        const detail = err.message.replace(/^[^:]+:\s*/, '').trim();
+        return detail || fallback;
+    }
+    if (err instanceof Error && err.message) return err.message;
+    return fallback;
+}
 
 type StartResponse = { sessionId: string; region: string };
 type Credentials = {
@@ -223,17 +248,32 @@ export function FaceLivenessScreen({
                 if (cancelled) return;
                 console.error('[liveness] could not open a session:', err);
 
-                // 401 here is the CHALLENGE, not the camera. It has expired,
-                // been spent, or burned through its attempts — the backend will
-                // answer identically every time, so there is nothing to retry
-                // and offering a button says otherwise. Out to /no-access,
-                // which can still offer to re-open the link.
+                // ⚠️ 401 is the CHALLENGE, not the camera — expired, spent, or
+                // burned through its attempts. Retrying the step cannot work:
+                // the backend answers identically every time, which is exactly
+                // why the retry button "always failed for no reason".
+                //
+                // A dead challenge is not a dead LINK, though. Re-opening the
+                // link mints a fresh one and drops the administrator back at
+                // whichever step the server now says is owed — so the recovery
+                // is to open it again rather than to end the sign-in.
+                // `restartSignInAction` is `/enter/<token>` in everything but
+                // name: it spends the STORED link token server-side, so the
+                // token never travels through a URL a second time. With no
+                // stored link it falls through to /no-access on its own, which
+                // is then the honest answer.
                 if (isChallengeExpired(err)) {
-                    void expireSignInAction();
+                    void restartSignInAction();
                     return;
                 }
 
-                setNotice(t('faceSetupFailed'));
+                // ⚠️ Say WHAT went wrong.
+                //
+                // This showed one fixed sentence for every cause, so pressing
+                // retry and failing again gave the user — and us — nothing to
+                // act on. The Worker and the backend both answer with a real
+                // message; it just was not being read.
+                setNotice(noticeFor(err, t('faceSetupFailed')));
                 setPhase('unavailable');
             }
         })();
@@ -290,11 +330,13 @@ export function FaceLivenessScreen({
                 }
             } catch (err) {
                 console.error('[liveness] verify threw:', err);
+                // Same reasoning as the session-open path: re-open the link
+                // rather than ending the sign-in.
                 if (isChallengeExpired(err)) {
-                    void expireSignInAction();
+                    void restartSignInAction();
                     return;
                 }
-                setNotice(t('faceSetupFailed'));
+                setNotice(noticeFor(err, t('faceSetupFailed')));
                 setPhase('unavailable');
                 return;
             }
@@ -373,7 +415,7 @@ export function FaceLivenessScreen({
             <div
                 ref={frameRef}
                 className="relative h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
-                style={{ marginTop: rem(12) }}
+                style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
             >
                 {phase === 'preparing' && (
                     <span
@@ -430,10 +472,12 @@ export function FaceLivenessScreen({
                                 setPhase('preparing');
                                 setAttempt((n) => n + 1);
                             }}
-                            className="fz-14 leading-none font-semibold text-[#388CFF] underline"
+                            title={t('deviceRetry')}
+                            aria-label={t('deviceRetry')}
+                            className="flex h-40 w-40 items-center justify-center rad-12 border border-white/40 text-white transition-colors hover:border-white"
                             style={{ marginTop: rem(16) }}
                         >
-                            {t('deviceRetry')}
+                            <Icon name="kyc/retry" size={20} mask />
                         </button>
                     </div>
                 )}
@@ -474,6 +518,35 @@ export function FaceLivenessScreen({
                             // their face was rejected when their camera never
                             // opened.
                             const state = (err as { state?: string } | null)?.state ?? '';
+
+                            // ⚠️ CAMERA_FRAMERATE_ERROR has two very different
+                            // causes and the message cannot tell them apart:
+                            //
+                            //   - the camera in use genuinely reports under
+                            //     15fps in `getSettings()`, which AWS refuses
+                            //     (machine.mjs), or
+                            //   - a relayed hand-off track is being used and the
+                            //     shim that teaches it to describe itself was
+                            //     not applied.
+                            //
+                            // One is a device limit the user must route around;
+                            // the other is our bug. Guessing between them has
+                            // already cost two rounds, so the next occurrence
+                            // says which. No image, no identifiers — the shim
+                            // flag and what the devices claim.
+                            if (/FRAMERATE/i.test(state)) {
+                                void (async () => {
+                                    const devices = await navigator.mediaDevices
+                                        .enumerateDevices()
+                                        .catch(() => []);
+                                    console.warn('[liveness] framerate refusal', {
+                                        handoffShimInstalled: isShimInstalled(),
+                                        videoInputs: devices
+                                            .filter((d) => d.kind === 'videoinput')
+                                            .map((d) => d.label || '(unlabelled)'),
+                                    });
+                                })();
+                            }
                             setNotice(
                                 /ACCESS|PERMISSION|DENIED/i.test(state)
                                     ? t('faceCameraBlocked')

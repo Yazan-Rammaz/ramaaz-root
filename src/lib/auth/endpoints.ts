@@ -116,7 +116,22 @@ export const AUTH_PATHS = {
    */
   device: "/v1/auth/device",
 
-  /** ✅ The authoritative session read. GET, Bearer access token. */
+  /**
+   * ⚠️ BROKEN — DO NOT CALL. Nothing in this app does.
+   *
+   * This was the authoritative session read, and while it was failing
+   * `getSession()` answered `null` for everybody: every protected page decided
+   * nobody was signed in and redirected to /login. A signed-in administrator
+   * could not reach the dashboard.
+   *
+   * The session now comes from the user the COMPLETED response already carried,
+   * kept in an httpOnly cookie — see `lib/auth/session.ts`, which states plainly
+   * what that gives up.
+   *
+   * Kept here, with its schema, so restoring the endpoint is a one-line change
+   * rather than an excavation. Re-point `getSession()` at it and delete the
+   * cookie; nothing else in the flow depends on the substitution.
+   */
   me: "/v1/me",
 
   /**
@@ -421,22 +436,23 @@ export const stepResponseSchema = z.object({
    */
   challenge_expires_at: z.string().optional(),
   /**
-   * The face captured during this sign-in's liveness check, base64, as the
-   * backend stored it when `/v1/auth/face` recorded it.
+   * Where the face captured during this sign-in is stored — a URL, not an
+   * image. The KYC Worker commits the frame Rekognition judged, and the backend
+   * hands back a link to it.
    *
-   * Returned on `/v1/auth/link` when the stage is ID_DOCUMENT_REQUIRED, so a
-   * refresh part-way through enrolment has a face to show rather than a grey
-   * placeholder — and so nobody is asked to photograph themselves a second
-   * time. See docs/kyc/step-restore.md.
+   * Returned on `/v1/auth/link` when the stage is ID_DOCUMENT_REQUIRED, which
+   * is what lets a REFRESH part-way through enrolment still show the face. The
+   * frame itself lives in React state and dies with the page; this outlives it.
    *
-   * ⚠️ NOT evidence, in either direction. It is the still the screen showed,
-   * chosen by the browser; the image AWS judged is one it holds itself. Render
-   * it, and never let anything downstream read it as proof of anything.
+   * A URL is why this works at all. The image is ~300KB of base64, far past a
+   * cookie's 4KB ceiling — a link is a hundred characters and rides in the
+   * challenge cookie with everything else.
    *
-   * Optional because the backend does not return it yet, and because it is
-   * absent on every stage but that one.
+   * ⚠️ For DISPLAY only, and never fetched by the browser: it points at the
+   * backend, which the browser must never address (AGENTS.md §2), and the CSP
+   * would refuse it anyway. `/api/face-capture` fetches it server-side.
    */
-  faceCapturedPhoto: z.string().optional(),
+  face_capture_url: z.string().optional(),
   tokens: wireTokensSchema.optional(),
 });
 export type StepResponse = z.infer<typeof stepResponseSchema>;

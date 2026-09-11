@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Icon } from '@/components/ui/Icon';
 import {
     ICE_SERVERS,
     iceGatheringComplete,
@@ -211,9 +212,11 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                 <button
                     type="button"
                     onClick={() => void connect()}
-                    className="fz-14 mt-16 leading-none font-semibold text-[#388CFF] underline"
+                    title="Try again"
+                    aria-label="Try again"
+                    className="mt-16 flex h-44 w-44 items-center justify-center rad-12 border border-white/40 text-white transition-colors hover:border-white"
                 >
-                    Try again
+                    <Icon name="kyc/retry" size={20} mask />
                 </button>
             )}
         </main>

@@ -11,6 +11,8 @@ import ExitConfirmDialog from '../ExitConfirmDialog';
 import faceDetectSvg from '@/features/kyc/assets/face-detect.svg';
 import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
 import { FlexSpace } from '@/components/ui/FlexSpace';
+import { fetchStoredFace } from '@/features/kyc/services/storedFace';
+import { Icon } from '@/components/ui/Icon';
 
 type MatchState = 'matching' | 'success' | 'review' | 'failed';
 
@@ -69,6 +71,7 @@ export default function FaceMatchScreen({
         setMatchResult,
         incrementAttempt,
         resetSession,
+        storedFaceSrc,
     } = useVerification();
     const router = useRouter();
 
@@ -94,6 +97,15 @@ export default function FaceMatchScreen({
     const matchInFlight = useRef(false);
     /** The comparison currently in flight, so the finaliser can wait for it. */
     const matchPendingRef = useRef<Promise<unknown> | null>(null);
+    /**
+     * The captured face `runMatch` actually used — from memory, or refetched
+     * from the backend after a reload.
+     *
+     * The enrolment below needs the SAME image the comparison ran on, and after
+     * a refresh that is not `livenessResult`, which is gone. A ref because it is
+     * resolved inside an async run and nothing renders from it.
+     */
+    const resolvedFaceRef = useRef<string | null>(null);
 
     const handleFailure = useCallback(
         (msg?: string) => {
@@ -142,7 +154,12 @@ export default function FaceMatchScreen({
             // actually been accepted — and by then the redirect to the device
             // step is usually already in flight, which is the honest signal
             // that it worked.
-            if (idDocument && livenessResult?.faceImageData) {
+            // The face the comparison ran on — which after a reload is the
+            // refetched copy, not `livenessResult`. Reading state here is what
+            // made a reloaded page skip the submit and report a mismatch.
+            const selfie = livenessResult?.faceImageData ?? resolvedFaceRef.current;
+
+            if (idDocument && selfie) {
                 // ── Enrolment goes to the AUTH backend, in one call ──────────
                 //
                 // Not to the KYC Worker's /submit. That route is RDB's: three
@@ -176,9 +193,14 @@ export default function FaceMatchScreen({
 
                 const result = await onEnroll({
                     idDocument,
-                    selfie: livenessResult.faceImageData,
+                    selfie,
                     selfieVsIdScore: score,
-                    livenessConfidence: livenessResult.metrics?.confidence,
+                    // Optional-chained: after a reload the selfie comes from
+                    // the backend and `livenessResult` is null, so the
+                    // confidence from that run is simply not available here.
+                    // The backend already has it — the Worker committed it with
+                    // the face — so omitting it costs nothing.
+                    livenessConfidence: livenessResult?.metrics?.confidence,
                 });
 
                 // Only reached when the caller did NOT redirect — i.e. it
@@ -204,7 +226,7 @@ export default function FaceMatchScreen({
             } else {
                 console.warn('[FaceMatch] Skipping submit — missing:', {
                     hasIdDocument: !!idDocument,
-                    hasFace: !!livenessResult?.faceImageData,
+                    hasFace: !!selfie,
                 });
 
                 // ⚠️ A MISSING FRAME IS NOT A FAILED MATCH, and saying so was a
@@ -224,9 +246,9 @@ export default function FaceMatchScreen({
                 // step data by token — see docs/kyc/step-restore.md — and this
                 // whole branch becomes unreachable.
                 handleFailure(
-                    livenessResult?.faceImageData
+                    selfie
                         ? undefined
-                        : 'Your photo was lost when the page reloaded. Open your access link again to restart.',
+                        : 'Your photo could not be loaded. Open your access link again to restart.',
                 );
             }
         } else {
@@ -263,7 +285,30 @@ export default function FaceMatchScreen({
         hasFinalisedRef.current = false;
         apiResultRef.current = null;
 
-        const liveFace = livenessResult?.faceImageData ?? '';
+        /**
+         * The captured face — from memory, or refetched from the backend.
+         *
+         * ⚠️ The refetch is what makes a REFRESH survivable. `livenessResult`
+         * is React state holding the frame, and a reload destroys it, so this
+         * guard used to fail with `hasLiveFace: false` on a screen that was
+         * visibly SHOWING the face — because the picture came from the stored
+         * copy while the comparison still demanded the lost bytes.
+         *
+         * `/api/face-capture` serves that same stored image from our own
+         * origin, so it can simply be fetched back. It is the frame Rekognition
+         * judged, committed by the Worker — if anything a better source than
+         * the browser's own copy, which was only ever the still it displayed.
+         */
+        let liveFace = livenessResult?.faceImageData ?? '';
+        if (!liveFace && storedFaceSrc) {
+            try {
+                liveFace = await fetchStoredFace();
+            } catch (err) {
+                console.error('[FaceMatch] could not refetch the stored face:', err);
+            }
+        }
+        resolvedFaceRef.current = liveFace || null;
+
         const idFace = idDocument?.idFaceImageData || idDocument?.frontImageData || '';
 
         if (!liveFace || !idFace) {
@@ -271,7 +316,13 @@ export default function FaceMatchScreen({
                 hasLiveFace: Boolean(liveFace),
                 hasIdFace: Boolean(idFace),
             });
-            handleFailure();
+            // Name the cause. A missing FACE after a reload is not "your face
+            // does not match your ID" — nothing was compared.
+            handleFailure(
+                !liveFace
+                    ? 'Your photo could not be loaded. Open your access link again to restart.'
+                    : undefined,
+            );
             matchInFlight.current = false;
             return;
         }
@@ -374,7 +425,17 @@ export default function FaceMatchScreen({
     const borderColor =
         matchState === 'success' ? '#34D317' : matchState === 'failed' ? '#FF5F61' : '#388CFF';
 
-    const liveFace = livenessResult?.faceImageData;
+    /**
+     * What to DRAW. Falls back to the stored capture so a refresh shows a face
+     * instead of a grey "Face Photo" box.
+     *
+     * ⚠️ Not what gets SUBMITTED. The enrolment above still requires
+     * `livenessResult.faceImageData` — the real bytes — because this fallback
+     * is a URL, and a URL posted as `selfie` is not an image. So a reloaded
+     * page can show you your face and still, correctly, refuse to submit a
+     * capture it does not have.
+     */
+    const liveFace = livenessResult?.faceImageData ?? storedFaceSrc;
     const idImage = idDocument?.frontImageData || idDocument?.idFaceImageData;
 
     return (
@@ -594,9 +655,11 @@ export default function FaceMatchScreen({
                     </button>
                     <button
                         onClick={() => runMatch()}
-                        className="fz-14 text-[#4D84FF] hover:underline"
+                        title="Rematch"
+                        aria-label="Rematch"
+                        className="flex h-36 w-36 items-center justify-center rad-12 border border-[#5D5C5D]/40 text-[#4D84FF] transition-colors hover:border-[#4D84FF]"
                     >
-                        Rematch
+                        <Icon name="kyc/retry" size={18} mask />
                     </button>
                 </div>
             )}

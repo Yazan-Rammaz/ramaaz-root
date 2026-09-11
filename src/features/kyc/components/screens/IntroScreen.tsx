@@ -47,7 +47,7 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  */
 export default function IntroScreen() {
     const t = useTranslations('auth');
-    const { goTo, livenessResult } = useVerification();
+    const { goTo, livenessResult, storedFaceSrc } = useVerification();
     const { userData } = useKycSession();
 
     // Supplied by the backend on the face-check response. Absent until that
@@ -58,7 +58,13 @@ export default function IntroScreen() {
         .join(' ')
         .trim();
 
-    const photo = livenessResult?.faceImageData;
+    /**
+     * The frame from this session if it is still in memory, otherwise the one
+     * the backend kept. A refresh drops the first and the second survives it —
+     * which is the whole reason this screen used to show a grey box to anybody
+     * who reloaded.
+     */
+    const photo = livenessResult?.faceImageData ?? storedFaceSrc;
 
     return (
         <div className="mx-auto flex h-full w-390 flex-col">

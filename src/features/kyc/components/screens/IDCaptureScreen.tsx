@@ -18,6 +18,7 @@ import idBackSvg from '@/features/kyc/assets/id-back.svg';
 import shieldSvg from '@/features/kyc/assets/shield.svg';
 import ExitConfirmDialog from '../ExitConfirmDialog';
 import { FlexSpace } from '@/components/ui/FlexSpace';
+import { Icon } from '@/components/ui/Icon';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import { idConfig, kycConfig } from '@/features/kyc/config/kycConfig';
 import { FaceProgressBar } from './AwsFaceLiveness';
@@ -1047,6 +1048,15 @@ export default function IDCaptureScreen() {
               getUserMedia call, not a camera already opened or already failed,
               so the screen has to ask again to receive the stream.
             */}
+            {/*
+              Hidden until the camera is actually being asked for.
+              
+              Before "Start Live Detection" there is no camera open and nothing
+              to hand off — offering an alternative to a device that has not been
+              tried yet is noise, and worse, it invites the choice at the one
+              moment the user has no information to make it with.
+            */}
+            {pollState !== 'idle' && (
             <CameraHandoffPanel
                 /* The frame's existing ref — it is the same element, and a
                    second ref on it would be two names for one thing. */
@@ -1061,6 +1071,7 @@ export default function IDCaptureScreen() {
                     void startCamera();
                 }}
             />
+            )}
 
             {/* Tabs */}
             {isPassport ? (
@@ -1225,13 +1236,15 @@ export default function IDCaptureScreen() {
             <FlexSpace size={32} share={0.65} />
             {/* Camera error */}
             {cameraError && (
-                <div className="text-center mb-8">
+                <div className="flex flex-col items-center mb-8">
                     <p className="text-xs text-red-500 mb-4">{cameraError}</p>
                     <button
                         onClick={startCamera}
-                        className="text-xs text-[#388CFF] hover:underline"
+                        title="Try again"
+                        aria-label="Try again"
+                        className="flex h-36 w-36 items-center justify-center rad-12 border border-[#5D5C5D]/40 text-[#388CFF] transition-colors hover:border-[#388CFF]"
                     >
-                        Try Again
+                        <Icon name="kyc/retry" size={18} mask />
                     </button>
                 </div>
             )}

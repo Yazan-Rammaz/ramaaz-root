@@ -45,6 +45,7 @@ export function IdentityGate({
     challengeId,
     onLivenessSession,
     onLivenessPassed,
+    hasStoredFace = false,
 }: {
     /** True when this admin has never completed ID enrolment. */
     needsEnrollment: boolean;
@@ -58,6 +59,14 @@ export function IdentityGate({
     onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
     /** Commits the verified step. See FaceLivenessScreen's onPassed. */
     onLivenessPassed?: (faceCapturedPhoto: string | null) => Promise<{ error?: string } | void>;
+    /**
+     * The backend is holding a face from earlier in this sign-in.
+     *
+     * Passed straight through to the provider, which turns it into a display
+     * source. It is what lets a refresh on the ID step keep the photo — the
+     * captured frame is React state and a reload drops it.
+     */
+    hasStoredFace?: boolean;
 }) {
     // ── Who moves the flow off the face check ───────────────────────────────
     // The SERVER does, and `needsEnrollment` is how it says so: a passed face
@@ -113,7 +122,10 @@ export function IdentityGate({
               * The provider follows a changed `initialStep` on its own now, so
               * the step moves and the frame survives.
               */}
-            <VerificationProvider initialStep={enrolling ? 'intro' : 'face-reverify'}>
+            <VerificationProvider
+                initialStep={enrolling ? 'intro' : 'face-reverify'}
+                hasStoredFace={hasStoredFace}
+            >
                 {/* `wantsEnrolling` is the server's yes, and it arrives the
                     moment the stage flips — before `enrolling` opens, since
                     that waits out SUCCESS_HOLD_MS. That gap IS the green

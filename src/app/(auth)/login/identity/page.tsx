@@ -48,6 +48,14 @@ export default async function IdentityPage() {
                 // issues it separately from the challenge token — and the token
                 // itself never leaves the server.
                 challengeId={challenge.challengeId ?? ''}
+                // Whether the backend is holding a face from earlier in this
+                // sign-in. A boolean, not the URL — the URL is the backend's
+                // and stays server-side; /api/face-capture reads it from the
+                // same cookie and streams the bytes.
+                //
+                // This is what makes a REFRESH here keep the photo: the frame
+                // itself is React state and does not survive a reload.
+                hasStoredFace={Boolean(challenge.faceCaptureUrl)}
             />
         </Screen>
     );

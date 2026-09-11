@@ -32,9 +32,12 @@ import { submitFaceAction, submitIdentityDocumentAction } from '../actions';
 export function IdentityStep({
     needsEnrollment,
     challengeId,
+    hasStoredFace = false,
 }: {
     needsEnrollment: boolean;
     challengeId: string;
+    /** The backend kept a face from earlier in this sign-in. See the page. */
+    hasStoredFace?: boolean;
 }) {
     /**
      * The step token, parked between verifying and committing.
@@ -65,6 +68,7 @@ export function IdentityStep({
         <IdentityGate
             needsEnrollment={needsEnrollment}
             challengeId={challengeId}
+            hasStoredFace={hasStoredFace}
             /**
              * The AWS Face Liveness path, and the reason it exists: a photograph
              * of the enrolled administrator, held up on a second phone, passed

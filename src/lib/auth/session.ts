@@ -1,8 +1,8 @@
 import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { api, ApiError, isBackendConfigured } from "@/lib/api/server";
-import { AUTH_PATHS, meResponseSchema, type WireUser } from "@/lib/auth/endpoints";
+import { getAccessToken, readSessionUser } from "@/lib/auth/cookies";
+import { wireUserSchema, type WireUser } from "@/lib/auth/endpoints";
 import { hasRole, type Role } from "@/lib/auth/rbac";
 
 export type SessionUser = {
@@ -66,32 +66,50 @@ export function toSessionUser(u: WireUser): SessionUser {
 }
 
 /**
- * The authoritative session — the backend's `/auth/me`. `cache()` dedupes it
- * across a single render pass. Returns null when unauthenticated.
+ * Who is signed in — read from the session cookie, NOT from the backend.
+ *
+ * ⚠️ `GET /v1/me` is gone. It was the authoritative read, and while it was
+ * broken this function answered `null` for everybody: the request failed, the
+ * catch below logged it and returned null, and every protected page redirected
+ * to /login. A signed-in administrator could not reach the dashboard at all.
+ *
+ * So the user is taken from the cookie written at sign-in, where the COMPLETED
+ * response handed us the whole record. `cache()` still dedupes across a render
+ * pass, which now costs nothing rather than saving a round trip.
+ *
+ * ── What this gives up, stated plainly ──────────────────────────────────────
+ * It no longer asks the backend whether the session is still good. The gate is
+ * "does this browser hold an access cookie", not "does the server still accept
+ * it" — so a session revoked server-side keeps rendering the shell until its
+ * token expires or a real request answers 401.
+ *
+ * That is narrower than it sounds, and was already the design: frontend RBAC
+ * decides rendering only, and NestJS enforces every real rule (AGENTS.md §3).
+ * Every call that touches data still carries the bearer and still gets a 401.
+ * What a stale cookie buys is an empty dashboard frame.
+ *
+ * The access cookie is the signal because middleware maintains it: it refreshes
+ * it silently while the refresh token is good, and DELETES BOTH the moment a
+ * refresh is refused. A dead session therefore stops rendering on the next
+ * request rather than lingering.
+ *
+ * Restore the endpoint and this becomes one call again — `toSessionUser` and
+ * `meResponseSchema` are both still here.
  */
 export const getSession = cache(async (): Promise<SessionUser | null> => {
-  // No backend wired yet — nobody can be signed in, so don't throw-and-catch
-  // once per request just to reach the same answer.
-  if (!isBackendConfigured()) return null;
+  // The token is what says "signed in"; the snapshot only says who. Without it
+  // there is no session, whatever the snapshot claims.
+  if (!(await getAccessToken())) return null;
+
+  const user = await readSessionUser<WireUser>();
+  if (!user) return null;
 
   try {
-    // Confirmed against staging: `{ user, projects }`, where `user` is a
-    // SPARSE version of the sign-in payload — see wireUserSchema.
-    const raw = await api.get<unknown>(AUTH_PATHS.me);
-    return toSessionUser(meResponseSchema.parse(raw).user);
+    return toSessionUser(wireUserSchema.parse(user));
   } catch (error) {
-    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-      return null;
-    }
-    // Anything else is NOT a "you're signed out" answer — the backend is
-    // unreachable, or NEST_API_URL is malformed. Still return null so protected
-    // pages fall through to /login rather than crashing the render, but say so
-    // loudly: silently redirecting forever is the worst way to learn that a
-    // base URL has a typo in it.
-    console.error(
-      "[auth] /auth/me failed — treating as signed out. Check NEST_API_URL:",
-      error instanceof Error ? error.message : error,
-    );
+    // Our own cookie failed our own schema — it predates a shape change, or was
+    // tampered with. Either way it is not a session.
+    console.warn("[auth] session cookie did not parse:", error);
     return null;
   }
 });
