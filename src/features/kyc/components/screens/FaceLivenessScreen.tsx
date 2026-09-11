@@ -1,14 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
 import { Icon } from '@/components/ui/Icon';
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
+import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
+import { isChallengeExpired } from '@/features/kyc/services/httpKycService';
+import { expireSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -48,7 +51,63 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * `connect-src` in middleware.ts names the streaming host for that reason.
  */
 
-type Phase = 'preparing' | 'ready' | 'checking' | 'passed' | 'failed';
+type Phase =
+    | 'preparing'
+    | 'ready'
+    | 'checking'
+    | 'passed'
+    /**
+     * The check RAN and the person was not accepted. This is the only state
+     * that earns the red ring.
+     */
+    | 'failed'
+    /**
+     * The check could not run at all — no camera, blocked permission, a session
+     * that would not open, a detector that errored, a request that never
+     * arrived.
+     *
+     * ⚠️ Split from `failed` deliberately. Both used to paint the frame red,
+     * which told somebody whose CAMERA was blocked that their face had been
+     * rejected. Nothing was compared; there was no verdict to show. A red ring
+     * is an accusation, and it belongs only where something was actually
+     * judged.
+     */
+    | 'unavailable';
+
+/**
+ * Challenges whose liveness check has already passed, with the still that was
+ * on screen when it did.
+ *
+ * ── Why this is module-level and not state ──────────────────────────────────
+ * Because the component REMOUNTS after it succeeds, and component state cannot
+ * survive that. The sequence, from a real run:
+ *
+ *   verify → 200 passed          the check is over, and the backend has now
+ *                                CONSUMED the re-verification challenge
+ *   onPassed() → applyStage()    the stage advances and redirects
+ *   …to /login/identity          the SAME route ID_DOCUMENT_REQUIRED maps to
+ *   IdentityGate re-renders      `heldOpen` starts false again, so `enrolling`
+ *                                is false for SUCCESS_HOLD_MS
+ *   initialStep='face-reverify'  → this screen mounts FRESH
+ *   start effect runs            → POST /reverify/start
+ *   → 401 "Invalid or expired re-verification challenge"
+ *   → setPhase('failed')         → the frame turns RED on a check that passed
+ *
+ * The 2-second success hold exists so the green frame can be seen. What it was
+ * actually doing was re-mounting the liveness screen for two seconds after the
+ * check had already succeeded, and the second AWS session it opened could only
+ * ever be refused — the challenge behind it was spent by the verify that just
+ * succeeded. The Worker's 401 was right; the second call was ours.
+ *
+ * So a pass is remembered HERE, outside the React tree. A remount reads it,
+ * opens on the green verdict instead of the camera, and never calls start.
+ *
+ * Keyed by challenge, so it says nothing about any other sign-in, and it holds
+ * no credential — a still and a boolean. A full page load clears it, which is
+ * correct: by then the server's stage has moved on and this screen is not what
+ * renders.
+ */
+const PASSED = new Map<string, string | null>();
 
 type StartResponse = { sessionId: string; region: string };
 type Credentials = {
@@ -88,7 +147,7 @@ export function FaceLivenessScreen({
      *
      * Optional: the design gallery and the bench have nothing to commit to.
      */
-    onPassed?: () => Promise<{ error?: string } | void>;
+    onPassed?: (faceCapturedPhoto: string | null) => Promise<{ error?: string } | void>;
     /**
      * The frame this check ended on, for the steps that follow.
      *
@@ -103,10 +162,17 @@ export function FaceLivenessScreen({
 }) {
     const t = useTranslations('auth');
 
-    const [phase, setPhase] = useState<Phase>('preparing');
+    // Seeded from PASSED so a remount AFTER a successful check opens on the
+    // green verdict rather than flashing the camera and then failing. See the
+    // note on PASSED — this is the whole reason it exists.
+    const [phase, setPhase] = useState<Phase>(() =>
+        PASSED.has(challengeId) ? 'passed' : 'preparing',
+    );
     const [session, setSession] = useState<StartResponse | null>(null);
+    /** Why the check could not run. Shown with `unavailable`, never with a ring. */
+    const [notice, setNotice] = useState<string | null>(null);
     /** The last camera frame, shown while the servers decide. Never judged. */
-    const [snapshot, setSnapshot] = useState<string | null>(null);
+    const [snapshot, setSnapshot] = useState<string | null>(() => PASSED.get(challengeId) ?? null);
     /**
      * Bumped to run the whole check again on the SAME challenge.
      *
@@ -124,6 +190,14 @@ export function FaceLivenessScreen({
     const [attempt, setAttempt] = useState(0);
 
     /**
+     * The camera frame. Handed to the hand-off panel, which mounts BELOW the
+     * frame (nothing clips its caption there) and portals its QR overlay back
+     * in. The frame is `overflow-hidden`, so a caption positioned outside it
+     * from within is simply never seen.
+     */
+    const frameRef = useRef<HTMLDivElement>(null);
+
+    /**
      * Open a session and fetch credentials before rendering the detector.
      *
      * Both have to be in hand first: the component takes `sessionId` as a prop
@@ -131,6 +205,11 @@ export function FaceLivenessScreen({
      * it early only produces a flash of its own error screen.
      */
     useEffect(() => {
+        // Already passed. Opening another AWS session would spend a billed
+        // session to ask about a challenge the backend has already retired, and
+        // the only possible answer is the 401 that used to paint this frame red.
+        if (PASSED.has(challengeId)) return;
+
         let cancelled = false;
 
         void (async () => {
@@ -143,7 +222,19 @@ export function FaceLivenessScreen({
             } catch (err) {
                 if (cancelled) return;
                 console.error('[liveness] could not open a session:', err);
-                setPhase('failed');
+
+                // 401 here is the CHALLENGE, not the camera. It has expired,
+                // been spent, or burned through its attempts — the backend will
+                // answer identically every time, so there is nothing to retry
+                // and offering a button says otherwise. Out to /no-access,
+                // which can still offer to re-open the link.
+                if (isChallengeExpired(err)) {
+                    void expireSignInAction();
+                    return;
+                }
+
+                setNotice(t('faceSetupFailed'));
+                setPhase('unavailable');
             }
         })();
 
@@ -199,10 +290,19 @@ export function FaceLivenessScreen({
                 }
             } catch (err) {
                 console.error('[liveness] verify threw:', err);
-                setPhase('failed');
+                if (isChallengeExpired(err)) {
+                    void expireSignInAction();
+                    return;
+                }
+                setNotice(t('faceSetupFailed'));
+                setPhase('unavailable');
                 return;
             }
 
+            // Recorded BEFORE the commit below, because the commit redirects
+            // and the redirect is what remounts this screen. Written any later
+            // and the remount would race it and start a session anyway.
+            PASSED.set(challengeId, shot);
             setPhase('passed');
 
             // Let the success pulse play before committing, because committing
@@ -211,7 +311,11 @@ export function FaceLivenessScreen({
             await new Promise((resolve) => setTimeout(resolve, 1100));
 
             try {
-                const committed = await onPassed?.();
+                // The frame goes WITH the commit. It is the same still the
+                // verdict showed — a base64 data URL — and the backend stores
+                // it so a refresh on the ID step has a face to display without
+                // asking anyone to photograph themselves twice.
+                const committed = await onPassed?.(shot);
                 if (committed?.error) {
                     console.error('[liveness] commit refused:', committed.error);
                     setPhase('failed');
@@ -227,10 +331,14 @@ export function FaceLivenessScreen({
                 const digest = (err as { digest?: unknown } | null)?.digest;
                 if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) throw err;
                 console.error('[liveness] commit threw:', err);
-                setPhase('failed');
+                setNotice(t('faceSetupFailed'));
+                setPhase('unavailable');
             }
         },
-        [onSession, onPassed, onFaceCaptured, sessionId],
+        // `t` is in here because the non-verdict paths above now render a
+        // message through it. Omitted, a language switch mid-check would leave
+        // this callback closed over the previous locale's strings.
+        [onSession, onPassed, onFaceCaptured, sessionId, challengeId, t],
     );
 
     return (
@@ -263,8 +371,9 @@ export function FaceLivenessScreen({
                 No border: the camera fills it edge to edge, so the picture is
                 the edge. */}
             <div
+                ref={frameRef}
                 className="relative h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
-                style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
+                style={{ marginTop: rem(12) }}
             >
                 {phase === 'preparing' && (
                     <span
@@ -300,6 +409,35 @@ export function FaceLivenessScreen({
                     />
                 )}
 
+                {/*
+                  Could not RUN — no ring, no verdict, no accusation.
+
+                  Plain dark panel and a retry. This is where a blocked camera,
+                  a missing device, a sub-15fps camera and a refused session all
+                  land, and none of them looked at anybody's face. The red ring
+                  above stays for the one case that did.
+                */}
+                {phase === 'unavailable' && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/85 px-24">
+                        <p className="fz-14 max-w-300 text-center leading-normal font-medium text-white">
+                            {notice ?? t('faceSetupFailed')}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setNotice(null);
+                                setSnapshot(null);
+                                setPhase('preparing');
+                                setAttempt((n) => n + 1);
+                            }}
+                            className="fz-14 leading-none font-semibold text-[#388CFF] underline"
+                            style={{ marginTop: rem(16) }}
+                        >
+                            {t('deviceRetry')}
+                        </button>
+                    </div>
+                )}
+
                 {/* The same brackets the single-frame capture uses, so the two
                     face frames read as one screen rather than two.
 
@@ -326,11 +464,49 @@ export function FaceLivenessScreen({
                             // RUNTIME_ERROR covers everything unclassified — so
                             // log the whole object for the cause.
                             console.error('[liveness] detector error', err);
-                            setPhase('failed');
+
+                            // ⚠️ NEVER `failed`. Everything that reaches here is
+                            // the camera, not the face: a blocked permission, no
+                            // device, a device that cannot sustain 15fps
+                            // (CAMERA_FRAMERATE_ERROR), a detector that threw.
+                            // Not one of them compared anybody to anything, and
+                            // painting the frame red for them tells the user
+                            // their face was rejected when their camera never
+                            // opened.
+                            const state = (err as { state?: string } | null)?.state ?? '';
+                            setNotice(
+                                /ACCESS|PERMISSION|DENIED/i.test(state)
+                                    ? t('faceCameraBlocked')
+                                    : t('faceSetupFailed'),
+                            );
+                            setPhase('unavailable');
                         }}
                     />
                 )}
             </div>
+
+            {/*
+              The phone-camera hand-off. Mounted OUTSIDE the frame so its
+              caption is not clipped by the frame's `overflow-hidden`; the QR
+              overlay is portalled back in via `frameRef`.
+
+              `onLive` bumps `attempt`, which is the retry trigger — a new AWS
+              session and a fresh <LivenessCamera>. That remount is what calls
+              getUserMedia again and so picks up the shimmed stream. The widget
+              acquires its camera internally and cannot be handed one, so a
+              remount is the only way in; without this the QR would connect and
+              the frame would stay dead.
+            */}
+            <CameraHandoffPanel
+                frameRef={frameRef}
+                facing="user"
+                label="look at your phone"
+                onLive={() => {
+                    setSnapshot(null);
+                    setPhase('preparing');
+                    setAttempt((n) => n + 1);
+                }}
+            />
 
             {/* Nothing is written under the frame.
 

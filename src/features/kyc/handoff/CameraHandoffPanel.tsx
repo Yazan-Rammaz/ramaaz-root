@@ -1,0 +1,329 @@
+'use client';
+
+import {
+    useEffect,
+    useRef,
+    useState,
+    useSyncExternalStore,
+    type CSSProperties,
+    type RefObject,
+} from 'react';
+import { createPortal } from 'react-dom';
+import { Icon } from '@/components/ui/Icon';
+import { CustomQRCode } from '@/components/ui/CustomQR';
+import { useCameraHandoff, type HandoffFacing } from './useCameraHandoff';
+import { detectCameraTrouble, isHandheldDevice, type CameraTrouble } from './cameraShim';
+
+// XD px -> scaling rem.
+const rem = (px: number) => `${px * 0.0625}rem`;
+
+/** A device does not stop being a phone, so there is nothing to subscribe to. */
+const NEVER_CHANGES = () => () => {};
+
+/**
+ * The desktop's offer of a phone camera, and the only new thing on screen.
+ *
+ * ── Additive by design ──────────────────────────────────────────────────────
+ * Mount this next to a capture step and nothing else changes. It does not wrap,
+ * replace or configure the capture screens — when the phone connects it
+ * installs the `getUserMedia` shim and those screens pick up the stream on
+ * their own, still believing they opened a local camera.
+ *
+ * ── Offered early, not after a fight ────────────────────────────────────────
+ * `detectCameraTrouble()` runs on mount rather than after N failed attempts.
+ * The commonest reason to need this is a DENIED permission, and a denial is
+ * remembered per origin: the browser will not prompt again, so retrying is
+ * something the user can do forever without it ever working. Waiting for
+ * repeated failures would just be watching somebody fail.
+ */
+export function CameraHandoffPanel({
+    facing,
+    label,
+    onLive,
+    frameRef,
+    style,
+}: {
+    /** 'user' for the face step, 'environment' for a document. */
+    facing: HandoffFacing;
+    /** What the phone is being asked to capture, for the instruction line. */
+    label: string;
+    /**
+     * Fired once, when the phone's video starts flowing.
+     *
+     * ⚠️ Load-bearing. Installing the shim does NOT redirect a camera that has
+     * already been opened — or already failed to open, which is the whole
+     * reason somebody is here. The capture screen has to ASK for a camera again
+     * to receive the phone's, so the host re-arms itself here: a new AWS
+     * liveness attempt, or another `startCamera()`. Without it the QR connects,
+     * the panel goes green, and the frame stays exactly as dead as it was.
+     */
+    onLive?: () => void;
+    /**
+     * The camera frame this hand-off belongs to.
+     *
+     * ⚠️ This component mounts OUTSIDE that frame and portals its overlay back
+     * in, which looks roundabout until you try the obvious thing.
+     *
+     * The frame is `overflow-hidden` (it has a 30px radius to clip the video
+     * to). Mount the whole panel inside it and the trigger link — which belongs
+     * BELOW the frame, not over the picture — is positioned outside the frame's
+     * box and clipped away. It rendered, it just could not be seen, which is
+     * exactly the "Camera blocked — use your phone doesn't appear" report.
+     *
+     * So: the text sits in normal flow under the frame where nothing clips it,
+     * and the QR overlay is portalled into the frame where it needs to cover
+     * the camera. One component, one piece of state, two places on screen.
+     */
+    frameRef: RefObject<HTMLElement | null>;
+    /**
+     * Optional override for the control's position.
+     *
+     * It pins itself to the top-end corner of the nearest positioned ancestor,
+     * which in the sign-in flow is the auth shell — so the default is the
+     * corner of the PAGE, opposite the brand mark. A host with a different
+     * frame of reference can move it; most should not need to.
+     */
+    style?: CSSProperties;
+}) {
+    const { phase, url, error, start, stop, sendHint } = useCameraHandoff();
+
+    /**
+     * The frame element, resolved AFTER mount.
+     *
+     * A portal needs a real DOM node, and `frameRef.current` is null on the
+     * first render — so reading it during render would decide "no frame" once
+     * and never revisit it, which is exactly what `react-hooks/refs` is warning
+     * about. Copying it into state on mount gives the re-render that makes the
+     * portal appear.
+     */
+    const [frameEl, setFrameEl] = useState<HTMLElement | null>(null);
+    useEffect(() => {
+        setFrameEl(frameRef.current);
+    }, [frameRef]);
+    const [trouble, setTrouble] = useState<CameraTrouble | null>(null);
+    /**
+     * Whether this is a phone or tablet, and so should not be offered a
+     * hand-off at all.
+     *
+     * `useSyncExternalStore` rather than state-in-an-effect: the value reads
+     * `navigator`, which does not exist on the server, and this is the API
+     * built for exactly that — a client-only value read without a hydration
+     * mismatch and without writing state on mount.
+     *
+     * The server snapshot is `true` (assume handheld, render nothing), so the
+     * offer APPEARS on desktop a moment after hydration rather than flashing on
+     * every phone and vanishing. Late is better than wrong.
+     *
+     * Never subscribes: a device does not stop being a phone.
+     */
+    const handheld = useSyncExternalStore(
+        NEVER_CHANGES,
+        isHandheldDevice,
+        () => true,
+    );
+
+    useEffect(() => {
+        void detectCameraTrouble().then(setTrouble);
+    }, []);
+
+
+    /**
+     * Mirror the check's guidance to the phone while the hand-off is live.
+     *
+     * ⚠️ Without this the hand-off is close to unusable for the face step. AWS
+     * renders "move closer", "hold still", "centre your face" on the COMPUTER —
+     * and during the check the user is looking at their phone, because that is
+     * where the camera is. They get corrected by a screen behind them.
+     *
+     * Read from the DOM rather than from a callback because Amplify exposes no
+     * hook for the current hint; `.amplify-liveness-hint` is the node it renders
+     * them into. That makes this the most brittle thing in the hand-off, so it
+     * fails SILENTLY: no node, no hints, and the video still works.
+     */
+    useEffect(() => {
+        if (phase !== 'live') return;
+
+        const node = document.querySelector('.amplify-liveness-hint');
+        if (!node) return;
+
+        let last = '';
+        const push = () => {
+            const text = (node.textContent ?? '').trim();
+            if (text && text !== last) {
+                last = text;
+                sendHint(text);
+            }
+        };
+
+        push();
+        const observer = new MutationObserver(push);
+        observer.observe(node, { childList: true, subtree: true, characterData: true });
+        return () => observer.disconnect();
+    }, [phase, sendHint]);
+
+    // Once per transition into `live`, never on a re-render. Re-arming twice
+    // would open a second AWS liveness session — billed, and single-use.
+    const announced = useRef(false);
+    useEffect(() => {
+        if (phase === 'live' && !announced.current) {
+            announced.current = true;
+            onLive?.();
+        }
+        if (phase === 'idle') announced.current = false;
+    }, [phase, onLive]);
+
+    // ── Not offered on a phone or tablet ────────────────────────────────────
+    //
+    // The whole feature is "borrow a camera from a device that has one". On a
+    // handheld the camera is already here, so the offer is at best noise and at
+    // worst a QR code asking to be scanned by the device displaying it.
+    //
+    // ⚠️ Once a hand-off is RUNNING this must not tear it down. `eligible` is
+    // fixed for the life of the page, so it cannot flip mid-session, but the
+    // phase check keeps the guard honest if that ever stops being true.
+    if (handheld && phase === 'idle') return null;
+
+    // ── The control, pinned top-right of the page ───────────────────────────
+    //
+    // An icon with a `title`, not an underlined sentence competing with the
+    // capture UI for attention. It shows the camera you would move TO — a phone
+    // while you are on this computer's camera, a monitor while you are on the
+    // phone's — so the glyph states the outcome rather than the current state.
+    //
+    // ⚠️ ONE EXCEPTION, and it is the important one. When the camera is
+    // genuinely unusable — no device, or a permission this origin can no longer
+    // prompt for — the label comes back alongside the icon.
+    //
+    // An icon with a hover tooltip is a fine affordance for an optional extra.
+    // It is a poor one for the only way forward, and that is exactly what this
+    // becomes for somebody whose camera is blocked: they are stuck, and the
+    // single thing that can unstick them would be an unlabelled glyph in a
+    // corner they have no reason to look at. So in that case it says what it is.
+    const stuck = trouble === 'no-camera' || trouble === 'denied';
+
+    const control =
+        phase === 'live' ? (
+            {
+                icon: 'kyc/camera_desktop',
+                title: "Switch back to this computer's camera",
+                onClick: stop,
+                label: null as string | null,
+            }
+        ) : phase === 'idle' ? (
+            {
+                icon: 'kyc/camera_phone',
+                title: "Use your phone's camera",
+                onClick: () => void start(facing),
+                label:
+                    trouble === 'no-camera'
+                        ? 'No camera here — use your phone'
+                        : trouble === 'denied'
+                          ? 'Camera blocked — use your phone'
+                          : null,
+            }
+        ) : null;
+
+    // ── The overlay, portalled INTO the frame ───────────────────────────────
+    //
+    // Only while there is something to show. Once the phone is connected this
+    // is null and the frame shows the phone's camera, drawn by the capture
+    // screen exactly as it draws a local one.
+    const overlayNeeded =
+        phase === 'preparing' || phase === 'waiting' || phase === 'connecting' || phase === 'failed';
+
+    const overlay =
+        overlayNeeded && frameEl
+            ? createPortal(
+                  <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white px-20">
+                      {phase === 'preparing' && (
+                          <p className="fz-12 leading-none font-medium text-[#707070]">
+                              Preparing…
+                          </p>
+                      )}
+
+                      {phase === 'waiting' && (
+                          <>
+                              {/*
+                                Drawn synchronously from the URL, so no async
+                                step can leave the PREVIOUS step's code on
+                                screen while the next one encodes — each step
+                                mints a new room, and a stale code is a live one
+                                for a room already spent.
+                              */}
+                              <CustomQRCode value={url ?? ''} size={230} />
+                              <p
+                                  className="fz-12 max-w-300 text-center leading-normal font-medium text-[#1D1D1D]"
+                                  style={{ marginTop: rem(16) }}
+                              >
+                                  Scan with your phone, then {label}.
+                              </p>
+                              <button
+                                  type="button"
+                                  onClick={stop}
+                                  aria-label="Cancel"
+                                  title="Cancel"
+                                  className="text-[#707070]"
+                                  style={{ marginTop: rem(12) }}
+                              >
+                                  <Icon name="kyc/retry" size={20} mask />
+                              </button>
+                          </>
+                      )}
+
+                      {phase === 'connecting' && (
+                          <p className="fz-12 leading-none font-medium text-[#707070]">
+                              Connecting…
+                          </p>
+                      )}
+
+                      {phase === 'failed' && (
+                          <>
+                              <p className="fz-12 max-w-300 text-center leading-normal font-medium text-red-500">
+                                  {error}
+                              </p>
+                              <button
+                                  type="button"
+                                  onClick={() => void start(facing)}
+                                  aria-label="Try again"
+                                  title="Try again"
+                                  className="text-primary"
+                                  style={{ marginTop: rem(12) }}
+                              >
+                                  <Icon name="kyc/retry" size={22} mask />
+                              </button>
+                          </>
+                      )}
+                  </div>,
+                  frameEl,
+              )
+            : null;
+
+    return (
+        <>
+            {overlay}
+
+            {control && (
+                <div
+                    className="absolute top-24 end-24 z-40 flex items-center gap-8"
+                    style={style}
+                >
+                    {/* Visible ONLY when the icon is the only way forward. */}
+                    {control.label && (
+                        <span className="fz-12 leading-none font-medium text-[#707070]">
+                            {control.label}
+                        </span>
+                    )}
+                    <button
+                        type="button"
+                        onClick={control.onClick}
+                        title={control.title}
+                        aria-label={control.title}
+                        className={stuck ? 'text-primary' : 'text-[#707070]'}
+                    >
+                        <Icon name={control.icon} size={22} mask />
+                    </button>
+                </div>
+            )}
+        </>
+    );
+}

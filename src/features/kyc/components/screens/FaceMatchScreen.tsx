@@ -206,7 +206,28 @@ export default function FaceMatchScreen({
                     hasIdDocument: !!idDocument,
                     hasFace: !!livenessResult?.faceImageData,
                 });
-                handleFailure();
+
+                // ⚠️ A MISSING FRAME IS NOT A FAILED MATCH, and saying so was a
+                // lie the user could not argue with.
+                //
+                // `livenessResult` is React state holding a ~300KB data URL, so
+                // a page refresh anywhere in enrolment drops it. This branch
+                // then ran and the screen announced "ID Matching With Your Photo
+                // Not Correct" — accusing somebody's face of not being their
+                // face, when what actually happened is that we lost the
+                // photograph and never compared anything at all.
+                //
+                // Nothing was submitted and nothing was judged, so the honest
+                // message names the refresh. Recovery is still a restart: the
+                // frame only exists in this tab, and re-opening the link is what
+                // rebuilds the sequence. That changes when the backend stores
+                // step data by token — see docs/kyc/step-restore.md — and this
+                // whole branch becomes unreachable.
+                handleFailure(
+                    livenessResult?.faceImageData
+                        ? undefined
+                        : 'Your photo was lost when the page reloaded. Open your access link again to restart.',
+                );
             }
         } else {
             setMatchResult({
@@ -411,7 +432,16 @@ export default function FaceMatchScreen({
                     <img
                         src={liveFace}
                         alt="Face"
-                        className="absolute inset-0 w-full h-full object-cover"
+                        // Mirrored, for the same reason as IntroScreen and
+                        // LivenessVerdict: this is the raw camera frame, and the
+                        // preview it came from was `scaleX(-1)`. All three show
+                        // the SAME string, so all three flip it or none do —
+                        // one screen disagreeing is what made the face look
+                        // reversed between steps.
+                        //
+                        // CSS only. `liveFace` is posted verbatim as `selfie`
+                        // above; the comparison the server runs never sees this.
+                        className="absolute inset-0 w-full h-full -scale-x-100 object-cover"
                         style={{ backgroundColor: '#E9EEEE' }}
                     />
                 ) : (

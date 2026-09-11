@@ -34,9 +34,38 @@ import { api, type ApiResult } from './kycApi';
  * server's message when there is one and falls back to a status-derived string,
  * so both cases collapse into this.
  */
+/**
+ * A failed KYC call, with the status still attached.
+ *
+ * `unwrap` used to throw a plain `Error`, which flattened every failure into a
+ * sentence — and callers genuinely need to tell one apart: a 401 from these
+ * routes means the CHALLENGE is gone (expired, spent, burned), so retrying can
+ * only fail again. Without the status the screen offered a retry button that
+ * could never work, and people pressed it.
+ */
+export class KycHttpError extends Error {
+    constructor(
+        message: string,
+        readonly status?: number,
+        readonly body?: unknown,
+    ) {
+        super(message);
+        this.name = 'KycHttpError';
+    }
+}
+
+/** True when the backend says this challenge is no longer valid. */
+export function isChallengeExpired(error: unknown): boolean {
+    return error instanceof KycHttpError && error.status === 401;
+}
+
 function unwrap<T>(res: ApiResult<T>, label: string): T {
     if (res.ok) return res.data;
-    throw new Error(`${label}: ${res.error.message}`);
+    throw new KycHttpError(
+        `${label}: ${res.error.message}`,
+        res.error.status,
+        res.error.body,
+    );
 }
 
 export class HttpKycService implements IKycService {

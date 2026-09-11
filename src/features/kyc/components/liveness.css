@@ -137,9 +137,50 @@
  * dimensions would override it and stretch the canvas.
  */
 .rz-liveness .amplify-liveness-video-anchor {
+    /*
+     * COVER in both directions, not just one.
+     *
+     * `height: 100%; width: auto` alone only covers a stream WIDER than the
+     * frame — a 4:3 laptop webcam becomes 533 wide in a 350 frame and the sides
+     * are trimmed, which is what this rule was written for.
+     *
+     * A phone streaming portrait is the opposite case: 720x1280 against a
+     * 350x400 frame gives a 225-wide box, and the frame shows black bars down
+     * the left and right. That is what the camera hand-off surfaced.
+     *
+     * Driving from BOTH minimums with the inline aspect-ratio intact makes the
+     * browser pick whichever scale covers — landscape trims the sides, portrait
+     * trims top and bottom, and neither is stretched.
+     *
+     * ⚠️ `width`/`height` stay `auto` so the inline aspect-ratio still does the
+     * work. Pinning either to 100% overrides it and stretches the canvas — and
+     * the canvas is the oval, which is drawn from the same geometry the
+     * face-fit test uses. Stretch one and the guide stops describing the test.
+     */
     height: 100%;
     width: auto;
 }
+
+/*
+ * ⚠️ DO NOT "fix" the portrait bars with min-width/min-height. It was tried.
+ *
+ * `width:auto; height:auto; min-width:100%; min-height:100%` looks like the
+ * standard cover trick, and with an `aspect-ratio` set it is not: when BOTH
+ * minimums bind, the ratio is the constraint that gives way. The box becomes
+ * exactly 350x400 and the video is STRETCHED into it — a portrait phone stream
+ * came out squashed top-to-bottom, faces visibly wrong. Black bars were the
+ * better bug.
+ *
+ * It cannot be fixed from CSS either, because covering needs a branch on
+ * whether the stream is wider or narrower than the frame, and CSS cannot read
+ * the inline aspect-ratio to branch on it.
+ *
+ * So it is fixed at the SOURCE instead: the phone is asked for a stream shaped
+ * like the frame (`aspectRatio` in PhoneCamera's constraints). The anchor then
+ * has nothing to letterbox, and the rule above keeps the video and the oval
+ * canvas the same box — which is the property that must not be broken, since
+ * the oval is drawn from the geometry the face-fit test uses.
+ */
 
 /* ── Type ───────────────────────────────────────────────────────────────────
  * Amplify ships its own font stack. Ours is Quicksand, everywhere.

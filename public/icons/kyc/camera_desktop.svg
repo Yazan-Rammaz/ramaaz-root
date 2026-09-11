@@ -1,0 +1,16 @@
+<!--
+  PLACEHOLDER — not an XD export. See camera_phone.svg for the reasoning.
+
+  A monitor with a lens: "go back to the camera on this computer". Paired with
+  camera_phone.svg — the two swap depending on which camera is in use, so the
+  control always shows the camera you would move TO.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+     stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+     stroke-linejoin="round">
+  <rect x="2" y="4" width="20" height="13" rx="2" />
+  <line x1="9" y1="21" x2="15" y2="21" />
+  <line x1="12" y1="17" x2="12" y2="21" />
+  <circle cx="12" cy="10.5" r="3" />
+  <circle cx="12" cy="10.5" r="0.9" fill="currentColor" stroke="none" />
+</svg>

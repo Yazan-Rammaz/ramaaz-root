@@ -57,7 +57,7 @@ export function IdentityGate({
     /** Submits a finished AWS liveness session — see VerificationPage. */
     onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
     /** Commits the verified step. See FaceLivenessScreen's onPassed. */
-    onLivenessPassed?: () => Promise<{ error?: string } | void>;
+    onLivenessPassed?: (faceCapturedPhoto: string | null) => Promise<{ error?: string } | void>;
 }) {
     // ── Who moves the flow off the face check ───────────────────────────────
     // The SERVER does, and `needsEnrollment` is how it says so: a passed face

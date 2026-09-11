@@ -48,6 +48,18 @@ export function IdentityStep({
      * halves would drop a single-use credential on the floor.
      */
     const stepToken = useRef<string | null>(null);
+    /**
+     * The scores from the verdict the parked token belongs to.
+     *
+     * A ref, and cleared with the token, for the same reason it is: both are
+     * per-attempt. Holding them in state would let a re-render pair the photo
+     * of one attempt with the confidence of another, and the backend would
+     * store a record that never happened.
+     */
+    const scores = useRef<{
+        faceMatchScore?: number;
+        livenessConfidence?: number;
+    } | null>(null);
 
     return (
         <IdentityGate
@@ -104,6 +116,14 @@ export function IdentityStep({
                 // Verified. Park the token; `onLivenessPassed` spends it once
                 // the screen has shown the result.
                 stepToken.current = verdict.stepToken;
+                // The scores belong to THIS verdict, so they are parked with
+                // the token rather than re-read later — a retry replaces both
+                // together and cannot pair one attempt's photo with another's
+                // confidence.
+                scores.current = {
+                    faceMatchScore: verdict.faceMatchScore,
+                    livenessConfidence: verdict.livenessConfidence,
+                };
                 return undefined;
             }}
             /**
@@ -114,11 +134,16 @@ export function IdentityStep({
              * that re-posted a spent token would fail in a way that reads as a
              * failed face check rather than a spent credential.
              */
-            onLivenessPassed={async () => {
+            onLivenessPassed={async (faceCapturedPhoto) => {
                 const token = stepToken.current;
+                const measured = scores.current;
                 stepToken.current = null;
+                scores.current = null;
                 if (!token) return { error: 'This verification has already been used.' };
-                const result = await submitFaceAction(token);
+                const result = await submitFaceAction(token, {
+                    faceCapturedPhoto,
+                    ...measured,
+                });
                 return result?.error ? { error: result.error } : undefined;
             }}
             onCapture={async (frame) => {

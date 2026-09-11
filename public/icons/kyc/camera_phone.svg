@@ -1,0 +1,18 @@
+<!--
+  PLACEHOLDER — not an XD export.
+
+  /public/icons holds icons exported from the XD file (AGENTS.md §5), and the
+  set had no phone-camera glyph when the camera hand-off needed one. Drawn to
+  the same 24px box as the rest and single colour, so `<Icon mask />` recolours
+  it. Replace with the real export and nothing else changes.
+
+  A phone with a lens: "use the camera on your phone instead of this one".
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+     stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+     stroke-linejoin="round">
+  <rect x="6" y="2" width="12" height="20" rx="2.5" />
+  <line x1="10.5" y1="19" x2="13.5" y2="19" />
+  <circle cx="12" cy="10.5" r="3.2" />
+  <circle cx="12" cy="10.5" r="0.9" fill="currentColor" stroke="none" />
+</svg>

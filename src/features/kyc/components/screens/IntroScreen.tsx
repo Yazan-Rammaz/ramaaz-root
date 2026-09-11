@@ -68,8 +68,28 @@ export default function IntroScreen() {
             {photo ? (
                 // A data: URL held in memory; next/image would need a loader and
                 // would gain nothing over a 130 x 148 thumbnail.
+                //
+                // `-scale-x-100` because the capture is RAW CAMERA PIXELS and the
+                // preview it was taken from is not. `.amplify-liveness-video`
+                // carries `transform: scaleX(-1)` — a mirror, as every selfie
+                // preview is — but a canvas grab reads the native frame and
+                // ignores CSS entirely. So the stored frame is the unmirrored
+                // truth, and showing it as-is hands somebody a photograph that is
+                // backwards from the face they were just looking at. People do
+                // not recognise themselves unmirrored; it reads as a stranger.
+                //
+                // Display only. `livenessResult.faceImageData` is untouched, and
+                // must stay so — FaceMatchScreen posts that exact string as
+                // `selfie` for the server-side comparison.
+                //
+                // LivenessVerdict does the same flip on the same frame. The two
+                // have to agree: change one, change both.
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={photo} alt="" className="h-148 w-130 shrink-0 rad-20 object-cover" />
+                <img
+                    src={photo}
+                    alt=""
+                    className="h-148 w-130 shrink-0 -scale-x-100 rad-20 object-cover"
+                />
             ) : (
                 <div className="h-148 w-130 shrink-0 rad-20 bg-[#F2F2F2]" />
             )}

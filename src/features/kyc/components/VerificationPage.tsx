@@ -86,7 +86,7 @@ export default function VerificationPage({
      */
     onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
     /** Commits the verified step, after the success animation. */
-    onLivenessPassed?: () => Promise<{ error?: string } | void>;
+    onLivenessPassed?: (faceCapturedPhoto: string | null) => Promise<{ error?: string } | void>;
 } = {}) {
     const { currentStep, direction, setLivenessResult } = useVerification();
 

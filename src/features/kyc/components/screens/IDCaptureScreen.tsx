@@ -18,6 +18,7 @@ import idBackSvg from '@/features/kyc/assets/id-back.svg';
 import shieldSvg from '@/features/kyc/assets/shield.svg';
 import ExitConfirmDialog from '../ExitConfirmDialog';
 import { FlexSpace } from '@/components/ui/FlexSpace';
+import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import { idConfig, kycConfig } from '@/features/kyc/config/kycConfig';
 import { FaceProgressBar } from './AwsFaceLiveness';
 
@@ -130,6 +131,7 @@ export default function IDCaptureScreen() {
     const [isVerifying, setIsVerifying] = useState(false);
     const [showFlash, setShowFlash] = useState(false);
     const [debugPreview, setDebugPreview] = useState<string | null>(null);
+
 
     const {
         isReady,
@@ -1033,6 +1035,33 @@ export default function IDCaptureScreen() {
                 )}
             </div>
 
+            {/*
+              The phone-camera hand-off. OUTSIDE the frame so its caption is not
+              clipped by `overflow-hidden`; the QR overlay is portalled back in
+              via `frameRef`.
+
+              `environment` because this is a document: a mirrored back camera
+              would render the text on an ID backwards.
+
+              `onLive` re-runs startCamera(). The shim redirects the NEXT
+              getUserMedia call, not a camera already opened or already failed,
+              so the screen has to ask again to receive the stream.
+            */}
+            <CameraHandoffPanel
+                /* The frame's existing ref — it is the same element, and a
+                   second ref on it would be two names for one thing. */
+                frameRef={viewfinderRef}
+                facing="environment"
+                label={
+                    activeSide === 'back'
+                        ? 'photograph the back of your ID'
+                        : 'photograph the front of your ID'
+                }
+                onLive={() => {
+                    void startCamera();
+                }}
+            />
+
             {/* Tabs */}
             {isPassport ? (
                 <div className="flex shrink-0 items-center justify-center mb-12">
@@ -1206,6 +1235,7 @@ export default function IDCaptureScreen() {
                     </button>
                 </div>
             )}
+
             <div className="mt-auto flex shrink-0 items-center flex-col justify-end">
                 {/* Privacy badge */}
                 <div className="flex items-center flex-col justify-center gap-8 mb-12">

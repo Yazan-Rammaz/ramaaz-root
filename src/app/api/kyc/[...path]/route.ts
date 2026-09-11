@@ -220,7 +220,17 @@ async function proxy(req: NextRequest): Promise<Response> {
     // Not JSON — an image or an empty body. The status alone is the signal.
     console.log(`[kyc proxy] ${req.method} ${pathname} → ${res.status} (${payload.length}b)`);
   }
-  return new Response(payload, {
+  // ⚠️ 204/205/304 are "null body statuses" — the Response constructor REFUSES
+  // a body with them, and an empty string still counts as a body. So
+  // `new Response(await res.text(), { status: 204 })` throws TypeError and this
+  // proxy answers 500 for a response the Worker handled perfectly.
+  //
+  // It went unnoticed because nothing upstream returned a 204 until the camera
+  // hand-off, where 204 is the normal "the other side has not answered yet" and
+  // is polled once a second. The symptom was a 500 on every poll.
+  const NULL_BODY = new Set([204, 205, 304]);
+
+  return new Response(NULL_BODY.has(res.status) ? null : payload, {
     status: res.status,
     headers: {
       "Content-Type": res.headers.get("content-type") ?? "application/json",
