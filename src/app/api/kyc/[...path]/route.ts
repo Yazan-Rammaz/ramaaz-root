@@ -134,11 +134,27 @@ async function proxy(req: NextRequest): Promise<Response> {
   // and it must go as X-Step-Token rather than a bearer so the Worker commits
   // to the step-scoped route. A stale access cookie must not shadow it.
   const challenge = await readChallenge();
+  /**
+   * Which credential went out — and whether ANY did.
+   *
+   * The Worker answers a bare 401 when it finds neither, and from the browser
+   * that is indistinguishable from a refusal: the enrolment step failed this
+   * way after a long ID capture and the screen blamed the user's face. The
+   * cause is almost always that the challenge cookie aged out
+   * (CHALLENGE_MAX_AGE, ten minutes) while the images were being taken. Naming
+   * it here costs one word per request and settles it.
+   */
+  let credential: 'step-token' | 'bearer' | 'none' = 'none';
+
   if (challenge.challengeToken) {
     headers["X-Step-Token"] = challenge.challengeToken;
+    credential = 'step-token';
   } else {
     const accessToken = await getAccessToken();
-    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    if (accessToken) {
+      headers["Authorization"] = `Bearer ${accessToken}`;
+      credential = 'bearer';
+    }
   }
 
   // Cookies are deliberately NOT forwarded. The Worker can read them, but
@@ -164,7 +180,7 @@ async function proxy(req: NextRequest): Promise<Response> {
     // rejecting the request. Knowing which path was taken is the difference
     // between debugging our proxy and debugging the KYC service.
     console.log(
-      `[kyc proxy] ${req.method} ${pathname} via ${binding ? 'binding' : 'fetch'} → ${target}`,
+      `[kyc proxy] ${req.method} ${pathname} via ${binding ? 'binding' : 'fetch'} auth=${credential} → ${target}`,
     );
 
     res = binding ? await binding.fetch(target, init) : await fetch(target, init);

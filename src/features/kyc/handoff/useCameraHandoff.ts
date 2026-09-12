@@ -32,6 +32,18 @@ import { installCameraShim, uninstallCameraShim } from './cameraShim';
 
 export type HandoffFacing = 'user' | 'environment';
 
+/**
+ * What travels over the data channel, in both directions of understanding.
+ *
+ * Shared with the phone page so the two ends cannot drift — this is the whole
+ * protocol between them, and it is small on purpose.
+ */
+export type HandoffMessage =
+    /** A line of the check's guidance, to show over the viewfinder. */
+    | { type: 'hint'; text: string }
+    /** Whether live video is still wanted. False = freeze and stop filming. */
+    | { type: 'camera'; live: boolean };
+
 export type HandoffPhase =
     | 'idle'
     /** Building the offer and gathering ICE. Brief, but not instant. */
@@ -175,13 +187,34 @@ export function useCameraHandoff() {
     );
 
     /**
-     * Mirror one line of guidance to the phone. Silently does nothing before
-     * the channel opens, which is most of the hand-off's life.
+     * Send one message to the phone. Silently does nothing before the channel
+     * opens, which is most of the hand-off's life.
+     *
+     * JSON rather than bare text: the channel carries two kinds of message now
+     * — the check's guidance, and whether live video is still wanted — and a
+     * plain string cannot say which it is.
      */
-    const sendHint = useCallback((text: string) => {
+    const post = useCallback((msg: HandoffMessage) => {
         const ch = hintsRef.current;
-        if (ch?.readyState === 'open') ch.send(text);
+        if (ch?.readyState === 'open') ch.send(JSON.stringify(msg));
     }, []);
 
-    return { phase, url, error, start, stop, sendHint };
+    const sendHint = useCallback(
+        (text: string) => post({ type: 'hint', text }),
+        [post],
+    );
+
+    /**
+     * Tell the phone whether its camera is still wanted.
+     *
+     * Sent when the check stops needing live video — it has what it is going to
+     * judge, and the phone should stop filming and show what was captured
+     * rather than a live picture of somebody waiting.
+     */
+    const sendCameraLive = useCallback(
+        (live: boolean) => post({ type: 'camera', live }),
+        [post],
+    );
+
+    return { phase, url, error, start, stop, sendHint, sendCameraLive };
 }

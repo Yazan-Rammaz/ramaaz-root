@@ -121,6 +121,46 @@ export async function readChallenge(): Promise<ChallengeState> {
   }
 }
 
+/**
+ * How long the cookie should live — taken from the SERVER'S deadline.
+ *
+ * ⚠️ There must be ONE clock, and it is the backend's.
+ *
+ * This used to be `CHALLENGE_MAX_AGE`, a local constant, while
+ * `challenge_expires_at` sat unused three fields away under a comment calling
+ * it "authoritative — do not compute a deadline locally". So there were two
+ * deadlines, started at different moments: the backend's runs from /auth/link
+ * and is never refreshed, ours restarted on every step that wrote the cookie.
+ *
+ * When ours expired first the browser simply had no credential, the KYC proxy
+ * sent none, and the Worker answered a bare 401 — which the enrolment screen
+ * reported as "ID Matching With Your Photo Not Correct". A stopwatch nobody
+ * knew about, blamed on somebody's face.
+ *
+ * The GRACE is deliberate and is the point of the whole change. The cookie now
+ * outlives the challenge by a minute so that when time does run out, the
+ * request still goes out, the BACKEND refuses it, and the user is told what
+ * happened. Expiring first only ever produced silence.
+ *
+ * Falls back to the constant when the server sent no deadline, which is the
+ * only case where guessing is better than nothing.
+ */
+const EXPIRY_GRACE_SECONDS = 60;
+
+function cookieLifetime(state: ChallengeState): number {
+  if (!state.challengeExpiresAt) return CHALLENGE_MAX_AGE;
+
+  const deadline = Date.parse(state.challengeExpiresAt);
+  if (Number.isNaN(deadline)) return CHALLENGE_MAX_AGE;
+
+  const seconds =
+    Math.ceil((deadline - Date.now()) / 1000) + EXPIRY_GRACE_SECONDS;
+
+  // Never zero or negative: that deletes the cookie outright, and a dead
+  // challenge should still reach the backend to be refused out loud.
+  return Math.max(seconds, EXPIRY_GRACE_SECONDS);
+}
+
 /** Server Actions and Route Handlers only — a render may not set cookies. */
 export async function writeChallenge(state: ChallengeState) {
   (await cookies()).set(COOKIE, JSON.stringify(state), {
@@ -128,7 +168,7 @@ export async function writeChallenge(state: ChallengeState) {
     secure: isProd,
     sameSite: "lax",
     path: "/",
-    maxAge: CHALLENGE_MAX_AGE,
+    maxAge: cookieLifetime(state),
   });
 }
 
@@ -297,19 +337,30 @@ export async function readSignInError(): Promise<string | null> {
 const LAST_LINK_COOKIE = "root_last_link";
 
 /**
- * ⚠️ NOT `ERROR_MAX_AGE`, which is what this used to borrow.
+ * ⚠️ DELIBERATELY MUCH LONGER THAN THE CHALLENGE. Do not tie this to it again.
  *
- * Thirty seconds is right for a message about something that just happened. It
- * is useless for this: the commonest reason to need the link again is a
- * challenge that ran out, and a challenge runs for TEN MINUTES. The cookie
- * expired nineteen times over before the thing it was there to rescue had even
- * failed, so /no-access had nothing to offer in exactly the case it was built
- * for.
+ * This has been wrong twice, the same way both times, and the mistake is worth
+ * naming because it is easy to repeat: the lifetime of a RECOVERY was tied to
+ * the lifetime of the thing it recovers FROM.
  *
- * It outlives the challenge by a little, so the link is still there at the
- * moment the challenge dies.
+ *   first  ERROR_MAX_AGE, 30 seconds — gone before anything could go wrong.
+ *   then   CHALLENGE_MAX_AGE + 60, eleven minutes — gone at exactly the moment
+ *          it was needed, because the case that needs it IS a session that ran
+ *          past ten minutes. An administrator whose enrolment overran reached
+ *          /no-access and was offered nothing, having arrived by a link the
+ *          browser had simply forgotten.
+ *
+ * The link token does not expire with the challenge. It is valid for the life
+ * of the LINK — the backend decides that, and it outlasts any one attempt by a
+ * long way. Re-opening it is the correct recovery from every failure in this
+ * flow, so the only question is how long somebody might plausibly come back,
+ * and the answer is "later today".
+ *
+ * The exposure is a link token in an httpOnly, Secure, SameSite=lax cookie —
+ * on a device that already holds the same token in its history, from a message
+ * still sitting in WhatsApp. It is never read back out to the client.
  */
-const LAST_LINK_MAX_AGE = CHALLENGE_MAX_AGE + 60;
+const LAST_LINK_MAX_AGE = 60 * 60 * 24;
 
 export async function setLastLink(token: string) {
   (await cookies()).set(LAST_LINK_COOKIE, token, {

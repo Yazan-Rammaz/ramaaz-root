@@ -21,6 +21,26 @@ const rem = (px: number) => `${px * 0.0625}rem`;
 const NEVER_CHANGES = () => () => {};
 
 /**
+ * "Checking…Checking…" → "Checking…".
+ *
+ * A guard, not the fix — the selector above is. Amplify renders its hints twice
+ * for assistive tech, and reading the wrong node concatenates both copies; if
+ * their markup shifts again this keeps the phone readable rather than silently
+ * echoing.
+ *
+ * Only collapses an EXACT doubling, so a hint that genuinely repeats a word
+ * survives untouched.
+ */
+function collapseRepeat(text: string): string {
+    const t = text.replace(/\s+/g, ' ').trim();
+    const half = Math.floor(t.length / 2);
+    if (half < 2) return t;
+    const a = t.slice(0, half).trim();
+    const b = t.slice(half).trim();
+    return a && a === b ? a : t;
+}
+
+/**
  * The desktop's offer of a phone camera, and the only new thing on screen.
  *
  * ── Additive by design ──────────────────────────────────────────────────────
@@ -38,15 +58,13 @@ const NEVER_CHANGES = () => () => {};
  */
 export function CameraHandoffPanel({
     facing,
-    label,
     onLive,
     frameRef,
     style,
+    cameraLive = true,
 }: {
     /** 'user' for the face step, 'environment' for a document. */
     facing: HandoffFacing;
-    /** What the phone is being asked to capture, for the instruction line. */
-    label: string;
     /**
      * Fired once, when the phone's video starts flowing.
      *
@@ -58,6 +76,17 @@ export function CameraHandoffPanel({
      * the panel goes green, and the frame stays exactly as dead as it was.
      */
     onLive?: () => void;
+    /**
+     * Whether the host still wants live video.
+     *
+     * Goes false the moment the check stops filming — it has what it will
+     * judge. The phone is told, so it freezes on the captured frame and stops
+     * transmitting instead of showing a live picture of somebody waiting for a
+     * verdict. Back to true if the check re-arms for another attempt.
+     *
+     * Defaults to true so a host that does not care never freezes the phone.
+     */
+    cameraLive?: boolean;
     /**
      * The camera frame this hand-off belongs to.
      *
@@ -85,7 +114,7 @@ export function CameraHandoffPanel({
      */
     style?: CSSProperties;
 }) {
-    const { phase, url, error, start, stop, sendHint } = useCameraHandoff();
+    const { phase, url, error, start, stop, sendHint, sendCameraLive } = useCameraHandoff();
 
     /**
      * The frame element, resolved AFTER mount.
@@ -148,8 +177,16 @@ export function CameraHandoffPanel({
 
         let last = '';
         const push = () => {
-            const node = frameEl.querySelector('.amplify-liveness-hint');
-            const text = (node?.textContent ?? '').trim();
+            // `__text` is the TEXT; `.amplify-liveness-hint` is the container
+            // around it. Reading the container concatenated the visible label
+            // with the aria-live copy beside it, so every hint arrived on the
+            // phone doubled — "Checking…Checking…". Fall back to the container
+            // only if Amplify ever drops the inner class.
+            const node =
+                frameEl.querySelector('.amplify-liveness-hint__text') ??
+                frameEl.querySelector('.amplify-liveness-hint');
+
+            const text = collapseRepeat((node?.textContent ?? '').trim());
             if (text && text !== last) {
                 last = text;
                 sendHint(text);
@@ -165,6 +202,13 @@ export function CameraHandoffPanel({
         });
         return () => observer.disconnect();
     }, [phase, sendHint, frameEl]);
+
+    // Pass the host's camera state along whenever it changes — and once when
+    // the connection opens, so a phone that joins mid-check is not left filming.
+    useEffect(() => {
+        if (phase !== 'live') return;
+        sendCameraLive(cameraLive);
+    }, [phase, cameraLive, sendCameraLive]);
 
     // Once per transition into `live`, never on a re-render. Re-arming twice
     // would open a second AWS liveness session — billed, and single-use.
@@ -242,7 +286,9 @@ export function CameraHandoffPanel({
     const overlay =
         overlayNeeded && frameEl
             ? createPortal(
-                  <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white px-20">
+                  <div
+                      className="absolute inset-0 z-30 flex flex-col items-center justify-center rad-30 border border-[#5D5C5D]/40 bg-white p-24"
+                  >
                       {phase === 'preparing' && (
                           <p className="fz-12 leading-none font-medium text-[#707070]">
                               Preparing…
@@ -258,12 +304,12 @@ export function CameraHandoffPanel({
                                 mints a new room, and a stale code is a live one
                                 for a room already spent.
                               */}
-                              <CustomQRCode value={url ?? ''} size={230} />
+                              <CustomQRCode value={url ?? ''} size={200} />
                               <p
-                                  className="fz-12 max-w-300 text-center leading-normal font-medium text-[#1D1D1D]"
+                                  className="fz-12 max-w-300 text-center leading-none font-medium text-[#1D1D1D]"
                                   style={{ marginTop: rem(16) }}
                               >
-                                  Scan with your phone, then {label}.
+                                  Scan with your phone.
                               </p>
                               <button
                                   type="button"

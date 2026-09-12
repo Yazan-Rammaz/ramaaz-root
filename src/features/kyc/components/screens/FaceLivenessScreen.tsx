@@ -573,7 +573,12 @@ export function FaceLivenessScreen({
             <CameraHandoffPanel
                 frameRef={frameRef}
                 facing="user"
-                label="look at your phone"
+                // Live video is wanted only while the camera is actually
+                // running. From `checking` onward AWS already has what it will
+                // judge, so the phone freezes on the captured frame rather than
+                // filming somebody waiting for a verdict — and goes live again
+                // if the check re-arms for another attempt.
+                cameraLive={phase === 'preparing' || phase === 'ready'}
                 onLive={() => {
                     setSnapshot(null);
                     setPhase('preparing');

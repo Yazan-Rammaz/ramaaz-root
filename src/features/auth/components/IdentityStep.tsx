@@ -3,7 +3,12 @@
 import { useRef } from 'react';
 import { IdentityGate } from '@/features/kyc/components/IdentityGate';
 import { createKycService } from '@/features/kyc/services';
-import { submitFaceAction, submitIdentityDocumentAction } from '../actions';
+import { isChallengeExpired } from '@/features/kyc/services/httpKycService';
+import {
+    restartSignInAction,
+    submitFaceAction,
+    submitIdentityDocumentAction,
+} from '../actions';
 
 /**
  * The client half of the identity stages — and the seam where the two services
@@ -100,6 +105,26 @@ export function IdentityStep({
                         sessionId,
                     });
                 } catch (err) {
+                    // ⚠️ A 401 HERE IS THE CLOCK, not the document.
+                    //
+                    // Enrolment is the last step of a sequence that started at
+                    // /auth/link, and the challenge lives ten minutes
+                    // (CHALLENGE_MAX_AGE / AUTH_CHALLENGE_TTL). Capturing two
+                    // ID sides, waiting on OCR and running the match can take
+                    // longer than that — and when it does the Worker finds no
+                    // credential and answers a bare 401.
+                    //
+                    // Reported as an error string, that surfaced as "ID
+                    // Matching With Your Photo Not Correct": the screen blamed
+                    // somebody's face for a stopwatch. Nothing was compared and
+                    // nothing was wrong with the document.
+                    //
+                    // Re-opening the link mints a fresh challenge and returns
+                    // them to whatever step the server still owes.
+                    if (isChallengeExpired(err)) {
+                        void restartSignInAction();
+                        return undefined;
+                    }
                     return {
                         error:
                             err instanceof Error && err.message
@@ -148,6 +173,16 @@ export function IdentityStep({
                     faceCapturedPhoto,
                     ...measured,
                 });
+                // ⚠️ `restart` means the CHALLENGE is gone, not that this
+                // step was refused — so there is nothing to show and nothing to
+                // retry. Dropping it (which this did, by returning only
+                // `error`) left a message on screen beside a button that could
+                // not work. Re-open the link instead: it mints a fresh
+                // challenge and returns to whatever the server still owes.
+                if (result?.restart) {
+                    void restartSignInAction();
+                    return undefined;
+                }
                 return result?.error ? { error: result.error } : undefined;
             }}
             onCapture={async (frame) => {
@@ -185,6 +220,16 @@ export function IdentityStep({
                 }
 
                 const result = await submitFaceAction(verdict.stepToken);
+                // ⚠️ `restart` means the CHALLENGE is gone, not that this
+                // step was refused — so there is nothing to show and nothing to
+                // retry. Dropping it (which this did, by returning only
+                // `error`) left a message on screen beside a button that could
+                // not work. Re-open the link instead: it mints a fresh
+                // challenge and returns to whatever the server still owes.
+                if (result?.restart) {
+                    void restartSignInAction();
+                    return undefined;
+                }
                 return result?.error ? { error: result.error } : undefined;
             }}
             onEnroll={async ({ idDocument, selfie }) => {
@@ -217,6 +262,26 @@ export function IdentityStep({
                         documentType: idDocument.idType ?? undefined,
                     });
                 } catch (err) {
+                    // ⚠️ A 401 HERE IS THE CLOCK, not the document.
+                    //
+                    // Enrolment is the last step of a sequence that started at
+                    // /auth/link, and the challenge lives ten minutes
+                    // (CHALLENGE_MAX_AGE / AUTH_CHALLENGE_TTL). Capturing two
+                    // ID sides, waiting on OCR and running the match can take
+                    // longer than that — and when it does the Worker finds no
+                    // credential and answers a bare 401.
+                    //
+                    // Reported as an error string, that surfaced as "ID
+                    // Matching With Your Photo Not Correct": the screen blamed
+                    // somebody's face for a stopwatch. Nothing was compared and
+                    // nothing was wrong with the document.
+                    //
+                    // Re-opening the link mints a fresh challenge and returns
+                    // them to whatever step the server still owes.
+                    if (isChallengeExpired(err)) {
+                        void restartSignInAction();
+                        return undefined;
+                    }
                     return {
                         error:
                             err instanceof Error && err.message
@@ -239,6 +304,16 @@ export function IdentityStep({
                 const result = await submitIdentityDocumentAction({
                     step_token: verdict.stepToken,
                 });
+                // ⚠️ `restart` means the CHALLENGE is gone, not that this
+                // step was refused — so there is nothing to show and nothing to
+                // retry. Dropping it (which this did, by returning only
+                // `error`) left a message on screen beside a button that could
+                // not work. Re-open the link instead: it mints a fresh
+                // challenge and returns to whatever the server still owes.
+                if (result?.restart) {
+                    void restartSignInAction();
+                    return undefined;
+                }
                 return result?.error ? { error: result.error } : undefined;
             }}
         />

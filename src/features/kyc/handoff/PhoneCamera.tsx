@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import type { HandoffMessage } from './useCameraHandoff';
 import {
     ICE_SERVERS,
     iceGatheringComplete,
@@ -42,6 +43,16 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
      * this screen they need to read.
      */
     const [hint, setHint] = useState<string | null>(null);
+    /**
+     * Whether the computer still wants live video.
+     *
+     * Goes false once the check has what it will judge. The viewfinder then
+     * freezes on the captured frame and the camera stops transmitting — showing
+     * a live picture of somebody waiting for a verdict is both pointless and,
+     * with the phone held at their face, faintly unpleasant.
+     */
+    const [cameraLive, setCameraLive] = useState(true);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
@@ -93,8 +104,17 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
             // The computer creates the channel, so this side receives it.
             pc.addEventListener('datachannel', (e) => {
                 if (e.channel.label !== 'hints') return;
-                e.channel.onmessage = (m) =>
-                    setHint(typeof m.data === 'string' ? m.data : null);
+                e.channel.onmessage = (m) => {
+                    if (typeof m.data !== 'string') return;
+                    let msg: HandoffMessage;
+                    try {
+                        msg = JSON.parse(m.data) as HandoffMessage;
+                    } catch {
+                        return;
+                    }
+                    if (msg.type === 'hint') setHint(msg.text);
+                    if (msg.type === 'camera') setCameraLive(msg.live);
+                };
             });
 
             setPhase('waiting');
@@ -139,6 +159,38 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
         }
     }, [room, facing]);
 
+    /**
+     * Freeze on the last frame, or go live again.
+     *
+     * `enabled = false`, NOT `stop()`. Stopping a track is irreversible and
+     * removing it from the sender would need a renegotiation — and the whole
+     * signaling design here is a single exchange with no channel to renegotiate
+     * over. A retry would then find a dead stream and no way to revive it.
+     * Disabling transmits black and can be undone the instant the check re-arms.
+     *
+     * ⚠️ The hardware indicator light stays ON while disabled, because the
+     * device is still open. That is worth knowing rather than claiming
+     * otherwise: nothing is being sent, but the camera has not been released.
+     */
+    useEffect(() => {
+        const stream = streamRef.current;
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!stream) return;
+
+        if (!cameraLive) {
+            // Capture the frame BEFORE muting, or there is nothing left to draw.
+            if (video && canvas && video.videoWidth) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d')?.drawImage(video, 0, 0);
+            }
+            stream.getVideoTracks().forEach((t) => (t.enabled = false));
+        } else {
+            stream.getVideoTracks().forEach((t) => (t.enabled = true));
+        }
+    }, [cameraLive]);
+
     useEffect(() => {
         void connect();
         return () => {
@@ -178,29 +230,46 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
               this app — a back camera must never be mirrored, or text on a
               document reads backwards.
             */}
-            <div className="relative">
+            <div className="relative h-400 w-350">
                 <video
                     ref={videoRef}
                     autoPlay
                     playsInline
                     muted
-                    className={`h-400 w-350 rad-30 object-cover ${facing === 'user' ? '-scale-x-100' : ''}`}
+                    className={`h-400 w-350 rad-30 object-cover ${facing === 'user' ? '-scale-x-100' : ''} ${cameraLive ? '' : 'invisible'}`}
                 />
 
-                {/* Over the picture, because it is what the user must read. */}
-                {phase === 'live' && hint && (
+                {/*
+                  The frozen frame, drawn the instant the computer said it had
+                  what it needed. Same mirroring as the live view, so the picture
+                  does not flip at the moment it stops moving.
+                */}
+                <canvas
+                    ref={canvasRef}
+                    className={`absolute inset-0 h-400 w-350 rad-30 object-cover ${facing === 'user' ? '-scale-x-100' : ''} ${cameraLive ? 'hidden' : ''}`}
+                />
+
+                {/*
+                  ONE line of guidance, over the picture.
+
+                  There were two — this and a paragraph under the frame — both
+                  showing the same relayed hint, which read as the screen saying
+                  everything twice. The overlay is the one that stays: it sits
+                  where the user is already looking.
+
+                  Statuses that are NOT guidance (connecting, ended, failed)
+                  still print here, because there is nothing else on this screen
+                  to carry them.
+                */}
+                {(hint || phase !== 'live') && (
                     <p
                         role="status"
                         className="fz-16 absolute inset-x-16 bottom-20 rad-12 bg-black/65 px-16 py-12 text-center leading-normal font-semibold text-white"
                     >
-                        {hint}
+                        {message}
                     </p>
                 )}
             </div>
-
-            <p className="fz-14 mt-24 max-w-360 text-center leading-normal font-medium text-white">
-                {message}
-            </p>
 
             {/*
               Only for a failure BEFORE the connection existed — a blocked

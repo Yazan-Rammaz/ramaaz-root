@@ -7,6 +7,7 @@ import {
   applyStage,
   clearChallenge,
   readChallenge,
+  readLastLink,
   setLastLink,
   setSignInError,
   UnknownStageError,
@@ -337,10 +338,20 @@ export async function submitIdentityDocumentAction(
  * again, which is the one thing that does work.
  */
 export async function expireSignInAction(): Promise<void> {
+  // ⚠️ TWO sources, and the second is the one that usually has it.
+  //
+  // The challenge cookie is the obvious place — and it is gone in exactly the
+  // situation this function exists for. A challenge that expired took its own
+  // cookie with it, so reading only there meant "start over" worked whenever it
+  // was not needed and failed whenever it was.
+  //
+  // `root_last_link` is written the moment a link is opened and outlives the
+  // challenge by a day, for this.
   const { linkToken } = await readChallenge();
+  const token = linkToken ?? (await readLastLink());
 
   await clearChallenge();
-  if (linkToken) await setLastLink(linkToken);
+  if (token) await setLastLink(token);
 
   await setSignInError(
     "This sign-in expired. Open your access link again to restart.",
@@ -374,20 +385,33 @@ export async function expireSignInAction(): Promise<void> {
  * can simply spend it in place.
  */
 export async function restartSignInAction(): Promise<void> {
+  // ⚠️ TWO sources, and the second is the one that usually has it.
+  //
+  // The challenge cookie is the obvious place — and it is gone in exactly the
+  // situation this function exists for. A challenge that expired took its own
+  // cookie with it, so reading only there meant "start over" worked whenever it
+  // was not needed and failed whenever it was.
+  //
+  // `root_last_link` is written the moment a link is opened and outlives the
+  // challenge by a day, for this.
   const { linkToken } = await readChallenge();
+  const token = linkToken ?? (await readLastLink());
 
   await clearChallenge();
 
   // Nothing to re-open — an older cookie from before the token was stored, or a
   // challenge that never came from a link at all. There is genuinely no way
   // forward from here but a fresh link, so say so rather than loop.
-  if (!linkToken) redirect("/no-access");
+  if (!token) redirect("/no-access");
 
   // Redirects on success, exactly as the first open did.
-  const { error } = await openLink(linkToken);
+  const { error } = await openLink(token);
   await setSignInError(error);
-  // So /no-access can offer this same link again — see setLastLink.
-  await setLastLink(linkToken);
+  // So /no-access can offer this same link again — see setLastLink. Written
+  // from `token`, not `linkToken`: after a challenge has expired the only copy
+  // left is the long-lived one, and re-writing that is what keeps the day-long
+  // window rolling for somebody who comes back to try again.
+  await setLastLink(token);
   redirect("/no-access");
 }
 

@@ -133,7 +133,6 @@ export default function IDCaptureScreen() {
     const [showFlash, setShowFlash] = useState(false);
     const [debugPreview, setDebugPreview] = useState<string | null>(null);
 
-
     const {
         isReady,
         isDetecting,
@@ -566,7 +565,9 @@ export default function IDCaptureScreen() {
             // the ID itself (it returns its own croppedImageData). This is what makes
             // capture succeed when the corners aren't all visible.
             if (!croppedBase64Card) {
-                console.warn('[IDCapture] no quad — falling back to full-frame capture for Textract');
+                console.warn(
+                    '[IDCapture] no quad — falling back to full-frame capture for Textract',
+                );
                 croppedBase64Card = captureFrame();
             }
             if (!croppedBase64Card) {
@@ -864,9 +865,7 @@ export default function IDCaptureScreen() {
                     alt="live detect ID"
                     className="object-contain w-20 h-20"
                 />
-                <span className="fz-16 font-medium text-[#1D1D1D]">
-                    Live Detection Your ID
-                </span>
+                <span className="fz-16 font-medium text-[#1D1D1D]">Live Detection Your ID</span>
             </div>
 
             {/* Camera viewfinder */}
@@ -1017,23 +1016,61 @@ export default function IDCaptureScreen() {
                     </div>
                 )}
 
+                {/*
+                  A blocked camera takes over the frame.
+
+                  The retry goes in the MIDDLE of the frame, where the picture
+                  would be — there is nothing behind it to obscure, and a
+                  control tucked under an empty black rectangle is easy to miss.
+                */}
+                {cameraError && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center">
+                        <button
+                            onClick={startCamera}
+                            title="Try again"
+                            aria-label="Try again"
+                            className="flex h-56 w-56 items-center justify-center rad-16 border border-white/50 text-white transition-colors hover:border-white"
+                        >
+                            <Icon name="kyc/retry" size={26} mask />
+                        </button>
+                    </div>
+                )}
+
                 {/* Status overlay inside the frame */}
-                {pollState !== 'idle' && pollState !== 'done' && (
-                    <div className="absolute bottom-16 start-16 end-16 text-center">
+                {(cameraError || (pollState !== 'idle' && pollState !== 'done')) && (
+                    <div className="absolute bottom-16 start-16 end-16 z-20 text-center">
+                        {/*
+                          The camera error speaks in the STATUS line's place
+                          rather than in a block of its own below the frame.
+                          It is the same kind of message — what the screen is
+                          doing and what to do about it — and it was previously
+                          said twice over, in two different designs, while
+                          "Align ID within frame" carried on instructing
+                          somebody whose camera had never opened.
+
+                          It also names the way out. A denied permission is
+                          sticky per origin: the browser will not ask again, so
+                          "allow it in settings" can be the whole answer only if
+                          the user is willing to go there. The phone hand-off in
+                          the corner works without any of that, and is worth
+                          pointing at from the one place they are looking.
+                        */}
                         <p className="text-xs text-white bg-black/50 rounded-lg px-12 py-8">
-                            {statusText}
+                            {cameraError
+                                ? `${cameraError} Or use the camera icon above to continue on your phone.`
+                                : statusText}
                         </p>
                     </div>
                 )}
 
                 {/* Rejection hint — below the viewfinder, old style */}
-                {(captureHint || showFlipHint) && pollState === 'aligning' && (
+                {/* {(captureHint || showFlipHint) && pollState === 'aligning' && (
                     <div className="absolute -bottom-1 start-0 end-0 px-10">
                         <p className="text-xs text-[#E53E3E] bg-red-50 border border-red-200 rad-12 px-12 py-8 text-center leading-snug">
                             {captureHint ?? 'Show the side of your ID with your photo'}
                         </p>
                     </div>
-                )}
+                )} */}
             </div>
 
             {/*
@@ -1056,21 +1093,23 @@ export default function IDCaptureScreen() {
               tried yet is noise, and worse, it invites the choice at the one
               moment the user has no information to make it with.
             */}
-            {pollState !== 'idle' && (
-            <CameraHandoffPanel
-                /* The frame's existing ref — it is the same element, and a
+            {/*
+              Shown once the camera has been ASKED for — or the moment asking
+              failed. The error message inside the frame points at this icon as
+              the way out, so it has to be there whenever that message is; a
+              blocked `startCamera()` can leave `pollState` at 'idle', which
+              would have hidden the one control being recommended.
+            */}
+            {(pollState !== 'idle' || Boolean(cameraError)) && (
+                <CameraHandoffPanel
+                    /* The frame's existing ref — it is the same element, and a
                    second ref on it would be two names for one thing. */
-                frameRef={viewfinderRef}
-                facing="environment"
-                label={
-                    activeSide === 'back'
-                        ? 'photograph the back of your ID'
-                        : 'photograph the front of your ID'
-                }
-                onLive={() => {
-                    void startCamera();
-                }}
-            />
+                    frameRef={viewfinderRef}
+                    facing="environment"
+                    onLive={() => {
+                        void startCamera();
+                    }}
+                />
             )}
 
             {/* Tabs */}
@@ -1235,31 +1274,11 @@ export default function IDCaptureScreen() {
             */}
             <FlexSpace size={32} share={0.65} />
             {/* Camera error */}
-            {cameraError && (
-                <div className="flex flex-col items-center mb-8">
-                    <p className="text-xs text-red-500 mb-4">{cameraError}</p>
-                    <button
-                        onClick={startCamera}
-                        title="Try again"
-                        aria-label="Try again"
-                        className="flex h-36 w-36 items-center justify-center rad-12 border border-[#5D5C5D]/40 text-[#388CFF] transition-colors hover:border-[#388CFF]"
-                    >
-                        <Icon name="kyc/retry" size={18} mask />
-                    </button>
-                </div>
-            )}
-
             <div className="mt-auto flex shrink-0 items-center flex-col justify-end">
                 {/* Privacy badge */}
                 <div className="flex items-center flex-col justify-center gap-8 mb-12">
-                    <Image
-                        src={shieldSvg}
-                        alt="shield"
-                        className="w-15 h-15 object-contain"
-                    />
-                    <span className="fz-12 text-[#388CFF]">
-                        Your Privacy Is Completely Safe
-                    </span>
+                    <Image src={shieldSvg} alt="shield" className="w-15 h-15 object-contain" />
+                    <span className="fz-12 text-[#388CFF]">Your Privacy Is Completely Safe</span>
                 </div>
 
                 {/* Start button — only shown on idle */}
