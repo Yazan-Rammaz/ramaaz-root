@@ -22,3 +22,20 @@ export async function resolveEntry(): Promise<string> {
     return "/login";
   }
 }
+
+/*
+ * ── Why this is live again ──────────────────────────────────────────────────
+ *
+ * This was commented out to a hard-coded "/login" while `GET /v1/me` was dead —
+ * `getSession()` called it, so the check could only ever fail and the branch was
+ * dead weight. That reasoning was sound at the time.
+ *
+ * It no longer holds: `getSession()` makes NO network call. It reads the access
+ * cookie and the user snapshot written at sign-in (see lib/auth/session.ts), so
+ * nothing here depends on the missing endpoint.
+ *
+ * And with the fix in place the stub actively hurts. Returning "/login"
+ * unconditionally sends a SIGNED-IN administrator to the sign-in screen, which
+ * finds no challenge and forwards them to /no-access — so "/" became a dead end
+ * for exactly the people who had already got in.
+ */
