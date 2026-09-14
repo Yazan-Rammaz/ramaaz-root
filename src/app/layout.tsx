@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getLocale } from 'next-intl/server';
 import { localeDirection } from '@/lib/i18n/config';
 import { SplashGate } from '@/features/splash/components/SplashGate';
+import { DiagnosticsMount } from '@/components/diag/DiagnosticsMount';
 import './globals.css';
 
 // Project typeface. Quicksand covers Latin; Arabic falls back to the system
@@ -50,6 +51,9 @@ export default async function RootLayout({
             className={`${appSans.variable} h-full antialiased`}
         >
             <body className="bg-background text-foreground flex min-h-full flex-col">
+                {/* First, so its console and fetch hooks are installed before
+                    any screen below can throw. Renders nothing. */}
+                <DiagnosticsMount />
                 <NextIntlClientProvider>{children}</NextIntlClientProvider>
                 {/* Covers every full page load / refresh — see SplashGate. */}
                 <SplashGate />
