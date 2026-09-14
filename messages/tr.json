@@ -46,6 +46,8 @@
         "introStart": "Kimlik Doğrulamayı Başlat",
         "introDisagree": "Kabul Etmiyorum",
         "faceSetupFailed": "Yüz kontrolü başlatılamadı.",
+        "faceCameraFramerate": "Bu kamera yüz kontrolü için fazla yavaş — saniyede en az 15 kare gerekiyor. Bunun yerine telefona aktarmayı kullanın veya kamerası daha iyi bir cihaz deneyin.",
+        "faceSetupFailedCode": "Yüz kontrolü başlatılamadı ({code}).",
         "livenessRecording": "Kayıt",
         "livenessCancel": "Kontrolü iptal et",
         "livenessPhotosensitivity": "Bu kontrol renkli ışık yanıp söner."
