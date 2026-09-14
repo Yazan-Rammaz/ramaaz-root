@@ -373,7 +373,12 @@ export function FaceLivenessScreen({
                 const digest = (err as { digest?: unknown } | null)?.digest;
                 if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) throw err;
                 console.error('[liveness] commit threw:', err);
-                setNotice(t('faceSetupFailed'));
+                // Through noticeFor, like the two paths above. This threw the
+                // error away and showed the generic line, which put a check
+                // that PASSED and then failed to commit behind the same words
+                // as a camera that never opened — indistinguishable on screen,
+                // and the two need completely different fixes.
+                setNotice(noticeFor(err, t('faceSetupFailed')));
                 setPhase('unavailable');
             }
         },
