@@ -46,6 +46,8 @@
         "introStart": "Start Identity Verification",
         "introDisagree": "Disagree",
         "faceSetupFailed": "Could not start the face check.",
+        "faceCameraFramerate": "This camera is too slow for the face check — it needs at least 15 frames per second. Use the phone hand-off instead, or try a device with a better camera.",
+        "faceSetupFailedCode": "Could not start the face check ({code}).",
         "livenessRecording": "Rec",
         "livenessCancel": "Cancel the check",
         "livenessPhotosensitivity": "This check flashes coloured light."

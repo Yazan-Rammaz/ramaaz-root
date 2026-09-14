@@ -46,6 +46,8 @@
         "introStart": "ابدأ التحقق من الهوية",
         "introDisagree": "عدم الموافقة",
         "faceSetupFailed": "تعذّر بدء التحقق من الوجه.",
+        "faceCameraFramerate": "هذه الكاميرا أبطأ من أن تكفي للتحقق من الوجه — فهو يحتاج إلى 15 إطاراً في الثانية على الأقل. استخدم التحويل إلى الهاتف بدلاً من ذلك، أو جرّب جهازاً بكاميرا أفضل.",
+        "faceSetupFailedCode": "تعذّر بدء التحقق من الوجه ({code}).",
         "livenessRecording": "تسجيل",
         "livenessCancel": "إلغاء الفحص",
         "livenessPhotosensitivity": "يومض هذا الفحص بضوء ملوّن."

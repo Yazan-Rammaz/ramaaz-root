@@ -373,7 +373,12 @@ export function FaceLivenessScreen({
                 const digest = (err as { digest?: unknown } | null)?.digest;
                 if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) throw err;
                 console.error('[liveness] commit threw:', err);
-                setNotice(t('faceSetupFailed'));
+                // Through noticeFor, like the two paths above. This threw the
+                // error away and showed the generic line, which put a check
+                // that PASSED and then failed to commit behind the same words
+                // as a camera that never opened — indistinguishable on screen,
+                // and the two need completely different fixes.
+                setNotice(noticeFor(err, t('faceSetupFailed')));
                 setPhase('unavailable');
             }
         },
@@ -502,11 +507,10 @@ export function FaceLivenessScreen({
                         credentialProvider={credentialProvider}
                         onAnalysisComplete={handleComplete}
                         onError={(err) => {
-                            // The screen shows one fixed line by design, so
-                            // without this a failure here leaves no trace
-                            // anywhere. `state` is only a category —
-                            // RUNTIME_ERROR covers everything unclassified — so
-                            // log the whole object for the cause.
+                            // `state` is only a category — RUNTIME_ERROR covers
+                            // everything unclassified — so log the whole object
+                            // for the cause. The screen now names the state too,
+                            // but the object is what says why.
                             console.error('[liveness] detector error', err);
 
                             // ⚠️ NEVER `failed`. Everything that reaches here is
@@ -547,10 +551,31 @@ export function FaceLivenessScreen({
                                     });
                                 })();
                             }
+                            // ⚠️ Say WHICH failure, the same way the session and
+                            // verify paths above already do.
+                            //
+                            // Only ACCESS was ever named here; every other state
+                            // — framerate, timeout, server, a detector that
+                            // threw — showed the same "Could not start the face
+                            // check", and the one string that identified it went
+                            // to the console and nowhere else. On a tablet with
+                            // no console attached that is unreportable: the
+                            // administrator sees a black panel and a retry that
+                            // fails identically, and so does whoever they tell.
+                            //
+                            // Framerate gets its own line because it is the one
+                            // the user can route around unaided — the hand-off
+                            // borrows a phone camera that can hold 15fps. Any
+                            // state we have no wording for still carries its
+                            // code, so the next screenshot names itself.
                             setNotice(
                                 /ACCESS|PERMISSION|DENIED/i.test(state)
                                     ? t('faceCameraBlocked')
-                                    : t('faceSetupFailed'),
+                                    : /FRAMERATE/i.test(state)
+                                      ? t('faceCameraFramerate')
+                                      : state
+                                        ? t('faceSetupFailedCode', { code: state })
+                                        : t('faceSetupFailed'),
                             );
                             setPhase('unavailable');
                         }}
