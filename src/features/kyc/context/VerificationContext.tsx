@@ -45,7 +45,9 @@ interface VerificationContextType {
 
 const VerificationContext = createContext<VerificationContextType | undefined>(undefined);
 
-const MAX_ATTEMPTS = 10;
+// No MAX_ATTEMPTS. `attemptCounts` still counts so a screen can show progress,
+// but nothing in this app turns a count into a refusal — the NestJS backend
+// holds the budget and says when it is spent.
 
 export function VerificationProvider({
     children,
@@ -210,5 +212,3 @@ export function useVerification() {
     }
     return context;
 }
-
-export { MAX_ATTEMPTS };
