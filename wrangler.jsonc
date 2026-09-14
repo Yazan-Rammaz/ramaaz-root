@@ -29,7 +29,8 @@
   // yazan-adnof, so this resolves.
   "services": [{ "binding": "KYC_WORKER", "service": "ramaaz-kyc" }],
 
-  // Where the BROWSER's account of a failure is kept — see src/lib/diag.
+  // The BROWSER's account of a failure goes to `ramaaz-observe`, which owns
+  // the store and the dashboard — see src/app/api/diag/route.ts.
   //
   // `observability` below captures this Worker, and the KYC Worker captures
   // itself. Neither can see the browser, and the browser is where the camera
@@ -37,9 +38,8 @@
   // tablet and is gone the moment the tab closes. That happened, and answering
   // "why" cost a day and still needed a log pasted by hand.
   //
-  // Keyed by challenge id, so a backend log line quoting a challenge is enough
-  // to pull the browser side of the same sign-in. 30-day TTL, metadata only.
-  "kv_namespaces": [{ "binding": "DIAG", "id": "88fa2da5cd6f4c11b3e9e862aa977b6e" }],
+  // OBSERVE_URL and OBSERVE_KEY are secrets (`wrangler secret put`), not vars:
+  // a `vars` entry would shadow a secret of the same name and commit the key.
 
   // Retain logs, rather than requiring somebody to be watching.
   //

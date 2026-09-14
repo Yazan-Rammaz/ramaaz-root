@@ -1,35 +1,41 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readChallenge } from "@/lib/auth/challenge";
+import { cfEnv } from "@/lib/cf-env";
 import {
     DIAG_MAX_BODY_BYTES,
-    DIAG_TTL_SECONDS,
     diagPayloadSchema,
     redactPath,
 } from "@/lib/diag/events";
-import { diagKey, diagStore } from "@/lib/diag/store";
 
 /**
- * The diagnostic sink — where the browser's account of a failure is kept.
+ * The diagnostic sink — forwards the browser's account of a failure to
+ * `ramaaz-observe`, which owns the store and the dashboard.
  *
- * Writes each flush to KV under the sign-in's challenge id, and mirrors a
- * one-line summary to `console.log` so it also lands in Workers Logs. Two
- * sinks, two jobs: KV answers "what happened to this person last Tuesday" for
- * thirty days, the log line answers "what is happening right now" in the
- * dashboard, where a tail is already watching.
+ * ── Why this app forwards instead of posting straight there ─────────────────
+ * The SDK can post cross-origin, and on Vercel or Pages that is exactly how it
+ * should be used. Not here, for two reasons:
+ *
+ *  1. `connect-src 'self'` (middleware.ts) forbids this browser from talking to
+ *     any origin but ours, and that restriction is load-bearing — it is what
+ *     stops a tampered page from shipping a camera frame somewhere. Relaxing it
+ *     to admit a logging host would spend a real security property on
+ *     convenience.
+ *
+ *  2. The correlation id is the whole point, and only the server has it. The
+ *     challenge id lives in an httpOnly cookie precisely so client JS cannot
+ *     read it — so the browser could never label its own session with the id
+ *     the backend logs quote. Here it is one `readChallenge()` away.
  *
  * ── Always 204 ──────────────────────────────────────────────────────────────
- * Every path returns 204, including the rejected ones. This endpoint is reached
- * from a sign-in that has not authenticated yet, so its replies are readable by
- * anyone holding a link; distinguishing "stored" from "rejected" would tell a
- * prober whether their challenge id is real. The browser has no use for the
- * answer either — it cannot fix anything with it, and a failed report must not
- * become an error the collector then tries to report.
+ * Every path, including the rejected ones. Reached from a sign-in that has not
+ * authenticated yet, so a distinguishing reply would tell a prober whether a
+ * challenge id is real — and the browser can do nothing with the answer anyway.
+ * A failed report must never become an error the collector then tries to report.
  */
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-    // ⚠️ Length first, before reading. A body is a body whether or not it
-    // parses, and letting an unbounded one through to `.json()` is how an
-    // unauthenticated endpoint becomes a way to spend someone's memory.
+    // Length before reading. A body is a body whether or not it parses, and
+    // this endpoint is unauthenticated by design.
     const declared = Number(request.headers.get("content-length") ?? 0);
     if (declared > DIAG_MAX_BODY_BYTES) return new NextResponse(null, { status: 204 });
 
@@ -46,59 +52,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!parsed.success) return new NextResponse(null, { status: 204 });
     const payload = parsed.data;
 
-    // Redact AGAIN, server-side. The browser already did, but the browser is
-    // not a trusted place to enforce a rule about credentials — anything can
-    // POST here with any path it likes.
+    // Redact AGAIN, server-side. The browser already did, but the browser is not
+    // a trusted place to enforce a rule about credentials — anything can POST
+    // here with any path it likes.
     const events = payload.events.map((event) =>
         event.path ? { ...event, path: redactPath(event.path) } : event,
     );
 
-    // The correlation this whole feature exists for: the challenge id is read
-    // from the httpOnly cookie SERVER-SIDE, never sent by the client, so a
-    // bundle cannot be filed against somebody else's sign-in.
     const { challengeId } = await readChallenge();
 
-    const worst = events.some((e) => e.level === "error" || e.status === 0)
-        ? "error"
-        : events.some((e) => e.level === "warn" || (e.status ?? 200) >= 400)
-          ? "warn"
-          : "info";
-
-    // The Workers Logs half. One line, greppable, no payload — the bundle in KV
-    // is the detail, this is the pointer to it.
-    console.log(
-        JSON.stringify({
-            msg: "diag",
-            level: worst,
-            challengeId: challengeId ?? "anon",
-            sid: payload.sid,
-            seq: payload.seq,
-            events: events.length,
-            first: events[0]?.msg?.slice(0, 200),
-        }),
-    );
-
-    const store = diagStore();
-    if (!store) return new NextResponse(null, { status: 204 });
+    const url = cfEnv("OBSERVE_URL");
+    const key = cfEnv("OBSERVE_KEY");
+    if (!url || !key) {
+        // Unconfigured is not an error: a sign-in must work whether or not the
+        // logging does. Say so once, where it can be seen.
+        console.warn("[diag] OBSERVE_URL/OBSERVE_KEY unset — dropping", events.length, "events");
+        return new NextResponse(null, { status: 204 });
+    }
 
     try {
-        await store.put(
-            diagKey(challengeId, payload.sid, payload.seq),
-            JSON.stringify({
-                storedAt: new Date().toISOString(),
-                challengeId: challengeId ?? null,
+        await fetch(`${url.replace(/\/$/, "")}/ingest`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                key,
                 sid: payload.sid,
                 seq: payload.seq,
+                // The join between this browser session and every backend log
+                // line for the same sign-in.
+                correlation: challengeId,
                 ua: payload.ua,
                 screen: payload.screen,
                 events,
             }),
-            { expirationTtl: DIAG_TTL_SECONDS },
-        );
+        });
     } catch (err) {
-        // A KV write failing must not fail a sign-in. This lands in Workers
-        // Logs, which is the sink that still works when the other one does not.
-        console.error("[diag] KV write failed:", err);
+        // Never fail a sign-in over logging. This lands in Workers Logs, which
+        // is the sink that still works when the other one does not.
+        console.error("[diag] forward to observe failed:", err);
     }
 
     return new NextResponse(null, { status: 204 });
