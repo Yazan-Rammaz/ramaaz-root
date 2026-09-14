@@ -4,7 +4,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getLocale } from 'next-intl/server';
 import { localeDirection } from '@/lib/i18n/config';
 import { SplashGate } from '@/features/splash/components/SplashGate';
-import { DiagnosticsMount } from '@/components/diag/DiagnosticsMount';
+import { Observe } from '@/components/Observe';
+import { readChallenge } from '@/lib/auth/challenge';
 import './globals.css';
 
 // Project typeface. Quicksand covers Latin; Arabic falls back to the system
@@ -44,6 +45,12 @@ export default async function RootLayout({
     // agnostic via logical utilities (see AGENTS.md §10).
     const locale = await getLocale();
 
+    // Read server-side and handed to the collector: the challenge lives in an
+    // httpOnly cookie, so the browser cannot label its own session with the id
+    // the backend logs quote. An identifier, not a credential — the challenge
+    // TOKEN beside it never leaves the server.
+    const { challengeId } = await readChallenge();
+
     return (
         <html
             lang={locale}
@@ -53,7 +60,7 @@ export default async function RootLayout({
             <body className="bg-background text-foreground flex min-h-full flex-col">
                 {/* First, so its console and fetch hooks are installed before
                     any screen below can throw. Renders nothing. */}
-                <DiagnosticsMount />
+                <Observe correlation={challengeId} />
                 <NextIntlClientProvider>{children}</NextIntlClientProvider>
                 {/* Covers every full page load / refresh — see SplashGate. */}
                 <SplashGate />

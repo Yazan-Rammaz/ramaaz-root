@@ -80,9 +80,31 @@ function buildCsp(nonce: string, framable: boolean) {
     // livenessCredentials() in the ramaaz-kyc repo. Everything else about the
     // BFF rule stands: no other origin, and no token that outlives the check.
     const rekognitionStreaming = 'wss://streaming-rekognition.us-east-1.amazonaws.com';
+
+    // ── The second, and the reason it is named rather than wildcarded ───────
+    //
+    // The diagnostics collector posts the browser's own account of a failure to
+    // `ramaaz-observe`. It has to go direct: the point of that service is that
+    // any front end can report to it without a backend route of its own, and it
+    // is the same collector RDB and Trydos use.
+    //
+    // ⚠️ ONE HOST. Not a wildcard, not a scheme. `connect-src 'self'` is what
+    // stops a tampered page from posting a camera frame to somebody else's
+    // server, and in an app that photographs faces and identity documents that
+    // is not a formality. Adding an origin here widens exactly one destination;
+    // turning the directive off would open every destination, which is why this
+    // is written as an addition and not a removal.
+    //
+    // What crosses it is metadata only — see src/lib/observe.ts. No bodies, no
+    // headers, no image data, and paths are redacted twice before they leave.
+    // Literal, not imported: src/components/Observe.tsx is a 'use client'
+    // module, and pulling one into edge middleware drags client code into the
+    // edge bundle. The two must stay in step — they are checked together in
+    // docs/diagnostics.md.
+    const observeOrigin = 'https://ramaaz-observe.yazan-adnof.workers.dev';
     const connectSrc = dev
-        ? `connect-src 'self' ws: ${rekognitionStreaming}`
-        : `connect-src 'self' ${rekognitionStreaming}`;
+        ? `connect-src 'self' ws: ${rekognitionStreaming} ${observeOrigin}`
+        : `connect-src 'self' ${rekognitionStreaming} ${observeOrigin}`;
     const directives = [
         `default-src 'self'`,
         scriptSrc,
