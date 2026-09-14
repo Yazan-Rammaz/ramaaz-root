@@ -48,6 +48,9 @@
         "faceSetupFailed": "Yüz kontrolü başlatılamadı.",
         "faceCameraFramerate": "Bu kamera yüz kontrolü için fazla yavaş — saniyede en az 15 kare gerekiyor. Bunun yerine telefona aktarmayı kullanın veya kamerası daha iyi bir cihaz deneyin.",
         "faceSetupFailedCode": "Yüz kontrolü başlatılamadı ({code}).",
+        "faceRotateTitle": "Cihazınızı dik tutun",
+        "faceRotateBody": "Yüz kontrolü yalnızca dikey modda çalışır. Tabletinizi çevirin, kontrol kendiliğinden başlayacak.",
+        "faceRotateManual": "Bu tarayıcı ekranı sizin için çeviremiyor — lütfen cihazı elle döndürün.",
         "livenessRecording": "Kayıt",
         "livenessCancel": "Kontrolü iptal et",
         "livenessPhotosensitivity": "Bu kontrol renkli ışık yanıp söner."

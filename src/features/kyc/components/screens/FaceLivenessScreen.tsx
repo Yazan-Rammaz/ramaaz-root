@@ -134,6 +134,66 @@ function noticeFor(err: unknown, fallback: string): string {
     return fallback;
 }
 
+/**
+ * Is this a device AWS will refuse to run a liveness check on right now?
+ *
+ * ⚠️ Face Liveness does not work in landscape on a mobile device. It is not a
+ * degraded experience, it is a refusal: the detector raises
+ * `MOBILE_LANDSCAPE_ERROR` and never opens the camera.
+ *
+ * This mirrors the SDK's own test exactly — `isMobileScreen()` and
+ * `getLandscapeMediaQuery()` in its `utils/device.mjs`, including the iPadOS 13+
+ * case where an iPad reports a Macintosh user agent and is identified by having
+ * touch points instead. Mirrored rather than imported because neither helper is
+ * exported from the package; if the SDK's test ever diverges from this one, the
+ * symptom is the guard disagreeing with the detector, so it is worth rechecking
+ * on an upgrade.
+ *
+ * Testing it OURSELVES, before mounting the detector, is the whole point: a
+ * check started in landscape opens a billed AWS session and a backend
+ * validation round-trip, and then throws all of it away. Asking someone to turn
+ * their tablet upright first costs nothing.
+ */
+/**
+ * Turn the screen to portrait on the user's behalf.
+ *
+ * Returns false when the browser will not do it, which is not an edge case —
+ * it is every iPhone and iPad. `screen.orientation.lock` is unimplemented in
+ * Safari, so on exactly the devices most likely to be held sideways this button
+ * cannot work and the written instruction is the whole answer. Hence a boolean
+ * rather than a throw: the caller keeps the manual wording on screen.
+ *
+ * ⚠️ Fullscreen first, and not optional. Chrome refuses an orientation lock
+ * outside fullscreen ("screen.orientation.lock() requires that the document be
+ * fullscreen"), so a lock attempted on its own silently rejects and the button
+ * looks broken.
+ */
+async function lockPortrait(): Promise<boolean> {
+    try {
+        const orientation = window.screen?.orientation as
+            | (ScreenOrientation & { lock?: (o: string) => Promise<void> })
+            | undefined;
+        if (typeof orientation?.lock !== "function") return false;
+
+        if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen?.();
+        }
+        await orientation.lock("portrait");
+        return true;
+    } catch {
+        // Denied, unsupported, or the gesture was not trusted. The written
+        // instruction above is still correct, so this stays quiet.
+        return false;
+    }
+}
+
+function isMobileDevice(): boolean {
+    if (typeof navigator === "undefined") return false;
+    const newerIpad =
+        /Macintosh/i.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) > 1;
+    return /Android|iPhone|iPad/i.test(navigator.userAgent) || newerIpad;
+}
+
 type StartResponse = { sessionId: string; region: string };
 type Credentials = {
     accessKeyId: string;
@@ -223,6 +283,29 @@ export function FaceLivenessScreen({
     const frameRef = useRef<HTMLDivElement>(null);
 
     /**
+     * Landscape on a phone or tablet — the one state where starting the check
+     * is guaranteed to fail.
+     *
+     * Starts false and is set in an effect rather than read during render:
+     * `matchMedia` does not exist on the server, and a first paint that
+     * disagreed with the client would hydrate-mismatch.
+     */
+    const [mustRotate, setMustRotate] = useState(false);
+    /** Set once the rotate button has been tried and the browser refused. */
+    const [rotateManually, setRotateManually] = useState(false);
+
+    useEffect(() => {
+        if (!isMobileDevice()) return;
+        const query = window.matchMedia("(orientation: landscape)");
+        const apply = () => setMustRotate(query.matches);
+        apply();
+        // Turning the device is the fix, so the prompt has to clear itself the
+        // moment they do — and then the start effect below runs on its own.
+        query.addEventListener("change", apply);
+        return () => query.removeEventListener("change", apply);
+    }, []);
+
+    /**
      * Open a session and fetch credentials before rendering the detector.
      *
      * Both have to be in hand first: the component takes `sessionId` as a prop
@@ -234,6 +317,12 @@ export function FaceLivenessScreen({
         // session to ask about a challenge the backend has already retired, and
         // the only possible answer is the 401 that used to paint this frame red.
         if (PASSED.has(challengeId)) return;
+
+        // Landscape on mobile: do not open anything. The detector would refuse
+        // with MOBILE_LANDSCAPE_ERROR after we had already paid for an AWS
+        // session and a backend validate. `mustRotate` is a dependency, so
+        // turning the device upright runs this effect for real.
+        if (mustRotate) return;
 
         let cancelled = false;
 
@@ -283,7 +372,7 @@ export function FaceLivenessScreen({
         };
         // `attempt` is the retry trigger: AWS liveness sessions are single-use,
         // so going again means opening a new one, not reusing the last id.
-    }, [challengeId, attempt, t]);
+    }, [challengeId, attempt, t, mustRotate]);
 
     /**
      * Handed to AWS's SDK, which calls it whenever it needs to sign. Fetching
@@ -422,7 +511,50 @@ export function FaceLivenessScreen({
                 className="relative h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
                 style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
             >
-                {phase === 'preparing' && (
+                {/*
+                  Turn the device — shown INSTEAD of starting anything.
+
+                  Not an error state: nothing has failed, and nothing has been
+                  spent. Face Liveness simply does not run in landscape on a
+                  phone or tablet, so this is the one obstacle the person can
+                  clear themselves in a second. It clears itself when they do.
+                */}
+                {mustRotate && (
+                    <div
+                        role="status"
+                        className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/85 px-24"
+                    >
+                        {/* Tapping it turns the screen where the browser allows
+                            that; where it does not, the text below is the way. */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void lockPortrait().then((locked) => {
+                                    if (!locked) setRotateManually(true);
+                                });
+                            }}
+                            title={t('faceRotateTitle')}
+                            aria-label={t('faceRotateTitle')}
+                            className="flex h-56 w-56 items-center justify-center rounded-full border border-white/40 text-white transition-colors hover:border-white"
+                        >
+                            <Icon name="kyc/retry" size={26} mask />
+                        </button>
+                        <p
+                            className="fz-16 text-center leading-none font-semibold text-white"
+                            style={{ marginTop: rem(16) }}
+                        >
+                            {t('faceRotateTitle')}
+                        </p>
+                        <p
+                            className="fz-13 max-w-300 text-center leading-normal font-medium text-white/80"
+                            style={{ marginTop: rem(8) }}
+                        >
+                            {rotateManually ? t('faceRotateManual') : t('faceRotateBody')}
+                        </p>
+                    </div>
+                )}
+
+                {phase === 'preparing' && !mustRotate && (
                     <span
                         aria-hidden
                         className="pointer-events-none absolute inset-0 flex items-center justify-center gap-8"
@@ -573,9 +705,17 @@ export function FaceLivenessScreen({
                                     ? t('faceCameraBlocked')
                                     : /FRAMERATE/i.test(state)
                                       ? t('faceCameraFramerate')
-                                      : state
-                                        ? t('faceSetupFailedCode', { code: state })
-                                        : t('faceSetupFailed'),
+                                      : // Backstop only — the guard above should
+                                        // mean we never mount the detector in
+                                        // landscape. Kept because the SDK's own
+                                        // test is the authority, and if the two
+                                        // ever disagree this must still say
+                                        // something a person can act on.
+                                        /LANDSCAPE/i.test(state)
+                                        ? t('faceRotateBody')
+                                        : state
+                                          ? t('faceSetupFailedCode', { code: state })
+                                          : t('faceSetupFailed'),
                             );
                             setPhase('unavailable');
                         }}
