@@ -2,7 +2,7 @@
 
 import React, { useCallback } from 'react';
 import Image from 'next/image';
-import { MAX_ATTEMPTS, useVerification } from '@/features/kyc/context/VerificationContext';
+import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useRouter } from 'next/navigation';
 import { createKycService } from '@/features/kyc/services';
 import ExitConfirmDialog from '../ExitConfirmDialog';
@@ -17,8 +17,6 @@ export default function IDSummaryScreen() {
         livenessResult,
         setIdDocument,
         markCompleted,
-        attemptCounts,
-        incrementAttempt,
     } = useVerification();
     const router = useRouter();
     const [showExitDialog, setShowExitDialog] = React.useState(false);
@@ -82,15 +80,12 @@ export default function IDSummaryScreen() {
             setSubmitting(false);
         }
     }
+    // Rejecting the scanned details always returns to the front-ID capture, with
+    // no count and no ceiling. The backend decides when someone has run out.
     const handleFailure = useCallback(() => {
-        // const count = incrementAttempt('id-capture-front');
-        // if (count >= MAX_ATTEMPTS) {
-        //     goTo('contact-support', 1);
-        // } else {
         setIdDocument(null);
         goTo('id-capture-front', -1);
-        // }
-    }, [incrementAttempt, goTo]);
+    }, [setIdDocument, goTo]);
     return (
         // `overflow-y-auto` is the floor under everything below: once the
         // elastic space is spent this screen scrolls instead of pushing its

@@ -381,12 +381,11 @@ export const faceConfig = {
     },
 
     // ── Attempt limits ────────────────────────────────────────────────────────
-    attempts: {
-        /** Maximum failures per challenge before redirecting to contact-support. */
-        maxPerChallenge: 3,
-        /** How many times the final-capture loop retries before giving up. */
-        finalCaptureRetries: 3,
-    },
+    // Deliberately absent, here and in the KYC Worker. The NestJS backend holds
+    // the challenge's attempt budget and refuses with a 401 when it is spent —
+    // it is the only party that sees every submit, so it is the only one that
+    // can count. A cap in this config could only guess, and disagreed: it cut
+    // people off while the backend still considered them entitled to continue.
 
     // ── Selfie crop padding (server-side Sharp) ───────────────────────────────
     cropping: {
