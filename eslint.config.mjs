@@ -119,6 +119,25 @@ const eslintConfig = defineConfig([
     },
   },
 
+  {
+    // The diagnostics collector — the ONE place a `fetch` in the UI layer is
+    // correct, and the exception belongs here rather than in the file.
+    //
+    // The ban exists so application data goes through the BFF and never
+    // straight from the browser. This is not application data: it is the
+    // collector's own transport to a separate logging service, the same one
+    // every other project posts to, and routing it through this app's server
+    // would defeat the point of a service any front end can report to. The
+    // origin is named in `connect-src`; what crosses is metadata and scrubbed
+    // bodies, never the KYC routes (see denyBodyPaths).
+    //
+    // Configured rather than an inline eslint-disable because the top of that
+    // file is GENERATED — `npm run sync:root` in ramaaz-observe rewrites it,
+    // and a comment there is silently wiped on the next sync. It was, once.
+    files: ["src/components/Observe.tsx"],
+    rules: { "no-restricted-syntax": "off" },
+  },
+
   globalIgnores([
     ".next/**",
     "out/**",

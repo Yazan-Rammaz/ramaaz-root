@@ -3,12 +3,13 @@
 /**
  * Browser diagnostics — the whole integration, in one file.
  *
- * Copied from the ramaaz-observe repo (sdk/src/index.ts) with the app's own
- * config and its React mount appended. A copy rather than a dependency because
- * the package is not published to npm and the service lives in a private repo:
- * a file: dependency on a sibling checkout builds here and fails on Cloudflare,
- * which only has this repo. When it is published, delete everything above
- * `OBSERVE_URL` and import from the package instead.
+ * GENERATED above the configuration banner from ramaaz-observe's
+ * sdk/src/index.ts. Do not edit that part here; run `npm run sync:root` in
+ * ramaaz-observe instead, or the next sync silently reverts it.
+ *
+ * A copy rather than a dependency because the package is not published and the
+ * service lives in a private repo: a file: dependency on a sibling checkout
+ * builds here and fails on Cloudflare, which only has this repo.
  *
  * Two lines elsewhere are unavoidable and deliberate:
  *   · app/layout.tsx mounts <Observe /> — something has to start it, and it
@@ -21,27 +22,6 @@
 
 import { useEffect } from 'react';
 
-/**
- * @ramaaz/observe — the browser collector.
- *
- * Zero dependencies and no framework assumptions on purpose: it runs in Next,
- * React, Vue, Svelte, Angular or a plain `<script>` tag, and it does not care
- * whether the app is hosted on Vercel, Cloudflare Pages, a Worker or a bucket.
- * It posts straight to the collector over CORS, so the host app needs no server
- * route of its own.
- *
- *   import { observe } from '@ramaaz/observe';
- *   observe({ url: 'https://observe.example.workers.dev', key: 'pk_root_…' });
- *
- * Three rules it obeys, in order of importance:
- *   1. NEVER change what the page does. Every hook calls through to the
- *      original and returns what it returned. A collector that swallows an
- *      error is worse than no collector.
- *   2. NEVER recurse. Its own POST is not recorded, and a failure to report is
- *      never itself reported — that is an infinite loop with a bill attached.
- *   3. NEVER send a credential. Paths are redacted, bodies are opt-in and
- *      scrubbed, and there is no field for a header.
- */
 
 export type ObserveEvent = {
     t: number;
@@ -55,7 +35,48 @@ export type ObserveEvent = {
     status?: number;
     ms?: number;
     body?: string;
+    /** Full exchange, when the project opts in. Every value already scrubbed. */
+    detail?: {
+        reqHeaders?: Record<string, string>;
+        reqBody?: string;
+        resHeaders?: Record<string, string>;
+        resBody?: string;
+    };
 };
+
+/**
+ * Headers that are dropped even when `captureHeaders` is on.
+ *
+ * Not configurable, and not a judgement call the caller gets to make: these
+ * carry credentials by definition, and a logging tool that stores them has
+ * turned every log line into a way to impersonate somebody.
+ */
+const SENSITIVE_HEADERS = new Set([
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "x-step-token",
+    "x-csrf-token",
+]);
+
+function headersToObject(h: Headers | undefined, max: number): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!h) return out;
+    h.forEach((value, key) => {
+        const name = key.toLowerCase();
+        if (SENSITIVE_HEADERS.has(name)) {
+            // Recorded as present-but-withheld rather than omitted: knowing a
+            // request DID carry auth is usually the point of looking.
+            out[key] = "[redacted]";
+            return;
+        }
+        out[key] = scrub(String(value)).slice(0, max);
+    });
+    return out;
+}
 
 export type ObserveOptions = {
     /** Collector origin, e.g. https://observe.ramaaz.workers.dev */
@@ -80,7 +101,20 @@ export type ObserveOptions = {
      * credentials.
      */
     captureBodies?: boolean;
-    /** Never capture a body when the path matches. Checked after redaction. */
+    /**
+     * Also keep request/response HEADERS.
+     *
+     * ⚠️ Separate from `captureBodies` and off by default, because headers are
+     * where credentials live. `Authorization`, `Cookie` and `Set-Cookie` are
+     * dropped unconditionally even with this on — see SENSITIVE_HEADERS — but a
+     * custom auth header this library has never heard of would come through, so
+     * turn it on knowing what your app sends.
+     */
+    captureHeaders?: boolean;
+    /**
+     * Never capture a body or headers when the path matches. Checked after
+     * redaction, so write these against the redacted form (`/users/[id]`).
+     */
     denyBodyPaths?: RegExp[];
     /** Max characters kept per body excerpt. Default 2000. */
     maxBody?: number;
@@ -251,20 +285,6 @@ export function observe(options: ObserveOptions): void {
 
         reporting = true;
         try {
-            /**
-             * The one sanctioned `fetch` in the UI layer, and the lint rule is
-             * right to ask about it.
-             *
-             * The ban exists so application data goes through the BFF — a
-             * Server Action or a feature api module — and never straight from
-             * the browser. This is not application data and there is no BFF to
-             * go through: it is the collector's own transport to a separate
-             * logging service, the same one RDB and Trydos post to, and routing
-             * it through this app's server would defeat the point of a service
-             * any front end can report to. The origin is named in `connect-src`
-             * (middleware.ts); what crosses is metadata only.
-             */
-            // eslint-disable-next-line no-restricted-syntax
             await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -319,12 +339,35 @@ export function observe(options: ObserveOptions): void {
         const path = redactPath(url);
         const startedAt = Date.now();
 
+        // One check for the whole exchange: a path worth withholding a response
+        // from is a path worth withholding the request from too.
+        const denied = options.denyBodyPaths?.some((re) => re.test(path)) ?? false;
+
+        // Captured BEFORE the call. `init.body` is readable now; after the
+        // fetch, a stream body has been consumed and there is nothing to read.
+        let reqBody: string | undefined;
+        let reqHeaders: Record<string, string> | undefined;
+        if (!denied && options.captureBodies && typeof init?.body === "string") {
+            reqBody = scrub(init.body).slice(0, maxBody);
+        }
+        if (!denied && options.captureHeaders) {
+            const h =
+                init?.headers instanceof Headers
+                    ? init.headers
+                    : init?.headers
+                      ? new Headers(init.headers as HeadersInit)
+                      : input instanceof Request
+                        ? input.headers
+                        : undefined;
+            reqHeaders = headersToObject(h, maxBody);
+        }
+
         try {
             const response = await originalFetch(input, init);
             let body: string | undefined;
             if (
                 options.captureBodies &&
-                !options.denyBodyPaths?.some((re) => re.test(path)) &&
+                !denied &&
                 // Reading the body consumes the stream, so work on a clone —
                 // otherwise the collector would steal the response from the app
                 // that asked for it, which is rule 1.
@@ -337,6 +380,14 @@ export function observe(options: ObserveOptions): void {
                     /* opaque, streaming, or already consumed — skip it */
                 }
             }
+            const resHeaders =
+                !denied && options.captureHeaders
+                    ? headersToObject(response.headers, maxBody)
+                    : undefined;
+            const detail =
+                reqHeaders || reqBody || resHeaders || body
+                    ? { reqHeaders, reqBody, resHeaders, resBody: body }
+                    : undefined;
             record({
                 t: startedAt,
                 kind: "fetch",
@@ -345,6 +396,7 @@ export function observe(options: ObserveOptions): void {
                 status: response.status,
                 ms: Date.now() - startedAt,
                 body,
+                detail,
                 level: response.ok ? undefined : "warn",
             });
             if (!response.ok) void flush(false);
@@ -361,6 +413,9 @@ export function observe(options: ObserveOptions): void {
                 msg,
                 name,
                 level: "error",
+                // The request still happened; only the response is missing. A
+                // failed call is exactly when you want to see what was sent.
+                detail: reqHeaders || reqBody ? { reqHeaders, reqBody } : undefined,
             });
             void flush(false);
             throw err; // Rule 1: the caller still gets its rejection.
@@ -422,7 +477,6 @@ export function setCorrelation(value: string): void {
     window.dispatchEvent(new CustomEvent("__observe_corr", { detail: value }));
 }
 
-
 /* ── this app's configuration ─────────────────────────────────────────────── */
 
 /**
@@ -452,7 +506,45 @@ export const OBSERVE_KEY = 'pk_root_9afe991c2091264f58cf6987';
  */
 export function Observe({ correlation }: { correlation?: string }) {
     useEffect(() => {
-        observe({ url: OBSERVE_URL, key: OBSERVE_KEY });
+        observe({
+            url: OBSERVE_URL,
+            key: OBSERVE_KEY,
+
+            /**
+             * Payloads and headers ARE captured here, and the exclusions below
+             * are what make that defensible.
+             *
+             * Without them a Server Action is unreadable: it answers HTTP 200
+             * and puts the real outcome in the RSC body, so the body is the
+             * only place the failure exists. That is the difference between a
+             * log that says "POST /login 200" and one that shows why the code
+             * was refused.
+             */
+            captureBodies: true,
+            captureHeaders: true,
+
+            /**
+             * ⚠️ The KYC routes, and they are NOT optional.
+             *
+             * These carry base64 face images, document scans, and responses
+             * holding `selfieImageUrl` — a signed S3 link to somebody's face.
+             * The scrubber would catch the data URLs and the signed link by
+             * shape, but "probably scrubbed" is the wrong standard for
+             * biometrics: excluded outright, so there is no pattern to get
+             * wrong and nothing to review after the fact.
+             *
+             * Matched against the REDACTED path, which is what the collector
+             * has by this point.
+             */
+            denyBodyPaths: [/^\/api\/kyc/, /^\/api\/face-capture/],
+
+            /**
+             * MediaPipe's on-device telemetry. Blocked by `connect-src` and
+             * fails on every face-gate load, so it would otherwise be the most
+             * common "error" in the log while meaning nothing.
+             */
+            ignorePaths: [/googleapis\.com/],
+        });
     }, []);
 
     // Its own effect, keyed on the value: the id arrives after sign-in begins,
