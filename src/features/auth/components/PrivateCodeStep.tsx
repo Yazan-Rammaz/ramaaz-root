@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { AuthCodeField } from './AuthCodeField';
 import { kickstartLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { restartSignInAction, submitPrivateCodeAction } from '../actions';
+import { reportUserError } from '@/components/Observe';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -73,6 +74,10 @@ export function PrivateCodeStep() {
                     if (!result?.error) return;
                     if (result.restart) setDead(true);
                     setError(result.error);
+                    // The action answered HTTP 200 — the refusal exists only in
+                    // this body, so without reporting it the session reads as a
+                    // clean sign-in that simply stopped.
+                    reportUserError(result.error, result.diag);
                 }}
             />
 

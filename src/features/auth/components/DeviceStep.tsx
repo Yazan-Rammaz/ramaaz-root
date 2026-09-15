@@ -10,6 +10,7 @@ import {
     toPublicKeyOptions,
 } from '@/lib/auth/webauthn';
 import { deviceOptionsAction, restartSignInAction, submitDeviceAction } from '../actions';
+import { reportUserError } from '@/components/Observe';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -118,6 +119,8 @@ export function DeviceStep() {
         const result = await submitDeviceAction(credentialToJSON(credential), deviceLabel());
         if (result?.error) {
             setError(result.error);
+            // Same 200-with-a-refusal-inside as the private code step.
+            reportUserError(result.error, result.diag);
             setPhase(result.restart ? 'dead' : 'error');
         }
     }, [t]);

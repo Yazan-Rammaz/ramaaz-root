@@ -23,7 +23,13 @@ import {
   type EvidenceRequest,
   type PrivateCodeRequest,
 } from "@/lib/auth/endpoints";
-import { errorCode, isChallengeDead, signInError } from "@/lib/auth/errors";
+import {
+  errorCode,
+  isChallengeDead,
+  signInError,
+  signInDiag,
+  type SignInDiag,
+} from "@/lib/auth/errors";
 import { privateCodeSchema } from "./schema";
 
 /**
@@ -46,6 +52,20 @@ export type ActionState = {
    * access link, because no retry of this step can now succeed.
    */
   restart?: boolean;
+  /**
+   * What the backend ACTUALLY said — status, error code, correlation id — as
+   * distinct from `error`, which is the sentence for the screen.
+   *
+   * Carried because a Server Action always answers HTTP 200: the RSC protocol
+   * puts the outcome in the body, so a refusal reaches the browser looking like
+   * a successful request and the diagnostics record a clean session. The client
+   * passes this to `reportUserError`, which is the only reason a rejected
+   * sign-in is visible in the logs at all.
+   *
+   * Never rendered. It is for the log, and it names the backend's own wording,
+   * which is usually more specific than ours.
+   */
+  diag?: SignInDiag;
 };
 
 /**
@@ -101,6 +121,7 @@ export async function submitPrivateCodeAction(
     return {
       ok: false,
       error: signInError(error, "That code is not correct"),
+      diag: signInDiag(error),
       restart: errorCode(error) === ERROR_CODES.challengeInvalid,
     };
   }
@@ -192,6 +213,7 @@ export async function submitFaceAction(
     return {
       ok: false,
       error: signInError(error, "That did not match. Try again."),
+      diag: signInDiag(error),
       restart: isChallengeDead(error),
     };
   }
@@ -316,6 +338,7 @@ export async function submitIdentityDocumentAction(
     return {
       ok: false,
       error: signInError(error, "That document could not be enrolled. Try again."),
+      diag: signInDiag(error),
       restart: isChallengeDead(error),
     };
   }
@@ -460,6 +483,7 @@ export async function deviceOptionsAction(): Promise<
     return {
       ok: false,
       error: signInError(error, "Could not start device verification"),
+      diag: signInDiag(error),
       restart: isChallengeDead(error),
     };
   }
@@ -530,6 +554,7 @@ export async function submitDeviceAction(
     return {
       ok: false,
       error: signInError(error, "That device could not be verified"),
+      diag: signInDiag(error),
       restart: isChallengeDead(error),
     };
   }

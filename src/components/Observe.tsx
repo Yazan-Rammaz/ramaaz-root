@@ -463,3 +463,51 @@ export function Observe({ correlation }: { correlation?: string }) {
 
     return null;
 }
+
+/**
+ * Report a failure the USER was shown.
+ *
+ * ── The gap this closes ─────────────────────────────────────────────────────
+ * A Server Action always answers HTTP 200 — the RSC protocol puts the outcome
+ * in the body, not the status — so a refusal from the backend reaches the
+ * collector looking like a successful request. The evidence that anything went
+ * wrong is a sentence on somebody's screen, which nothing records.
+ *
+ * That happened: a private code was rejected with "That code is not valid.
+ * Message the system to get a new one." and the diagnostics showed a clean
+ * session, because the action's 200 was the only thing the fetch hook saw.
+ *
+ * So both halves are sent. `screenMessage` records what the person read, which
+ * is the thing they will quote when they report it. The console line carries
+ * what the BACKEND said — status, error code, correlation id — which is the
+ * thing you need to fix it, and which `signInError` had already flattened away.
+ */
+export function reportUserError(
+    shown: string,
+    diag?: {
+        status?: number;
+        code?: string;
+        correlationId?: string;
+        backendMessage?: string;
+    },
+): void {
+    screenMessage(shown);
+
+    const real = diag && Object.values(diag).some((v) => v !== undefined);
+    if (real) {
+        // console.error, not note(): this is a failure, and the collector marks
+        // the session as having one. A session that refused somebody's sign-in
+        // should not read as clean.
+        console.error(
+            `[shown to user] ${shown}`,
+            {
+                status: diag.status,
+                code: diag.code,
+                correlationId: diag.correlationId,
+                backend: diag.backendMessage,
+            },
+        );
+    } else {
+        console.error(`[shown to user] ${shown}`);
+    }
+}

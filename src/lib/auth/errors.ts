@@ -46,6 +46,44 @@ export function isChallengeDead(error: unknown): boolean {
   );
 }
 
+/**
+ * What REALLY came back, for the log — as distinct from what goes on screen.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ * A Server Action answers the browser with HTTP 200 whatever happened inside
+ * it: the RSC protocol carries the outcome in the body, not the status. So a
+ * sign-in that the backend refused with 401 and a real reason arrives at the
+ * collector looking like a perfectly successful request, and the only trace of
+ * the refusal is a sentence rendered on a screen nobody is watching.
+ *
+ * That is not hypothetical — a private code was rejected with "That code is
+ * not valid. Message the system to get a new one." and the diagnostics showed
+ * nothing at all, because `signInError` had already flattened an ApiError into
+ * a display string and thrown the status, the code and the correlation id away.
+ *
+ * Returned alongside the message so the client can report both: the sentence
+ * the person read, and the answer the backend actually gave.
+ */
+export type SignInDiag = {
+  status?: number;
+  code?: string;
+  correlationId?: string;
+  /** The backend's own wording, which is often more specific than ours. */
+  backendMessage?: string;
+};
+
+export function signInDiag(error: unknown): SignInDiag {
+  if (!(error instanceof ApiError)) {
+    return { backendMessage: error instanceof Error ? error.message : undefined };
+  }
+  return {
+    status: error.status,
+    code: errorCode(error),
+    correlationId: correlationId(error),
+    backendMessage: error.message,
+  };
+}
+
 /** What to put on the screen. `fallback` covers non-API failures. */
 export function signInError(error: unknown, fallback: string): string {
   if (error instanceof BackendNotConfiguredError) {
