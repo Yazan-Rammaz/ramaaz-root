@@ -212,11 +212,59 @@ function describe(args: unknown[]): { msg: string; name?: string; stack?: string
 
 let started = false;
 
+/**
+ * Settings fetched from the service, which the dashboard can change at any
+ * time. Starts permissive so the collector works from the first millisecond
+ * rather than waiting on a round trip, then narrows when the real answer lands.
+ */
+type RemoteConfig = {
+    enabled: boolean;
+    levels?: Array<"log" | "info" | "warn" | "error">;
+    captureBodies?: boolean;
+    captureHeaders?: boolean;
+    captureScreens?: boolean;
+    sampleRate?: number;
+    denyPaths?: string[];
+};
+
+let remote: RemoteConfig = { enabled: true };
+let remoteDeny: RegExp[] = [];
+
+/**
+ * Snapshot what is on screen.
+ *
+ * Not a picture — a copy of the DOM. A real screenshot needs html2canvas
+ * (~200KB) or a permission prompt, and neither is worth it for something that
+ * runs on every page. The markup replays in the dashboard with the app's own
+ * stylesheets, which for a form or an error screen is the same information.
+ *
+ * Scripts are stripped before it leaves, and passwords are emptied: a snapshot
+ * of a login screen would otherwise carry whatever was typed into it.
+ */
+function captureScreen(): string | null {
+    try {
+        const doc = document.documentElement.cloneNode(true) as HTMLElement;
+        for (const el of Array.from(doc.querySelectorAll("script,noscript"))) el.remove();
+        for (const el of Array.from(doc.querySelectorAll("input"))) {
+            const input = el as HTMLInputElement;
+            if (input.type === "password") input.setAttribute("value", "");
+            else input.setAttribute("value", input.value ?? "");
+        }
+        // A <base> so the captured page still resolves its own stylesheets and
+        // images when it is framed from a different origin.
+        const base = `<base href="${location.origin}">`;
+        return `<!doctype html><html>${base}${doc.innerHTML}</html>`.slice(0, 380_000);
+    } catch {
+        return null;
+    }
+}
+
 export function observe(options: ObserveOptions): void {
     if (started || typeof window === "undefined") return;
     started = true;
 
     const endpoint = options.url.replace(/\/$/, "") + "/ingest";
+    const base = options.url.replace(/\/$/, "");
     const levels = options.levels ?? DEFAULTS.levels;
     const maxBody = options.maxBody ?? DEFAULTS.maxBody;
     const flushMs = options.flushMs ?? DEFAULTS.flushMs;
@@ -305,11 +353,82 @@ export function observe(options: ObserveOptions): void {
         console[level] = (...args: unknown[]) => {
             original(...args);
             const { msg, name, stack } = describe(args);
+            if (level === "error") maybeSnapshot(msg);
             record({ t: Date.now(), kind: "console", level, msg, name, stack });
         };
     }
 
+    /**
+     * Poll the project's settings.
+     *
+     * Every sixty seconds, so a toggle in the dashboard reaches a browser that
+     * is already open — the whole point of moving settings off the app. A
+     * failed poll keeps whatever was last known rather than falling back to
+     * defaults, so a blip in the service cannot silently widen what an app
+     * captures.
+     */
+    async function pollConfig() {
+        try {
+            const r = await originalFetch(`${base}/config/${encodeURIComponent(options.key)}`);
+            if (!r.ok) return;
+            remote = await r.json();
+            remoteDeny = (remote.denyPaths ?? [])
+                .map((p) => {
+                    try {
+                        return new RegExp(p);
+                    } catch {
+                        return null;
+                    }
+                })
+                .filter((r): r is RegExp => r !== null);
+        } catch {
+            /* keep the last known settings */
+        }
+    }
+
+    /**
+     * Resolved per call, not once at startup, because the answer changes when
+     * the config poll lands. A local option always wins where it is set: an
+     * app's own refusal — root excluding its KYC routes — must not be
+     * overridable from a web page.
+     */
+    const capBodies = () =>
+        options.captureBodies !== undefined ? options.captureBodies : !!remote.captureBodies;
+    const capHeaders = () =>
+        options.captureHeaders !== undefined ? options.captureHeaders : !!remote.captureHeaders;
+
+    let lastSnapshot = 0;
+    function maybeSnapshot(reason: string) {
+        if (!remote.captureScreens) return;
+        // At most one every ten seconds. An error loop would otherwise post a
+        // few hundred kilobytes per occurrence.
+        if (Date.now() - lastSnapshot < 10_000) return;
+        lastSnapshot = Date.now();
+        const html = captureScreen();
+        if (!html) return;
+        try {
+            navigator.sendBeacon(
+                `${base}/snapshot`,
+                new Blob(
+                    [
+                        JSON.stringify({
+                            key: options.key,
+                            sid,
+                            html,
+                            viewport: `${innerWidth}x${innerHeight}`,
+                            reason: reason.slice(0, 300),
+                        }),
+                    ],
+                    { type: "text/plain" },
+                ),
+            );
+        } catch {
+            /* over the beacon size limit, or the page is going away */
+        }
+    }
+
     window.addEventListener("error", (event) => {
+        maybeSnapshot(String(event.message));
         record({
             t: Date.now(),
             kind: "error",
@@ -323,6 +442,7 @@ export function observe(options: ObserveOptions): void {
 
     window.addEventListener("unhandledrejection", (event) => {
         const { msg, name, stack } = describe([event.reason]);
+        maybeSnapshot(msg);
         record({ t: Date.now(), kind: "rejection", level: "error", msg, name, stack });
     });
 
@@ -341,16 +461,17 @@ export function observe(options: ObserveOptions): void {
 
         // One check for the whole exchange: a path worth withholding a response
         // from is a path worth withholding the request from too.
-        const denied = options.denyBodyPaths?.some((re) => re.test(path)) ?? false;
+        const denied = (options.denyBodyPaths?.some((re) => re.test(path)) ?? false)
+            || remoteDeny.some((re) => re.test(path));
 
         // Captured BEFORE the call. `init.body` is readable now; after the
         // fetch, a stream body has been consumed and there is nothing to read.
         let reqBody: string | undefined;
         let reqHeaders: Record<string, string> | undefined;
-        if (!denied && options.captureBodies && typeof init?.body === "string") {
+        if (!denied && capBodies() && typeof init?.body === "string") {
             reqBody = scrub(init.body).slice(0, maxBody);
         }
-        if (!denied && options.captureHeaders) {
+        if (!denied && capHeaders()) {
             const h =
                 init?.headers instanceof Headers
                     ? init.headers
@@ -366,7 +487,7 @@ export function observe(options: ObserveOptions): void {
             const response = await originalFetch(input, init);
             let body: string | undefined;
             if (
-                options.captureBodies &&
+                capBodies() &&
                 !denied &&
                 // Reading the body consumes the stream, so work on a clone —
                 // otherwise the collector would steal the response from the app
@@ -381,7 +502,7 @@ export function observe(options: ObserveOptions): void {
                 }
             }
             const resHeaders =
-                !denied && options.captureHeaders
+                !denied && capHeaders()
                     ? headersToObject(response.headers, maxBody)
                     : undefined;
             const detail =
@@ -449,6 +570,16 @@ export function observe(options: ObserveOptions): void {
 
     // pagehide, not unload: bfcache and mobile Safari never fire unload, and
     // mobile Safari is most of what this will run on.
+    /**
+     * Start polling settings.
+     *
+     * Here, at the end, and not earlier: `pollConfig` uses `originalFetch`, and
+     * calling it before that is bound would throw on the very first line the
+     * collector runs — taking the page's own console with it.
+     */
+    void pollConfig();
+    setInterval(() => void pollConfig(), 60_000);
+
     window.addEventListener("pagehide", () => void flush(true));
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "hidden") void flush(true);
@@ -511,17 +642,20 @@ export function Observe({ correlation }: { correlation?: string }) {
             key: OBSERVE_KEY,
 
             /**
-             * Payloads and headers ARE captured here, and the exclusions below
-             * are what make that defensible.
+             * ⚠️ `captureBodies` and `captureHeaders` are DELIBERATELY ABSENT.
              *
-             * Without them a Server Action is unreadable: it answers HTTP 200
-             * and puts the real outcome in the RSC body, so the body is the
-             * only place the failure exists. That is the difference between a
-             * log that says "POST /login 200" and one that shows why the code
-             * was refused.
+             * They are now decided in the Observe dashboard, per project, and
+             * an option set here would override that — silently, so the toggle
+             * would appear to do nothing and the next person would go looking
+             * for a bug in the service.
+             *
+             * The collector fetches the project's settings on start and every
+             * minute after, so turning bodies on to chase something takes
+             * effect here within a minute and needs no deploy of this app.
+             *
+             * What stays below is the part that must NOT be switchable from a
+             * web page.
              */
-            captureBodies: true,
-            captureHeaders: true,
 
             /**
              * ⚠️ The KYC routes, and they are NOT optional.
