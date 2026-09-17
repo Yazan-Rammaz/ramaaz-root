@@ -925,20 +925,23 @@ export default function IDCaptureScreen() {
                 // alone and the frame became 350 x 246 in Safari, a different
                 // rectangle from the one the ID has to be aligned inside.
                 //
-                // `flexShrink: 1`, not the 0.2 it used to be. The spacers above
-                // carry far heavier weights, so they still give up their white
-                // space first and the frame remains the last thing to go — but
-                // a factor of 1 means the frame can absorb the whole remaining
-                // shortfall BY ITSELF once those spacers have bottomed out and
-                // frozen. That is what stops the foot of the screen being
-                // pushed under the browser toolbar; see the note above the
-                // header, and FlexSpace on why factors under 1 under-absorb.
+                // `shrink` (flex-shrink: 1), replacing an inline
+                // `style={{ flexShrink: 0.2 }}` — 0.2 had no utility, 1 does, so
+                // this is a class like everything else on the screen.
+                //
+                // The spacers above carry far heavier weights, so they still
+                // give up their white space first and the frame remains the
+                // last thing to go — but a factor of 1 means the frame can
+                // absorb the whole remaining shortfall BY ITSELF once those
+                // spacers have bottomed out and frozen. That is what stops the
+                // foot of the screen being pushed under the browser toolbar;
+                // see the note above the header, and FlexSpace on why factors
+                // under 1 under-absorb.
                 //
                 // `min-h-0` is load-bearing next to it: a flex item defaults to
                 // `min-height: auto` and would refuse to shrink past its
                 // content no matter what factor it carries.
-                className="relative aspect-[350/400] h-400 w-auto max-w-350 min-h-0 mx-auto rad-30 overflow-hidden bg-[#000000] mb-10"
-                style={{ flexShrink: 1 }}
+                className="relative aspect-[350/400] h-400 w-auto max-w-350 min-h-0 shrink mx-auto rad-30 overflow-hidden bg-[#000000] mb-10"
             >
                 <video
                     ref={videoRef}
