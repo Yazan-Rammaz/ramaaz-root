@@ -23,8 +23,26 @@ export const idConfig = {
     // Screen-displayed IDs have 3–5× higher edge contrast; using screen-tuned
     // values here caused 'too_blurry' false-rejections on real documents.
     quality: {
-        /** Minimum mean luminance [0–255]. Below this → "Too dark". */
-        minBrightness: 45,
+        /**
+         * Minimum mean luminance [0–255]. Below this → "Too dark".
+         *
+         * ⚠️ This is the mean of the WHOLE FRAME, not of the card. A document
+         * held up in a dim room — dark desk, evening light, the card itself
+         * perfectly legible — averages well under the old 45 and was told to
+         * "move to a brighter area" while a phone scanner app captured the same
+         * scene without complaint. The room being dark is not the same as the
+         * ID being unreadable, and this check cannot tell the difference.
+         *
+         * 25 keeps the genuinely hopeless frames (lens covered, lights off)
+         * flagged while letting a legible card in a dim room through.
+         *
+         * Note this gate is ADVISORY on the ID screen: nothing blocks on it.
+         * Auto-capture waits on the scanner's lock-on and stability, so all a
+         * wrong value here does is put wrong words on the screen — which is
+         * its own bug, since it sends the user off to fix the lighting when
+         * the actual problem was edge contrast (see the worker's Canny ladder).
+         */
+        minBrightness: 25,
         /** Maximum mean luminance [0–255]. Above this → "Too bright". */
         maxBrightness: 240,
         /**
@@ -99,6 +117,26 @@ export const idConfig = {
         aspectRatioMax: 1.75,
         /** Detected card bounding box must fill at least this fraction of the ROI. */
         minFillRatio: 0,
+        /**
+         * How far the detected quad's centre may sit from the frame's centre
+         * before it stops counting as "the user is presenting their ID".
+         *
+         * Measured per axis and normalised to the frame's HALF size, so the
+         * number reads as a fraction of the way to the edge: 0 is dead centre,
+         * 1 is the centroid sitting on the frame edge. The larger of the two
+         * axes is the one tested, so a card that is centred vertically but off
+         * to one side is still rejected.
+         *
+         * This is what stops the scanner locking onto whatever else is on the
+         * desk. OpenCV will happily return a clean 4-corner quad for a book, a
+         * laptop, or a sheet of paper at the edge of frame; the thing that
+         * distinguishes the document the user is actually offering up is that
+         * they hold it in the MIDDLE, where the guide is.
+         *
+         * Raise it to accept sloppier framing, lower it to demand tighter
+         * centring. Above ~0.35 it stops meaningfully filtering.
+         */
+        maxCenterOffset: 0.22,
     },
 
     // ── Moiré / photo-of-screen detection ────────────────────────────────────

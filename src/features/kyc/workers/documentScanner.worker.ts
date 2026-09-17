@@ -398,9 +398,43 @@ function largestQuadFromFrame(
         const minArea = width * height * minAreaRatio;
         const maxArea = width * height * 0.95;
 
-        // Stable single-pass detection (the original, non-jumpy algorithm): pick
-        // the best card-shaped 4-corner convex quad by aspect + centeredness.
-        let best = detectCardQuadPass(gray, width, height, minArea, maxArea, 30, 120);
+        /*
+          ── Contrast ladder, not a single guess ──────────────────────────────
+          This used to be ONE pass at Canny(30, 120), even though the pass
+          function takes its thresholds as arguments precisely "so a low-contrast
+          retry can use lower values" (see its doc comment). The retry was never
+          written, so the scanner had exactly one idea of what an edge looks like.
+
+          That is the whole difference against a dedicated scanner app on a dim
+          desk or an ID held in a dark room: a fixed hysteresis pair is tuned for
+          one lighting level. Above it the card's border is found instantly;
+          below it Canny suppresses the border as noise and the frame comes back
+          with no quad at all — not a worse quad, NONE — so the brackets never
+          leave their resting corners and the screen looks broken while a phone
+          camera app two icons away outlines the same card immediately.
+
+          Each rung is tried only if the one before found nothing, so a
+          well-lit card still resolves on the first pass and costs exactly what
+          it cost before. The extra work is spent only on the frames that were
+          previously being thrown away.
+
+          Going lower than this is not free: Canny below ~8 starts promoting
+          sensor noise and fabric/wood grain into contours, and the aspect +
+          convexity + interior-density gates downstream are what stop those
+          becoming false locks. If a real ID is still missed, prefer raising the
+          light on the card over adding a fourth rung.
+        */
+        const CANNY_LADDER: ReadonlyArray<readonly [number, number]> = [
+            [30, 120], // normal indoor lighting — the original pass
+            [15, 60], // dim room, or a card darker than its background
+            [8, 30], // very low contrast: dark desk, ID in shadow, night
+        ];
+
+        let best: [Point, Point, Point, Point] | null = null;
+        for (const [low, high] of CANNY_LADDER) {
+            best = detectCardQuadPass(gray, width, height, minArea, maxArea, low, high);
+            if (best) break;
+        }
 
         // Reject the full-frame border (≥3 corners hug the edge) but allow a card
         // whose corner is slightly cut off (≤2 corners at the boundary).

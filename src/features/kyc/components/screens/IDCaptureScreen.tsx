@@ -155,6 +155,72 @@ export default function IDCaptureScreen() {
                 : kycConfig.id.openCV.minInteriorDensityFront,
     });
 
+    /*
+      ── Detection, derived ───────────────────────────────────────────────────
+      Declared HIGH, immediately under the scanner they read from, because both
+      the status-line effect below and the auto-capture effect further down
+      depend on `isLockedOn`. A `const` referenced in an effect's dependency
+      array is evaluated during RENDER, so if these sat lower in the component
+      the array would touch them before their initialiser ran and throw on the
+      temporal dead zone — a crash, not a warning.
+    */
+    const isCardDetected = !!docCorners;
+    const cardFillRatio =
+        docCorners && scannerOverlay
+            ? getQuadArea(docCorners) / (scannerOverlay.width * scannerOverlay.height)
+            : 0;
+    const isCardCloseEnough = cardFillRatio >= kycConfig.id.cardGeometry.minFillRatio;
+
+    /*
+      ── Is the thing in frame the ID, or just the nearest rectangle? ──────────
+      OpenCV returns a clean quad for anything with four corners — a book, a
+      laptop lid, a sheet of paper at the edge of the picture. Treating every
+      one of those as "the card" is what made the brackets skitter around the
+      frame chasing the furniture.
+
+      The signal that separates the document the user is OFFERING from the ones
+      merely lying in shot is where it is: they hold it up in the MIDDLE, over
+      the guide. So the quad's centroid is measured against the frame's centre,
+      normalised to the frame's half-size on each axis, and the WORSE axis is
+      the one tested — a card centred top-to-bottom but shoved to one side is
+      still not being presented.
+    */
+    const cardCenterOffset =
+        docCorners && scannerOverlay
+            ? (() => {
+                  const cx =
+                      (docCorners.topLeft.x +
+                          docCorners.topRight.x +
+                          docCorners.bottomLeft.x +
+                          docCorners.bottomRight.x) /
+                      4;
+                  const cy =
+                      (docCorners.topLeft.y +
+                          docCorners.topRight.y +
+                          docCorners.bottomLeft.y +
+                          docCorners.bottomRight.y) /
+                      4;
+                  const halfW = scannerOverlay.width / 2;
+                  const halfH = scannerOverlay.height / 2;
+                  if (halfW <= 0 || halfH <= 0) return 1;
+                  return Math.max(Math.abs(cx - halfW) / halfW, Math.abs(cy - halfH) / halfH);
+              })()
+            : 1;
+    const isCardCentered = cardCenterOffset <= kycConfig.id.cardGeometry.maxCenterOffset;
+
+    /*
+      LOCK-ON — the single gate for "we believe this is the ID, and we are about
+      to photograph it". The brackets, the auto-capture and the status line all
+      read this and nothing else, so what the user SEES and what the screen DOES
+      can never disagree: if the brackets have not snapped onto the card, no
+      capture is being counted down, and nothing claims a card was found.
+
+      Stability is deliberately NOT part of it. The brackets should land the
+      moment the card is recognised — that is the feedback that tells the user
+      to hold still — and the one-second hold is measured after they land.
+    */
+    const isLockedOn = isCardDetected && isCardCloseEnough && isCardCentered;
+
     /** Maps backend rejection codes/reasons to user-facing guidance. */
     function codeToHint(
         code: string | null | undefined,
@@ -338,14 +404,43 @@ export default function IDCaptureScreen() {
                     newText = 'Align ID within frame';
                     break;
             }
-        } else if (!readyToCapture) {
-            key = 'pass:steadying';
-            debounceMs = DEBOUNCE_TRANSITION_MS;
-            newText = 'Hold steady…';
         } else {
-            key = 'pass:ready';
+            /*
+              ⚠️ This branch used to say "Card detected — scanning…", and it was
+              claiming something it cannot know.
+
+              `checkResult.pass` is a statement about the PICTURE, not about the
+              card: brightness, glare, sharpness, motion — and `detectCard`,
+              which is a cheap edge / border-stripe heuristic in imageQuality.ts,
+              not the OpenCV quad. That heuristic finds "a card" in an empty
+              frame all the time (a desk edge, a doorframe, a shadow), so the
+              screen cheerfully announced a detection with nothing in shot, then
+              sat there scanning nothing.
+
+              The authoritative "there is an ID being held in the middle of this
+              frame" signal is `isLockedOn`, and when THAT is true the
+              auto-capture effect owns this line and says "Hold steady…" while
+              it counts down. So there is nothing for this branch to add once
+              locked on — it bails and leaves the line alone.
+
+              What is left is the honest reading of a passing quality check:
+              the picture is good, we are simply waiting for the document.
+            */
+            if (isLockedOn) return;
+            key = 'pass:waiting';
             debounceMs = DEBOUNCE_TRANSITION_MS;
-            newText = 'Card detected — scanning…';
+            /*
+              Two different situations, and telling them apart matters. If a
+              quad was found but sits off to one side, "centre it" is actionable
+              advice. If NOTHING was found, the card may already be dead centre
+              and perfectly framed — the scanner simply cannot see it — and
+              telling that user to centre something they have already centred
+              reads as the app being broken, which is exactly how it looked on a
+              dim desk before the contrast ladder in the worker.
+            */
+            newText = isCardDetected
+                ? 'Hold your ID in the centre of the frame'
+                : 'Looking for your ID…';
         }
 
         // Allow the same failure key to re-fire if the pass→fail→pass cycle
@@ -359,7 +454,11 @@ export default function IDCaptureScreen() {
             setStatusText(newText);
             statusDebounceRef.current = null;
         }, debounceMs);
-    }, [checkResult, readyToCapture, pollState]);
+        // `readyToCapture` is gone from here on purpose: it timed the quality
+        // checks' own stability window, which is not something to narrate
+        // before there is a card to be steady ABOUT. The hold that matters is
+        // counted by the auto-capture effect, after lock-on.
+    }, [checkResult, isLockedOn, isCardDetected, pollState]);
 
     useEffect(() => {
         return () => {
@@ -651,14 +750,6 @@ export default function IDCaptureScreen() {
     //  blue  (#388CFF)  → AWS Textract call in progress
     //  green (#22C55E)  → ready, capture succeeded, or done
 
-    // Derived booleans — declared here so cornerColor and effects can use them.
-    const isCardDetected = !!docCorners;
-    const cardFillRatio =
-        docCorners && scannerOverlay
-            ? getQuadArea(docCorners) / (scannerOverlay.width * scannerOverlay.height)
-            : 0;
-    const isCardCloseEnough = cardFillRatio >= kycConfig.id.cardGeometry.minFillRatio;
-
     const cornerColor =
         pollState === 'success' || pollState === 'done'
             ? '#22C55E'
@@ -670,10 +761,10 @@ export default function IDCaptureScreen() {
                   ? '#EF4444' // server rejection or flip hint
                   : pollState === 'aligning' && checkResult && !checkResult.pass
                     ? '#EF4444' // local frame check failure
-                    : pollState === 'aligning' && readyToCapture && isCardCloseEnough
-                      ? '#22C55E' // ready AND card close enough
-                      : pollState === 'aligning' && isCardDetected && !isCardCloseEnough
-                        ? '#F59E0B' // detected but too far — prompt to move closer
+                    : pollState === 'aligning' && readyToCapture && isLockedOn
+                      ? '#22C55E' // locked onto the card and ready to shoot
+                      : pollState === 'aligning' && isCardDetected && !isCardCentered
+                        ? '#F59E0B' // a rectangle, but not centred — not the ID yet
                         : pollState === 'aligning' && checkResult?.pass
                           ? '#F59E0B'
                           : '#FFD700';
@@ -701,38 +792,61 @@ export default function IDCaptureScreen() {
       This is the documented exception to AGENTS.md §9 — logical utilities
       mirror UI, and this is not UI, it is an annotation drawn on a photograph.
     */
-    const topLeftStyle = docCorners
-        ? {
-              top: `${Math.max(0, docCorners.topLeft.y - cornerInset)}px`,
-              left: `${Math.max(0, docCorners.topLeft.x - cornerInset)}px`,
-              right: 'auto',
-              bottom: 'auto',
-          }
-        : {};
-    const topRightStyle = docCorners
-        ? {
-              top: `${Math.max(0, docCorners.topRight.y - cornerInset)}px`,
-              left: `${Math.max(0, docCorners.topRight.x - cornerInset - cornerBracketSize)}px`,
-              right: 'auto',
-              bottom: 'auto',
-          }
-        : {};
-    const bottomLeftStyle = docCorners
-        ? {
-              top: `${Math.max(0, docCorners.bottomLeft.y - cornerInset - cornerBracketSize)}px`,
-              left: `${Math.max(0, docCorners.bottomLeft.x - cornerInset)}px`,
-              right: 'auto',
-              bottom: 'auto',
-          }
-        : {};
-    const bottomRightStyle = docCorners
-        ? {
-              top: `${Math.max(0, docCorners.bottomRight.y - cornerInset - cornerBracketSize)}px`,
-              left: `${Math.max(0, docCorners.bottomRight.x - cornerInset - cornerBracketSize)}px`,
-              right: 'auto',
-              bottom: 'auto',
-          }
-        : {};
+    /*
+      ⚠️ These read `isLockedOn`, NOT `docCorners`. The difference is the whole
+      behaviour of this screen.
+
+      Keyed on `docCorners` the brackets tracked EVERY quad OpenCV returned,
+      several times a second, so they spent the whole session twitching around
+      the frame over books, edges of the desk and shadows. That reads as a
+      scanner that cannot make up its mind, and it trains the user to ignore
+      the one moment the brackets are actually telling them something.
+
+      Keyed on `isLockedOn` they have exactly two states: resting in the frame's
+      own corners (the `left-0`/`right-0`/`top-0`/`bottom-0` classes on the
+      elements, which is what an empty style object falls back to), or snapped
+      onto the card. The snap IS the message — "this is your ID, hold still" —
+      and the capture follows one second later. Nothing in between.
+
+      `docCorners` is still non-null inside every branch below, because
+      `isLockedOn` requires `isCardDetected`, which is `!!docCorners`.
+    */
+    const topLeftStyle =
+        isLockedOn && docCorners
+            ? {
+                  top: `${Math.max(0, docCorners.topLeft.y - cornerInset)}px`,
+                  left: `${Math.max(0, docCorners.topLeft.x - cornerInset)}px`,
+                  right: 'auto',
+                  bottom: 'auto',
+              }
+            : {};
+    const topRightStyle =
+        isLockedOn && docCorners
+            ? {
+                  top: `${Math.max(0, docCorners.topRight.y - cornerInset)}px`,
+                  left: `${Math.max(0, docCorners.topRight.x - cornerInset - cornerBracketSize)}px`,
+                  right: 'auto',
+                  bottom: 'auto',
+              }
+            : {};
+    const bottomLeftStyle =
+        isLockedOn && docCorners
+            ? {
+                  top: `${Math.max(0, docCorners.bottomLeft.y - cornerInset - cornerBracketSize)}px`,
+                  left: `${Math.max(0, docCorners.bottomLeft.x - cornerInset)}px`,
+                  right: 'auto',
+                  bottom: 'auto',
+              }
+            : {};
+    const bottomRightStyle =
+        isLockedOn && docCorners
+            ? {
+                  top: `${Math.max(0, docCorners.bottomRight.y - cornerInset - cornerBracketSize)}px`,
+                  left: `${Math.max(0, docCorners.bottomRight.x - cornerInset - cornerBracketSize)}px`,
+                  right: 'auto',
+                  bottom: 'auto',
+              }
+            : {};
 
     const verifyingBounds = docCorners
         ? {
@@ -805,13 +919,23 @@ export default function IDCaptureScreen() {
             isVerifying ||
             pollState !== 'aligning' ||
             !isArmedRef.current ||
-            flipLockoutRef.current ||
-            !isCardCloseEnough
+            flipLockoutRef.current
         ) {
             return;
         }
 
-        if (isCardDetected && isStable) {
+        /*
+          The countdown runs off `isLockedOn` — the SAME gate the brackets read
+          — so the second the user is being asked to hold for is always a
+          second the brackets are sitting on their card. Previously this ran on
+          a bare `isCardDetected`, which meant a quad found on a book started a
+          capture the user had no idea was coming.
+
+          The timer is cleared by this effect's own cleanup the instant lock-on
+          or stability is lost, so drifting off-centre cancels the shot rather
+          than firing a blurred one.
+        */
+        if (isLockedOn && isStable) {
             setStatusText('Hold steady...');
 
             const autoCaptureTimer = setTimeout(() => {
@@ -819,14 +943,25 @@ export default function IDCaptureScreen() {
             }, 1000);
 
             return () => clearTimeout(autoCaptureTimer);
-        } else if (isCardDetected && !isStable) {
-            setStatusText('Move closer to the document');
-        } else if (isCardDetected && !isStable) {
-            // Optional: Tell the user to stop moving
-            setStatusText('Hold still, focusing...');
+        }
+
+        if (isCardDetected && !isCardCentered) {
+            // Something rectangular is in shot, but off to one side — almost
+            // always furniture rather than the document being offered up.
+            setStatusText('Hold your ID in the centre of the frame');
+        } else if (isLockedOn && !isStable) {
+            setStatusText('Hold still…');
         }
         // CRITICAL: handleCaptureClick is NOT in this array — the ref handles it
-    }, [isCardDetected, isCardCloseEnough, isActive, isVerifying, pollState, isStable]);
+    }, [
+        isLockedOn,
+        isCardDetected,
+        isCardCentered,
+        isActive,
+        isVerifying,
+        pollState,
+        isStable,
+    ]);
 
     return (
         <div className="flex flex-col items-center justify-start h-full bg-white">
