@@ -724,7 +724,9 @@ export default function AwsFaceLivenessScreen() {
         startCamera,
         stopCamera,
         captureFrame,
-    } = useCamera({ facingMode: 'user' });
+        // Same 350 x 400 frame as FaceScanScreen — ask the camera for that
+        // shape instead of cropping a landscape stream into it. See useCamera.
+    } = useCamera({ facingMode: 'user', aspectRatio: 350 / 400 });
 
     const [phase, setPhase] = useState<Phase>('init');
     const [currentChallengeIdx, setCurrentChallengeIdx] = useState(-1);

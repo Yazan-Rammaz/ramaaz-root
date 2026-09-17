@@ -118,7 +118,9 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
         startCamera,
         stopCamera,
         captureFrame,
-    } = useCamera({ facingMode: 'user' });
+        // The frame below is 350 x 400, so ask the camera for that shape rather
+        // than centre-cropping a 1.67 landscape stream into it — see useCamera.
+    } = useCamera({ facingMode: 'user', aspectRatio: 350 / 400 });
 
     // The landmarker is a module-level singleton, so asking for it here costs
     // nothing beyond the hook — `useFaceGate` is already holding the same

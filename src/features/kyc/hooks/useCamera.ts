@@ -7,6 +7,15 @@ interface UseCameraOptions {
     facingMode: 'user' | 'environment';
     width?: number;
     height?: number;
+    /**
+     * Preferred stream aspect ratio (width / height). Pass the ratio of the
+     * frame the video is rendered into — e.g. `350 / 400` for the 350x400
+     * viewfinders — so the camera produces that shape and `object-cover` has
+     * nothing left to crop. Omitted means "whatever the camera prefers", which
+     * is right for ID capture: the card is landscape, so a wide stream spends
+     * more pixels on it. See the note at the getUserMedia call.
+     */
+    aspectRatio?: number;
 }
 
 interface UseCameraReturn {
@@ -45,6 +54,7 @@ export function useCamera({
     facingMode: requestedFacing,
     width = 1500,
     height = 900,
+    aspectRatio,
 }: UseCameraOptions): UseCameraReturn {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -105,6 +115,36 @@ export function useCamera({
                     facingMode: effectiveFacing,
                     width: { ideal: width },
                     height: { ideal: height },
+                    /*
+                      Ask the CAMERA for the shape the frame actually is, rather
+                      than cropping a landscape stream down to it afterwards.
+
+                      Every frame these screens render into is 350 x 400 — a
+                      portrait 0.875 — but the request above asks for 1500 x 900,
+                      a landscape 1.67. `object-cover` then has to discard about
+                      48% of the width to fit, which is why a face here fills the
+                      frame far more tightly, and reads as taller and narrower,
+                      than the same face in the phone's own camera app: it is a
+                      heavy centre crop of a wide picture, not a portrait one.
+
+                      Asking at the source is the fix PhoneCamera already uses
+                      for the hand-off (`aspectRatio: { ideal: 350 / 400 }`), and
+                      this is the same constraint for the same reason. The
+                      browser then hands back a stream already shaped like the
+                      frame, `object-cover` has almost nothing left to trim, and
+                      the proportions match what the user expects.
+
+                      `ideal`, not `exact`: a camera that cannot produce this
+                      ratio must still return SOMETHING. `exact` would make
+                      getUserMedia reject with OverconstrainedError and the
+                      screen would show a dead frame rather than a cropped one.
+
+                      Callers that want a different shape pass their own — ID
+                      capture deliberately does NOT use this, because the card is
+                      landscape and a portrait stream spends fewer pixels on it,
+                      which costs OCR accuracy and makes `minAreaRatio` harder.
+                    */
+                    ...(aspectRatio ? { aspectRatio: { ideal: aspectRatio } } : {}),
                 },
                 audio: false,
             });
@@ -122,7 +162,7 @@ export function useCamera({
             setError(message);
             setIsActive(false);
         }
-    }, [effectiveFacing, width, height]);
+    }, [effectiveFacing, width, height, aspectRatio]);
 
     /**
      * Captures the current video frame to a JPEG data URL.
