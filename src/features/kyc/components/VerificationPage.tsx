@@ -223,7 +223,24 @@ export default function VerificationPage({
                     animate="center"
                     exit="exit"
                     transition={transition}
-                    className="absolute inset-0 w-full h-full"
+                    /*
+                      A floor, not the fix — it should never engage. The real
+                      fix was neutralising the `min-height: 100vh` that
+                      `@aws-amplify/ui-react/styles.css` puts on <body> (see
+                      globals.css): it outranked our `height: 100svh`, so the
+                      shell was laid out to the LARGE viewport and the <FlexSpace>
+                      shares had no shortfall to absorb. With that gone they
+                      absorb it, and these screens fit at full width.
+
+                      This stays because the failure mode without it is silent
+                      and total: `html`, `body`, `(auth)/layout.tsx` and the
+                      wrapper just above are ALL `overflow: hidden`, so with no
+                      scroll container anywhere in the chain, a screen that
+                      outgrows its shares loses its foot — and the foot is where
+                      the primary button lives. A scrollbar that never appears
+                      is a cheap price for never losing a button again.
+                    */
+                    className="thin-scroll absolute inset-0 w-full h-full overflow-y-auto"
                 >
                     {renderStep()}
                 </motion.div>

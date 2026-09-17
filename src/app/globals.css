@@ -55,6 +55,23 @@ html {
     }
 }
 
+/* ── Why there is NO height term in the rules above ─────────────────────────
+   It was tried, and it is the wrong trade. Scaling on min(width-fit,
+   height-fit) — i.e. `min(100vw / 26.875, 100svh / 58.25)`, where 58.25 is the
+   932 canvas height over 16 — does make the whole frame fit with no scrolling,
+   but on a phone HEIGHT is the binding term, so the whole design drops to
+   ~0.80 instead of ~0.93: the 430 column renders ~344 wide on a 393 screen,
+   leaving side whitespace, exposing the auth layout's brand mark beside it,
+   and making every label visibly small.
+
+   Width-only is correct. The screen should fill the width it was drawn for,
+   and the vertical difference belongs to the <FlexSpace> shrink shares — which
+   is exactly what they exist for, and which finally works now that the
+   `min-height: 100vh` below is neutralised. Before that fix there was no
+   shortfall for them to absorb, because the shell was laid out to the LARGE
+   viewport; that is why the spacers appeared to do nothing and the button went
+   behind the toolbar regardless of how they were tuned. */
+
 /* App shell = a FIXED, non-scrollable box pinned to the viewport.
    This is what keeps the mobile soft keyboard from shoving the page upward:
    iOS Safari ignores `overflow:hidden` AND the `interactive-widget` viewport
@@ -105,6 +122,42 @@ body {
     body {
         height: 100svh;
     }
+}
+
+/* ⚠️ THE THIRD TIME THIS BUG HAS BEEN INTRODUCED. Do not delete this rule.
+   ---------------------------------------------------------------------------
+   `@aws-amplify/ui-react/styles.css` — pulled in globally by
+   `features/kyc/components/LivenessCamera.tsx` for the Face Liveness widget —
+   ships its own reset, and that reset contains:
+
+       body { min-height: 100vh; ... }
+
+   `min-height` BEATS `height`, so the `100svh` directly above it was dead on
+   arrival. And `100vh` on iOS is the LARGE viewport — the height the page would
+   have if the browser toolbars were hidden. They are not hidden, so the shell
+   laid out ~110px taller than the visible area in Safari and ~200px taller in
+   Chrome for iOS, and everything the design puts at the foot sat behind the
+   toolbar. Desktop Chrome has no toolbar over the content, `100vh` == the
+   visible height, and the screens looked perfect — which is exactly why this
+   kept getting missed.
+
+   Measured from the symptom: the bottom spacer on the ID capture screen had to
+   be raised from 12 to ~120 for the button to clear Safari's bar, and to ~212
+   for Chrome's. Those deltas ARE lvh - svh on each browser.
+
+   The previous two sightings were our own: `min-h-full` on <html> in
+   `app/layout.tsx` (see the comment there), and before that the `inset: 0`
+   sizing on `body` above. Same mechanism every time — a min-height resolved
+   against the large viewport silently outranking an svh height.
+
+   `html body` (specificity 0,0,2) rather than `body` (0,0,1) is deliberate:
+   Amplify's stylesheet is imported from a component, so it can land AFTER this
+   file in the bundle, and at equal specificity source order would hand the win
+   back to it. Nothing needs a min-height here in any case — the element is
+   `position: fixed` with an explicit height and `overflow: hidden`, so it can
+   neither scroll nor grow whatever this says. */
+html body {
+    min-height: 0;
 }
 
 /* Scrolling still works, the bar itself is just never drawn — the OS default

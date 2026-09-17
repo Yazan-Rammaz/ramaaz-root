@@ -893,12 +893,35 @@ export default function IDCaptureScreen() {
               browser's toolbar. Measured, not guessed: the screen root was
               656px with a 727px scrollHeight.
 
-              The frame now carries a share of 1 on its own, so whatever else
+              The frame keeps a share of exactly 1 on its own, so whatever else
               has bottomed out it can still finish absorbing alone and nothing
-              is ever pushed off the screen. That is the trade this screen
-              wants: a smaller camera window, never a hidden button.
+              is ever pushed off the screen. Do NOT lower it below 1 to protect
+              the frame further — that is the same cliff as the paragraph above,
+              and it trades a slightly smaller camera for a missing button.
+
+              ── Why the spacers carry 40 and the frame carries 1 ──────────────
+              The frame should stay the size it was DRAWN, and the white space
+              around it should disappear first. Flexbox has no "spend this one
+              last" — it splits the shortfall proportionally, all at once, by
+              `share x size`. So "last" has to be bought with weight:
+
+                  100 spacer   40 x 100 = 4000
+                  32  spacer   40 x  32 = 1280
+                  frame         1 x 400 =  400   <- 6% of the total
+
+              On an iPhone (about 81 of shortfall) the frame therefore gives up
+              ~6 of its 400 and the two spacers absorb the rest — a camera
+              window at 394 instead of the 333 it sat at when the shares were
+              0.8 / 0.2, which put 82% of the weight on the frame itself.
+
+              Their capacity is 132 together, so they cover any shortfall up to
+              that ALONE and the frame is untouched. Past it they freeze at zero
+              and the frame's share of 1 takes over and finishes the job by
+              itself — which is what keeps a very short screen fitting rather
+              than clipping. The frame is the last thing to give, not the first,
+              and it still cannot be the thing that overflows.
             */}
-            <FlexSpace size={100} share={4} />
+            <FlexSpace size={100} share={10} />
             {/* Header */}
             <h1 className="fz-30 leading-none font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
                 Identity Verification !
@@ -1333,7 +1356,7 @@ export default function IDCaptureScreen() {
               space lands here anyway. What changed is that the space is now
               slack the frame never has to pay for.
             */}
-            <FlexSpace size={32} share={2} />
+            <FlexSpace size={32} share={60} />
             {/* Camera error */}
             <div className="mt-auto flex shrink-0 items-center flex-col justify-end">
                 {/* Privacy badge */}
