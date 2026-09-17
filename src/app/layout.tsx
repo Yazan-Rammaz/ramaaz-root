@@ -57,7 +57,32 @@ export default async function RootLayout({
             dir={localeDirection(locale)}
             className={`${appSans.variable} h-full antialiased`}
         >
-            <body className="bg-background text-foreground flex min-h-full flex-col">
+            {/*
+              NO `min-h-full` here. It looks harmless next to the `height: 100svh`
+              globals.css gives this element, and it silently defeats it.
+
+              `body` is `position: fixed`, so a percentage height resolves against
+              the INITIAL CONTAINING BLOCK — which on iOS is the LARGE viewport,
+              the height the page would have if the browser's toolbar were hidden.
+              `min-height` then beats `height`, so the shell laid out ~100-150px
+              taller than the part you can actually see. That is the exact bug the
+              comment above `body` in globals.css says it fixed, reintroduced from
+              a second file.
+
+              What it cost: every screen below is height-bounded by this element,
+              and the ID capture screen's spacers and viewfinder shrink to fit that
+              bound (see FlexSpace). Laid out against the large viewport there was
+              no shortfall to absorb, so nothing shrank, the frame stayed at its
+              full 350x400 — and "Your Privacy Is Completely Safe" and the "Start
+              Live Detection Your ID" button were pushed behind the browser bar.
+              Safari's bar is thin, so half the button showed; Chrome's is tall, so
+              neither did.
+
+              Nothing needs it: the element is fixed and `overflow: hidden`, so it
+              cannot scroll or grow whatever this says. The dashboard scrolls in
+              its own `overflow-auto` main, not here.
+            */}
+            <body className="bg-background text-foreground flex flex-col">
                 {/* First, so its console and fetch hooks are installed before
                     any screen below can throw. Renders nothing. */}
                 <Observe correlation={challengeId} />
