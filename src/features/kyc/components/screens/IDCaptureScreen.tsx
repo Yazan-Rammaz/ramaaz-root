@@ -680,10 +680,33 @@ export default function IDCaptureScreen() {
 
     const cornerBracketSize = 18;
     const cornerInset = 20;
+    /*
+      ── These four brackets are PHYSICAL, and must not mirror in Arabic ────────
+      Their positions come from `docCorners`, which are pixels measured on the
+      raw camera frame: `topLeft.x` counts from the left edge of the picture in
+      every language. The frame itself does not mirror either — the video and
+      the SVG mask above are painted in raw-frame space.
+
+      They used to be placed with `start-0` / `end-0`, and in RTL that is not
+      merely the wrong edge, it silently drops the coordinate: `start-0` becomes
+      `right: 0`, which with a fixed `w-18` and an inline `left` over-constrains
+      the box, and CSS resolves that by ignoring `left` when the direction is
+      RTL. So in Arabic the left-hand brackets stayed welded to the right edge
+      of the viewfinder no matter where the card was, and the screen read as
+      "it cannot see my ID" when detection was in fact working perfectly.
+
+      Hence physical `left-0`/`right-0` on the elements below, and `right:auto`
+      / `bottom: auto` written out on all four here: with only one inset per
+      axis ever set, the box can never be over-constrained in either direction.
+      This is the documented exception to AGENTS.md §9 — logical utilities
+      mirror UI, and this is not UI, it is an annotation drawn on a photograph.
+    */
     const topLeftStyle = docCorners
         ? {
               top: `${Math.max(0, docCorners.topLeft.y - cornerInset)}px`,
               left: `${Math.max(0, docCorners.topLeft.x - cornerInset)}px`,
+              right: 'auto',
+              bottom: 'auto',
           }
         : {};
     const topRightStyle = docCorners
@@ -691,12 +714,14 @@ export default function IDCaptureScreen() {
               top: `${Math.max(0, docCorners.topRight.y - cornerInset)}px`,
               left: `${Math.max(0, docCorners.topRight.x - cornerInset - cornerBracketSize)}px`,
               right: 'auto',
+              bottom: 'auto',
           }
         : {};
     const bottomLeftStyle = docCorners
         ? {
               top: `${Math.max(0, docCorners.bottomLeft.y - cornerInset - cornerBracketSize)}px`,
               left: `${Math.max(0, docCorners.bottomLeft.x - cornerInset)}px`,
+              right: 'auto',
               bottom: 'auto',
           }
         : {};
@@ -922,13 +947,18 @@ export default function IDCaptureScreen() {
                 {!flipLockout && (
                     // Same mirror as the overlay above — these brackets are positioned
                     // from docCorners, which are raw-frame coordinates.
+                    //
+                    // `dir="ltr"` for the same reason: raw-frame coordinates are
+                    // left-to-right in every language, and this subtree must not pick
+                    // up the RTL flip from <html dir> (see the note on the styles).
                     <div
+                        dir="ltr"
                         className="absolute inset-20 pointer-events-none"
                         style={{ transform: shouldMirror ? 'scaleX(-1)' : undefined }}
                     >
                         {/* Top-left */}
                         <div
-                            className="absolute top-0 start-0 w-18 h-18"
+                            className="absolute top-0 left-0 w-18 h-18"
                             style={{
                                 borderTop: `3px solid ${cornerColor}`,
                                 borderLeft: `3px solid ${cornerColor}`,
@@ -940,37 +970,37 @@ export default function IDCaptureScreen() {
                         />
                         {/* Top-right */}
                         <div
-                            className="absolute top-0 end-0 w-18 h-18"
+                            className="absolute top-0 right-0 w-18 h-18"
                             style={{
                                 borderTop: `3px solid ${cornerColor}`,
                                 borderRight: `3px solid ${cornerColor}`,
                                 borderRadius: '0 10px 0 0',
                                 transition:
-                                    'top 0.25s ease, right 0.25s ease, border-color 0.5s ease',
+                                    'top 0.25s ease, left 0.25s ease, border-color 0.5s ease',
                                 ...topRightStyle,
                             }}
                         />
                         {/* Bottom-left */}
                         <div
-                            className="absolute bottom-0 start-0 w-18 h-18"
+                            className="absolute bottom-0 left-0 w-18 h-18"
                             style={{
                                 borderBottom: `3px solid ${cornerColor}`,
                                 borderLeft: `3px solid ${cornerColor}`,
                                 borderRadius: '0 0 0 10px',
                                 transition:
-                                    'bottom 0.25s ease, left 0.25s ease, border-color 0.5s ease',
+                                    'top 0.25s ease, left 0.25s ease, border-color 0.5s ease',
                                 ...bottomLeftStyle,
                             }}
                         />
                         {/* Bottom-right */}
                         <div
-                            className="absolute bottom-0 end-0 w-18 h-18"
+                            className="absolute bottom-0 right-0 w-18 h-18"
                             style={{
                                 borderBottom: `3px solid ${cornerColor}`,
                                 borderRight: `3px solid ${cornerColor}`,
                                 borderRadius: '0 0 10px 0',
                                 transition:
-                                    'bottom 0.25s ease, right 0.25s ease, border-color 0.5s ease',
+                                    'top 0.25s ease, left 0.25s ease, border-color 0.5s ease',
                                 ...bottomRightStyle,
                             }}
                         />
