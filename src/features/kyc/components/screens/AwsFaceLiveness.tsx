@@ -1087,6 +1087,26 @@ export default function AwsFaceLivenessScreen() {
 
             {/* Camera viewport — same dimensions as FaceDetectionScreen */}
             <div
+                /*
+                  LTR in every language — the same exception IDCaptureScreen's
+                  frame carries, and for the same reason: everything in this box
+                  is drawn ON the camera picture, in the picture's coordinates,
+                  and a camera frame has no reading direction.
+
+                  It mattered more here than there, because the brackets below
+                  mix the two systems in a single element: placement is LOGICAL
+                  (`start-0` / `end-0`) while the border and the radius that
+                  SHAPE each corner are physical (`borderLeft`, `borderRadius:
+                  '10px 0 0 0'`). In Arabic the placement flipped and the shape
+                  did not, so every bracket sat on the opposite edge still
+                  drawing its original corner — four brackets all pointing out
+                  of the frame instead of into it.
+
+                  Pinning the frame fixes the mesh nodes too (they are placed
+                  with a physical `left: x%` from landmark coordinates) and the
+                  face-mesh oval, which is geometry from the video stream.
+                */
+                dir="ltr"
                 className="relative mx-auto w-350 h-400 rad-30 overflow-hidden bg-[#000000] mb-10"
                 style={{
                     borderColor: allDone ? '#A3FF38' : '#388CFF',

@@ -508,6 +508,24 @@ export function FaceLivenessScreen({
                 the edge. */}
             <div
                 ref={frameRef}
+                /*
+                  LTR in every language — same exception as the other two camera
+                  frames (IDCaptureScreen, AwsFaceLiveness), and here it covers a
+                  third party as well as us.
+
+                  AWS's widget lays its own chrome out in flex and positions the
+                  oval from the VIDEO STREAM's geometry — the same geometry the
+                  face-fit test reads. It has no RTL mode and was never written
+                  for one, so under `<html dir="rtl">` its hint, Rec badge and
+                  match-indicator mirror while the oval underneath them does
+                  not. `liveness.css` then styles a layout that is no longer the
+                  one it was written against (see its `margin-top: auto` note).
+
+                  Pinning the frame means Arabic gets byte-identical behaviour
+                  to English inside the camera. The screen's own copy is outside
+                  this box and still mirrors.
+                */
+                dir="ltr"
                 className="relative h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
                 style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
             >

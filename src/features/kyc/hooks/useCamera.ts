@@ -16,8 +16,10 @@ interface UseCameraReturn {
     error: string | null;
     /**
      * Whether the video preview should be CSS-mirrored (scaleX(-1)).
-     * True for front-facing cameras (facingMode 'user') on any device.
-     * False for back cameras (facingMode 'environment') on mobile.
+     * True when 'user' was REQUESTED — a self-view — on any device.
+     * False when 'environment' was requested, on any device, including a
+     * desktop that has to open the webcam to serve it. See the note at the
+     * assignment: mirroring follows the intent, not which camera opened.
      *
      * The captured frame is ALWAYS the raw, non-mirrored image regardless of
      * this flag — ctx.drawImage() reads native pixel data, not CSS transforms.
@@ -51,7 +53,36 @@ export function useCamera({
     const [error, setError] = useState<string | null>(null);
     const isMobile = isMobileDevice();
 
-    const shouldMirror = !isMobile ? true : requestedFacing === 'user';
+    /*
+      Mirroring follows the INTENT, not the hardware.
+
+      A mirror is right for a SELF-view: you move left, the image moves left,
+      which is the only way a person can line their own face up. It is wrong for
+      a DOCUMENT: the card comes out flipped and every word on it reads
+      backwards, so the user sees an ID that looks like the wrong side, held the
+      wrong way round, and tries to "fix" it by turning the card over.
+
+      This used to read `!isMobile ? true : ...` — mirror EVERYTHING on desktop.
+      That was conflating two different questions. `effectiveFacing` below has
+      to say 'user' on a laptop because a laptop has no back camera and asking
+      for 'environment' gets you nothing; but which camera the hardware opens
+      says nothing about whether the picture should be flipped for the viewer.
+      The result was that the ID capture screen — which asks for 'environment'
+      precisely because it is photographing a document — showed a mirrored,
+      backwards card on every desktop.
+
+      Keying on `requestedFacing` separates them: the two face screens ask for
+      'user' and still mirror on every device, ID capture asks for
+      'environment' and never mirrors on any. Nothing about this is
+      locale-dependent — `scaleX(-1)` is a physical transform and `dir` cannot
+      reach it.
+
+      The captured frame was never affected either way: `captureFrame` reads
+      native pixels through `drawImage`, not CSS transforms. The scanner overlay
+      and corner brackets DO follow this flag, so they stay in step with
+      whatever the preview is doing.
+    */
+    const shouldMirror = requestedFacing === 'user';
 
     const effectiveFacing: 'user' | 'environment' = !isMobile ? 'user' : requestedFacing;
 

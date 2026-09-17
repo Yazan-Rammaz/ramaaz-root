@@ -964,6 +964,34 @@ export default function IDCaptureScreen() {
                 // `min-h-0` is load-bearing next to it: a flex item defaults to
                 // `min-height: auto` and would refuse to shrink past its
                 // content no matter what factor it carries.
+                //
+                // ── THE WHOLE FRAME IS LTR, IN EVERY LANGUAGE ───────────────
+                // This is the documented exception to AGENTS.md §9, and it is
+                // owned here rather than piecemeal further down.
+                //
+                // Everything inside this box is drawn ON a photograph, in the
+                // photograph's own coordinates. `docCorners` and `overlay` come
+                // out of useDocumentScanner measured against `video.clientWidth`
+                // / `clientHeight` — physical pixels counted from the video's
+                // LEFT edge, in Arabic exactly as in English, because a camera
+                // frame has no reading direction. The mask path, the brackets
+                // and the crop all share that one space.
+                //
+                // Under `<html dir="rtl">` the layer drawn on top of it did
+                // not. Logical utilities (`start-`/`end-`) resolved to the
+                // opposite edge from the numbers feeding them, and worse, an
+                // inline `left` next to a `start-0` and a fixed width
+                // over-constrains the box — CSS then silently DROPS `left` in
+                // RTL, so a bracket froze at an edge instead of tracking the
+                // card. The screen read as "it cannot see my ID" while
+                // detection was working perfectly.
+                //
+                // One `dir="ltr"` here pins the video, the mask, the brackets,
+                // the progress bar, the status line and the processing preview
+                // to the same handedness as the pixels underneath them. The
+                // screen's real UI — title, tabs, thumbnails, button — sits
+                // OUTSIDE this box and still mirrors normally.
+                dir="ltr"
                 className="relative aspect-[350/400] h-400 w-auto max-w-350 min-h-0 shrink mx-auto rad-30 overflow-hidden bg-[#000000] mb-10"
             >
                 <video
