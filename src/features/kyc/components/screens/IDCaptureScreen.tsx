@@ -871,15 +871,34 @@ export default function IDCaptureScreen() {
               give, so on a short screen it scales down whole rather than
               squashing (see `aspect-[350/400]` on it below).
 
-              The shortfall is split four ways, and the shares say which of them
-              the user should notice last. The big 160 under the tabs takes most
-              of it; the frame takes a fifth; the 100 above the title and the 35
-              under the button take almost none, because those two are what stop
-              the heading colliding with Safari's toolbar and the button sitting
-              flush on the bottom edge. Shares total 1: 0.15 + 0.55 + 0.10 on
-              the spacers, 0.20 on the frame.
+              The shortfall is split, and the shares say which of them the user
+              should notice last. White space goes first: the 100 above the
+              title carries the largest weight, then the gap under the
+              thumbnails, and the frame gives up only what is left over. The 12
+              under the button stays rigid so the button never sits flush on the
+              bottom edge.
+
+              ── Read FlexSpace's note before touching these numbers ───────────
+              They are flex-shrink factors, and two things about them are not
+              what they look like. They are WEIGHTED BY SIZE, so a share on the
+              93px spacer is worth a fraction of the same share on the 372px
+              frame. And they must SUM TO >= 1 or flexbox only absorbs part of
+              the shortfall and lets the rest overflow.
+
+              That second rule is what hid the foot of this screen. The old
+              values (0.15 / 0.2 / 0.65) summed to exactly 1, which held until
+              the small spacer collapsed to zero and froze; the survivors then
+              summed to 0.35, absorption stopped, and 82px — the privacy badge
+              and the whole start button — sat below the fold, behind the
+              browser's toolbar. Measured, not guessed: the screen root was
+              656px with a 727px scrollHeight.
+
+              The frame now carries a share of 1 on its own, so whatever else
+              has bottomed out it can still finish absorbing alone and nothing
+              is ever pushed off the screen. That is the trade this screen
+              wants: a smaller camera window, never a hidden button.
             */}
-            <FlexSpace size={100} share={0.15} />
+            <FlexSpace size={100} share={4} />
             {/* Header */}
             <h1 className="fz-30 leading-none font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
                 Identity Verification !
@@ -906,11 +925,20 @@ export default function IDCaptureScreen() {
                 // alone and the frame became 350 x 246 in Safari, a different
                 // rectangle from the one the ID has to be aligned inside.
                 //
-                // It shrinks reluctantly: `flexShrink: 0.2` against the spacers'
-                // shares means the gaps give up most of any shortfall before the
-                // frame gives up any. See the note above the header.
+                // `flexShrink: 1`, not the 0.2 it used to be. The spacers above
+                // carry far heavier weights, so they still give up their white
+                // space first and the frame remains the last thing to go — but
+                // a factor of 1 means the frame can absorb the whole remaining
+                // shortfall BY ITSELF once those spacers have bottomed out and
+                // frozen. That is what stops the foot of the screen being
+                // pushed under the browser toolbar; see the note above the
+                // header, and FlexSpace on why factors under 1 under-absorb.
+                //
+                // `min-h-0` is load-bearing next to it: a flex item defaults to
+                // `min-height: auto` and would refuse to shrink past its
+                // content no matter what factor it carries.
                 className="relative aspect-[350/400] h-400 w-auto max-w-350 min-h-0 mx-auto rad-30 overflow-hidden bg-[#000000] mb-10"
-                style={{ flexShrink: 0.2 }}
+                style={{ flexShrink: 1 }}
             >
                 <video
                     ref={videoRef}
@@ -1302,7 +1330,7 @@ export default function IDCaptureScreen() {
               space lands here anyway. What changed is that the space is now
               slack the frame never has to pay for.
             */}
-            <FlexSpace size={32} share={0.65} />
+            <FlexSpace size={32} share={2} />
             {/* Camera error */}
             <div className="mt-auto flex shrink-0 items-center flex-col justify-end">
                 {/* Privacy badge */}
