@@ -64,20 +64,6 @@ const FACE_MODEL_URL =
 const FACE_MODEL_MIN_BYTES = 2 * 1024 * 1024;
 
 /**
- * Selfie Segmenter — separates the person from what is behind them.
- *
- * Used by `services/portrait.ts` to matte the captured face onto white. Tiny
- * next to everything else here (~250 KB) and from the same MediaPipe bucket as
- * the landmarker, so it is subject to the same rule: self-hosted, because
- * `script-src`/`connect-src` are `'self'` and a sign-in must not depend on a
- * third-party CDN being up.
- */
-const SELFIE_MODEL_URL =
-    'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite';
-/** The real file is ~250 KB; anything much smaller is an error page. */
-const SELFIE_MODEL_MIN_BYTES = 100 * 1024;
-
-/**
  * Blazeface — the face detector Amazon's Face Liveness component runs in the
  * browser before it will stream anything.
  *
@@ -118,36 +104,6 @@ function syncMediapipe() {
     }
     console.log(`[sync-vendor] mediapipe: ${n} files (${(bytes / 1048576).toFixed(1)} MB)`);
     return true;
-}
-
-// ── The selfie segmentation model ───────────────────────────────────────────
-async function syncSelfieModel() {
-    const dest = join(vendor, 'mediapipe', 'selfie_segmenter.tflite');
-    if (existsSync(dest) && statSync(dest).size >= SELFIE_MODEL_MIN_BYTES) {
-        console.log('[sync-vendor] selfie_segmenter.tflite: already present, skipping');
-        return true;
-    }
-    mkdirSync(join(vendor, 'mediapipe'), { recursive: true });
-    console.log('[sync-vendor] selfie_segmenter.tflite: downloading …');
-    try {
-        const res = await fetch(SELFIE_MODEL_URL, { redirect: 'follow' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const buf = Buffer.from(await res.arrayBuffer());
-        // Same guard as the others: a captive-portal HTML page written as a
-        // .tflite fails at runtime with nothing pointing back to here.
-        if (buf.length < SELFIE_MODEL_MIN_BYTES) {
-            throw new Error(`got ${buf.length} bytes, expected >= ${SELFIE_MODEL_MIN_BYTES}`);
-        }
-        writeFileSync(dest, buf);
-        console.log(`[sync-vendor] selfie_segmenter.tflite: ${(buf.length / 1024).toFixed(0)} KB`);
-        return true;
-    } catch (err) {
-        console.error(`[sync-vendor] selfie_segmenter.tflite FAILED: ${err.message}`);
-        // Not fatal anywhere: portrait.ts falls back to the untouched frame, so
-        // captures keep working with their real background.
-        console.error('[sync-vendor] Captured faces will keep their real background.');
-        return false;
-    }
 }
 
 // ── OpenCV: download (no npm package ships a browser build we can use) ──────
@@ -322,12 +278,10 @@ async function syncBlazeface() {
 // an earlier step failed, which is exactly the fresh-clone case.
 const mediapipeOk = syncMediapipe();
 const faceModelOk = await syncFaceModel();
-const selfieModelOk = await syncSelfieModel();
 const tfjsOk = syncTfjsWasm();
 const blazefaceOk = await syncBlazeface();
 const openCvOk = await syncOpenCv();
-const ok =
-    mediapipeOk && faceModelOk && selfieModelOk && tfjsOk && blazefaceOk && openCvOk;
+const ok = mediapipeOk && faceModelOk && tfjsOk && blazefaceOk && openCvOk;
 // Do not fail the install: a developer who never touches KYC should not be
 // blocked by a flaky download. The warning above is the signal.
 if (!ok) console.warn('[sync-vendor] completed with errors (see above).');

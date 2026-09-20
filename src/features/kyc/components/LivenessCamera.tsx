@@ -6,9 +6,8 @@ import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
 import '@aws-amplify/ui-react/styles.css';
 
-import { TFJS_WASM_PATH, blazefaceModelUrl, CAMERA_ZOOM } from '@/features/kyc/config/liveness';
+import { TFJS_WASM_PATH, blazefaceModelUrl } from '@/features/kyc/config/liveness';
 import { scoreFrameQuality } from '@/features/kyc/services/imageQuality';
-import { kickstartPortrait, toPortrait } from '@/features/kyc/services/portrait';
 import './liveness.css';
 
 /**
@@ -22,6 +21,19 @@ import './liveness.css';
 const FRAME_POLL_MS = 200;
 
 /**
+ * 0.92, not the 0.85 this shipped with.
+ *
+ * The only argument for a lower number is payload size, and the difference is a
+ * few tens of kilobytes on a frame posted once. What it costs is real: JPEG
+ * artefacts land hardest on the mid-frequency detail — eye corners, the edge of
+ * the nose — that CompareFaces reads at `face-match`.
+ */
+const SNAPSHOT_JPEG_QUALITY = 0.92;
+
+/** The camera frame's shape, 350x400 — what the capture is cropped to. */
+const FRAME_ASPECT = 350 / 400;
+
+/**
  * How long the held frame keeps its slot without being beaten.
  *
  * Without this, one sharp frame early on wins for the rest of the session — and
@@ -31,17 +43,6 @@ const FRAME_POLL_MS = 200;
  * the still stays roughly current.
  */
 const BEST_FRAME_WINDOW_MS = 2000;
-
-/**
- * 0.92, not the 0.85 this shipped with.
- *
- * The only argument for a low number here is payload size, and the difference
- * is a few tens of kilobytes on a frame that is posted once. What it was
- * costing is real: JPEG artefacts land hardest on exactly the mid-frequency
- * detail — eye corners, the edge of the nose — that CompareFaces reads at
- * `face-match`.
- */
-const SNAPSHOT_JPEG_QUALITY = 0.92;
 
 /**
  * Amazon's Face Liveness widget, in our frame and our language.
@@ -111,7 +112,6 @@ export function LivenessCamera({
     credentialProvider,
     onAnalysisComplete,
     onError,
-    onCameraZoom,
 }: {
     sessionId: string;
     region: string;
@@ -128,15 +128,6 @@ export function LivenessCamera({
      */
     onAnalysisComplete: (snapshot: string | null) => Promise<void>;
     onError: (error: { state?: string; error?: Error }) => void;
-    /**
-     * What the camera did with `CAMERA_ZOOM`, in words.
-     *
-     * A diagnostic, not a feature: whether zoom applied decides whether tuning
-     * that constant can achieve anything at all, and on a phone — the device
-     * this actually runs on — reading it from a console is not practical. The
-     * bench renders it; the sign-in ignores it.
-     */
-    onCameraZoom?: (status: string) => void;
 }) {
     const t = useTranslations('auth');
     const frameRef = useRef<HTMLDivElement>(null);
@@ -190,13 +181,40 @@ export function LivenessCamera({
                 if (!stale && score.sharpness <= held.sharpness) return;
             }
 
+            /*
+             * Cropped to the frame's shape, centred — the same crop
+             * `object-fit: cover` performs on screen.
+             *
+             * Keeping the whole sensor frame files a landscape photograph for a
+             * portrait flow, and then every place that shows it crops it again
+             * to something slightly different. Capturing what the user was
+             * looking at is the only version that cannot disagree with the
+             * preview.
+             */
+            const sw = video.videoWidth;
+            const sh = video.videoHeight;
+            const cropW = Math.min(sw, sh * FRAME_ASPECT);
+            const cropH = Math.min(sh, sw / FRAME_ASPECT);
+
             const canvas = held?.canvas ?? document.createElement('canvas');
-            if (canvas.width !== video.videoWidth) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
+            if (canvas.width !== Math.round(cropW)) {
+                canvas.width = Math.round(cropW);
+                canvas.height = Math.round(cropH);
             }
             try {
-                canvas.getContext('2d')?.drawImage(video, 0, 0);
+                canvas
+                    .getContext('2d')
+                    ?.drawImage(
+                        video,
+                        (sw - cropW) / 2,
+                        (sh - cropH) / 2,
+                        cropW,
+                        cropH,
+                        0,
+                        0,
+                        canvas.width,
+                        canvas.height,
+                    );
                 bestFrame.current = {
                     canvas,
                     sharpness: score?.sharpness ?? 0,
@@ -209,106 +227,6 @@ export function LivenessCamera({
         }, FRAME_POLL_MS);
         return () => clearInterval(id);
     }, []);
-
-    /**
-     * Zoom the camera in, so the oval can be filled from further away.
-     *
-     * ── Why the camera and not the check ────────────────────────────────────
-     * Because the check is not ours to loosen. The oval, and every threshold
-     * measured against it, come down from AWS inside the session; the browser
-     * reads them. Narrowing what the lens sees is the one input on our side of
-     * the line, and it moves the same thing the user cares about — how far back
-     * they can sit. See `CAMERA_ZOOM`, which also says what it costs.
-     *
-     * ── Reaching the track without owning getUserMedia ──────────────────────
-     * AWS opens its own camera, so the track is theirs. It is taken off the
-     * <video> they render rather than by patching `navigator.mediaDevices`:
-     * `handoff/cameraShim.ts` already replaces `getUserMedia` for the phone
-     * relay, and a second patcher racing it over one global is a bug waiting
-     * for the one session where both are live.
-     *
-     * Polled because the element and its stream appear some time after mount,
-     * and applied once per track — a re-application on every tick would fight
-     * the user if the device ever adjusts itself.
-     */
-    /*
-     * Warm the segmentation model while the camera is opening.
-     *
-     * The matte runs at the instant the check finishes — the one moment in this
-     * flow where the user is already waiting on two servers. A model loaded
-     * cold there adds its download to that wait for no reason; loaded here it
-     * is ready before it is wanted.
-     */
-    useEffect(() => {
-        kickstartPortrait();
-    }, []);
-
-    useEffect(() => {
-        if (CAMERA_ZOOM <= 1) return;
-        let applied: MediaStreamTrack | null = null;
-
-        const id = setInterval(() => {
-            const video = frameRef.current?.querySelector('video');
-            const stream = video?.srcObject as MediaStream | null;
-            const track = stream?.getVideoTracks?.()[0];
-            if (!track || track === applied) return;
-            applied = track;
-
-            // `zoom` is outside the standard MediaTrack types — it comes from
-            // the Image Capture spec, which TypeScript's DOM lib does not
-            // carry. The casts are that gap, not a shortcut.
-            const range = (
-                track.getCapabilities?.() as { zoom?: { min: number; max: number } } | undefined
-            )?.zoom;
-
-            if (!range) {
-                // Most laptop webcams land here. Nothing is broken; the check
-                // simply runs at the distance AWS asks for.
-                const msg = 'camera advertises no zoom — distance unchanged';
-                console.info(`[liveness] ${msg}`);
-                onCameraZoom?.(msg);
-                return;
-            }
-
-            const target = Math.min(Math.max(CAMERA_ZOOM, range.min), range.max);
-            void track
-                .applyConstraints({ advanced: [{ zoom: target }] } as unknown as MediaTrackConstraints)
-                .then(() => {
-                    const msg = `zoom ${target}× (device allows ${range.min}–${range.max}, asked ${CAMERA_ZOOM}×)`;
-                    console.info(`[liveness] camera ${msg}`);
-                    onCameraZoom?.(msg);
-                })
-                .catch((err: unknown) => {
-                    // Refused after being advertised. Worth seeing, never worth
-                    // failing a sign-in over.
-                    console.warn('[liveness] camera refused zoom', err);
-                    onCameraZoom?.('camera refused the zoom it advertised');
-                });
-        }, 400);
-
-        return () => clearInterval(id);
-    }, [onCameraZoom]);
-
-    /** Encode the best frame we kept. Null if we never got one. */
-    const grabSnapshot = (): string | null => {
-        const canvas = bestFrame.current?.canvas;
-        if (!canvas?.width) return null;
-        try {
-            /*
-             * ⚠️ The live <video> is deliberately NOT re-read here, though it
-             * used to be, "in case there somehow still is a frame". There
-             * almost never is — AWS has released the camera by now, which is
-             * the whole reason a frame is kept — and on the occasions there
-             * was one, overwriting the ranked frame with an unranked one threw
-             * away the only thing this selection buys.
-             */
-            // JPEG, not PNG: this is a photograph, and a PNG of a camera frame
-            // is several megabytes of base64 held in React state.
-            return canvas.toDataURL('image/jpeg', SNAPSHOT_JPEG_QUALITY);
-        } catch {
-            return null;
-        }
-    };
 
     return (
         <div ref={frameRef} className="rz-liveness absolute inset-0">
@@ -365,13 +283,23 @@ export function LivenessCamera({
                         waitingCameraPermissionText: t('faceLoading'),
                         retryCameraPermissionsText: t('deviceRetry'),
                     }}
-                    onAnalysisComplete={async () => {
-                        // Matted here rather than at each display site: this
-                        // one string is both what the screens show and what is
-                        // submitted, so cutting the background once keeps those
-                        // two from ever being different pictures.
-                        const raw = grabSnapshot();
-                        return onAnalysisComplete(raw ? await toPortrait(raw) : null);
+                    onAnalysisComplete={() => {
+                        /*
+                         * The frame as the camera gave it, encoded once.
+                         *
+                         * A background-blur and relighting pipeline used to sit
+                         * here. It is gone: every version of it that looked
+                         * right in one situation looked wrong in another, and a
+                         * photograph of a real person for a real identity record
+                         * is a poor place to keep guessing. `git log` has it if
+                         * it is ever wanted back.
+                         */
+                        const canvas = bestFrame.current?.canvas;
+                        return onAnalysisComplete(
+                            canvas?.width
+                                ? canvas.toDataURL('image/jpeg', SNAPSHOT_JPEG_QUALITY)
+                                : null,
+                        );
                     }}
                     onError={onError}
                 />

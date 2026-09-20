@@ -178,6 +178,27 @@
  */
 .rz-liveness .amplify-liveness-video-anchor {
     /*
+     * ── Pinned to the frame, and the shape is the video's problem ──────────
+     *
+     * This box used to be left at the stream's own aspect ratio so the video
+     * inside it — which has no `object-fit` of its own — came out undistorted.
+     * That is a contract with no enforcement, and it failed in both directions:
+     * a landscape stream overflowed the sides, a portrait one left black
+     * columns, and every attempt to size the box for one case broke the other
+     * or stretched the picture.
+     *
+     * Pinning the box and giving the video `object-fit: cover` (below) settles
+     * all of it. The box is always the frame; the video always keeps its own
+     * proportions and crops whatever does not fit.
+     *
+     * ⚠️ Safe only because the oval is hidden. This size feeds `scaleFactor`,
+     * which decides where AWS DRAWS the oval — not where the face-fit test
+     * looks, which is the video stream and is untouched by any of this. Show
+     * the ring again and this rule has to go with it.
+     */
+    position: absolute;
+    inset: 0;
+    /*
      * COVER in both directions, not just one.
      *
      * `height: 100%; width: auto` alone only covers a stream WIDER than the
@@ -198,7 +219,7 @@
      * face-fit test uses. Stretch one and the guide stops describing the test.
      */
     height: 100%;
-    width: auto;
+    width: 100%;
 }
 
 /*
@@ -215,11 +236,19 @@
  * whether the stream is wider or narrower than the frame, and CSS cannot read
  * the inline aspect-ratio to branch on it.
  *
- * So it is fixed at the SOURCE instead: the phone is asked for a stream shaped
- * like the frame (`aspectRatio` in PhoneCamera's constraints). The anchor then
- * has nothing to letterbox, and the rule above keeps the video and the oval
- * canvas the same box — which is the property that must not be broken, since
- * the oval is drawn from the geometry the face-fit test uses.
+ * It is fixed in two places, for the two ways a portrait stream can arrive:
+ *
+ *   - the HAND-OFF asks the phone for a stream shaped like the frame
+ *     (`aspectRatio` in PhoneCamera's constraints), so the anchor has nothing
+ *     to letterbox;
+ *   - a phone running the check DIRECTLY gets its stream from AWS, whose
+ *     constraints are landscape-ideal and portrait in practice. `LivenessCamera`
+ *     measures that stream and sets the anchor's width/height itself — the
+ *     branch this comment says CSS cannot make, made where the numbers exist.
+ *
+ * Both leave the video and the oval canvas the same box, which is the property
+ * that must not be broken: the oval is drawn from the geometry the face-fit
+ * test uses.
  */
 
 /* ── Type ───────────────────────────────────────────────────────────────────
@@ -342,4 +371,24 @@
  */
 .rz-liveness .amplify-liveness-start-screen-warning {
     display: none;
+}
+
+/* ── Their video may crop, but it may never stretch ─────────────────────────
+ *
+ * `.amplify-liveness-video` ships as `width: 100%; height: 100%` with NO
+ * `object-fit`, so it is stretched to whatever box it is given. That works only
+ * while the anchor above it is kept at the stream's own aspect ratio, which is
+ * a contract nothing enforces — and every rule in this file that resizes that
+ * box, for a portrait phone stream or for the wide view, breaks it.
+ *
+ * The symptom is a face that is too wide, and it reads as a bad camera rather
+ * than a bad stylesheet, which is how it survives.
+ *
+ * `cover` makes the failure mode a crop instead. A cropped preview is a smaller
+ * view of the right person; a stretched one is the wrong shape of face. It
+ * changes nothing when the anchor is correct, and it cannot affect the check:
+ * the face-fit test reads the video STREAM, never the element it is painted in.
+ */
+.rz-liveness .amplify-liveness-video {
+    object-fit: cover;
 }

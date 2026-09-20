@@ -3,11 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
-import {
-    BEAUTY_FILTER_CSS,
-    BEAUTY_SOFT_BLUR,
-    BEAUTY_SOFT_OPACITY,
-} from '@/features/kyc/services/portrait';
 
 /**
  * What fills the frame once the camera has stopped.
@@ -87,36 +82,19 @@ export function LivenessVerdict({
                 the video was `scaleX(-1)`, and a picture that flips at the
                 moment of capture reads as a different person's face. */}
             {snapshot && !showRetry && (
-                <>
-                    {/* A plain <img>, not next/image: this is a data URL held in
-                        memory, and the optimiser has nothing to fetch or resize.
-
-                        The look is CSS and stops here. The data URL underneath
-                        is the portrait — subject sharp, background blurred —
-                        and that file is also what gets submitted, so nothing
-                        applied to these pixels may be written into it. See
-                        services/portrait.ts. */}
-                    <img
-                        src={snapshot}
-                        alt=""
-                        className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
-                        style={{ filter: BEAUTY_FILTER_CSS }}
-                    />
-                    {/* The soft layer: a blurred copy at partial opacity, so
-                        edges survive underneath and only skin texture is filled
-                        in. A plain blur would soften the eyes too. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element -- same data URL as above */}
-                    <img
-                        src={snapshot}
-                        alt=""
-                        aria-hidden
-                        className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
-                        style={{
-                            filter: `${BEAUTY_FILTER_CSS} blur(${BEAUTY_SOFT_BLUR * 0.0625}rem)`,
-                            opacity: BEAUTY_SOFT_OPACITY,
-                        }}
-                    />
-                </>
+                // A plain <img>, not next/image: this is a data URL held in
+                // memory, and the optimiser has nothing to fetch or resize.
+                //
+                // Shown exactly as captured. No filter, no retouching: this is
+                // also the frame CompareFaces is given at `face-match`, and the
+                // screen should not show the user something other than what was
+                // submitted on their behalf.
+                // eslint-disable-next-line @next/next/no-img-element -- data URL
+                <img
+                    src={snapshot}
+                    alt=""
+                    className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+                />
             )}
 
             {/* Scanning the still while the servers decide. */}
