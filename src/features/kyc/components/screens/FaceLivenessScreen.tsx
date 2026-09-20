@@ -509,8 +509,8 @@ export function FaceLivenessScreen({
             <div
                 ref={frameRef}
                 /*
-                  LTR in every language — same exception as the other two camera
-                  frames (IDCaptureScreen, AwsFaceLiveness), and here it covers a
+                  LTR in every language — same exception as the other camera
+                  frames (IDCaptureScreen, FaceScanScreen), and here it covers a
                   third party as well as us.
 
                   AWS's widget lays its own chrome out in flex and positions the

@@ -59,11 +59,10 @@ export default function IDSummaryScreen() {
             // the very first step of this flow.
             //
             // 'face-detection' used to sit here and ask for a SECOND capture.
-            // It is not gone (VerificationPage still routes it, AwsFaceLiveness
-            // is untouched), it is simply no longer in the path: the frame
-            // taken before ID capture is the one FaceMatchScreen compares
-            // against the ID, so asking again photographed the same person
-            // twice to answer a question already answered.
+            // It has been deleted outright: the frame taken before ID capture
+            // is the one FaceMatchScreen compares against the ID, so asking
+            // again photographed the same person twice to answer a question
+            // already answered.
             //
             // This only works because the frame SURVIVES the ID steps — it
             // lives in VerificationContext, which is why IdentityGate must not

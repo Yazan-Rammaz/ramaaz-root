@@ -1,7 +1,6 @@
 import type {
     IKycService,
     KycRequest,
-    LivenessChallenge,
     AnalyzeIdResult,
     SubmitVerificationPayload,
     ReverifySession,
@@ -10,7 +9,7 @@ import type {
     EnrollPayload,
     EnrollResult,
 } from './kycService.interface';
-import type { LivenessResult, IDDocument, MatchResult } from '@/features/kyc/types/verification';
+import type { IDDocument, MatchResult } from '@/features/kyc/types/verification';
 import { api, type ApiResult } from './kycApi';
 
 /**
@@ -69,24 +68,6 @@ function unwrap<T>(res: ApiResult<T>, label: string): T {
 }
 
 export class HttpKycService implements IKycService {
-    async detectFace(
-        faceImageData: string,
-        challengeStep: LivenessChallenge = 'look_straight',
-        options: { crop?: boolean } = {},
-    ): Promise<LivenessResult> {
-        const data = unwrap(
-            await api.kyc.liveness({ faceImageData, challengeStep, crop: options.crop }),
-            'Liveness API error',
-        );
-
-        // Always preserve a usable image for downstream face-match: fall back to
-        // the original frame when the server didn't return a crop.
-        return {
-            ...data,
-            faceImageData: data.faceImageData ?? faceImageData,
-        } as LivenessResult;
-    }
-
     async analyzeId(
         imageData: string,
         side: 'front' | 'back',

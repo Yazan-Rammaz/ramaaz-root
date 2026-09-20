@@ -11,7 +11,6 @@ import IDSummaryScreen from './screens/IDSummaryScreen';
 import FaceMatchScreen, { type EnrolmentInput } from './screens/FaceMatchScreen';
 import SuccessScreen from './screens/SuccessScreen';
 import ContactSupportScreen from './screens/ContactSupportScreen';
-import AwsFaceLivenessScreen from './screens/AwsFaceLiveness';
 import { FaceScanScreen } from './screens/FaceScanScreen';
 import { FaceLivenessScreen } from './screens/FaceLivenessScreen';
 
@@ -186,8 +185,6 @@ export default function VerificationPage({
                         }}
                     />
                 );
-            case 'face-detection':
-                return <AwsFaceLivenessScreen />;
             case 'id-capture-front':
             case 'id-capture-back':
                 return <IDCaptureScreen />;

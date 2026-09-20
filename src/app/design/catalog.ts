@@ -230,13 +230,6 @@ export const DESIGN_CATALOG: DesignEntry[] = [
     { slug: 'kyc-success', title: 'Success', group: 'Identity', canvas: 'mobile' },
     { slug: 'kyc-contact-support', title: 'Contact support', group: 'Identity', canvas: 'mobile' },
     {
-        slug: 'kyc-liveness',
-        title: 'Liveness challenge',
-        group: 'Identity',
-        canvas: 'mobile',
-        note: 'Off the current path — the screen still exists',
-    },
-    {
         slug: 'identity-flow',
         title: 'Whole identity flow',
         group: 'Identity',

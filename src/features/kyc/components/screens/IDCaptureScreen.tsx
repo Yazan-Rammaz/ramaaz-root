@@ -21,7 +21,7 @@ import { FlexSpace } from '@/components/ui/FlexSpace';
 import { Icon } from '@/components/ui/Icon';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import { idConfig, kycConfig } from '@/features/kyc/config/kycConfig';
-import { FaceProgressBar } from './AwsFaceLiveness';
+import { FaceProgressBar } from '../FaceProgressBar';
 
 type PollState = 'idle' | 'aligning' | 'capturing' | 'processing' | 'success' | 'done';
 

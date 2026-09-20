@@ -1,6 +1,4 @@
-import type { LivenessResult, IDDocument, MatchResult } from '@/features/kyc/types/verification';
-
-export type LivenessChallenge = 'look_straight' | 'turn_right' | 'turn_left';
+import type { IDDocument, MatchResult } from '@/features/kyc/types/verification';
 
 /**
  * Structured status returned by the analyze-id API.
@@ -106,7 +104,7 @@ export interface SubmitVerificationPayload {
     selfieImageData: string;
     selfieVsIdScore: number;
     /**
-     * Liveness confidence (0–100) from the face-detection step. Forwarded to
+     * Liveness confidence (0–100) from the face check. Forwarded to
      * NestJS so it can factor liveness into the verification decision now that
      * the video step is gone. Optional for backward compatibility.
      */
@@ -115,11 +113,6 @@ export interface SubmitVerificationPayload {
 }
 
 export interface IKycService {
-    detectFace(
-        faceImageData: string,
-        challengeStep?: LivenessChallenge,
-        options?: { crop?: boolean },
-    ): Promise<LivenessResult>;
     analyzeId(
         imageData: string,
         side: 'front' | 'back',

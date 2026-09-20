@@ -82,11 +82,10 @@ export function VerificationProvider({
 
     // T037: Resume from last incomplete step on mount.
     // KYC completes at 'face-match'; the video interview step was removed.
-    // 'face-detection' is deliberately absent: the face is captured once, at
-    // the start of the flow, and compared straight after the ID summary. The
-    // step and its screen still exist — they are just not on the path, and
-    // leaving it here would let the resume effect below send somebody to a
-    // capture the flow no longer asks for.
+    // There is no second capture step: the face is taken once, at the start of
+    // the flow, and compared straight after the ID summary. ('face-detection'
+    // used to sit off this list, unreachable; its screen ran a second,
+    // MediaPipe-based liveness engine and has now been deleted outright.)
     const STEP_ORDER: VerificationStep[] = [
         'intro',
         'id-capture-front',

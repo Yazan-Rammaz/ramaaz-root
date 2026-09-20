@@ -61,7 +61,6 @@ made ONLY in NestJS") and already returns `stepToken`.
 | `intro` | `IntroScreen` | Enrolment explainer + consent. |
 | `id-capture-front` / `id-capture-back` | `IDCaptureScreen` | OpenCV document scanner finds the card edges, auto-captures when stable. |
 | `id-summary` | `IDSummaryScreen` | Extracted fields for review before submit. |
-| `face-detection` | `AwsFaceLiveness` | 3 liveness challenges (straight / right / left) via MediaPipe. **Off the path** — kept and still routable, but nothing navigates to it: the face captured at `face-reverify` is the one compared, so a second capture asked the same question twice. |
 | `face-match` | `FaceMatchScreen` | The `face-reverify` frame vs the photo on the ID. |
 | `success` | `SuccessScreen` | Enrolment complete. |
 | `contact-support` | `ContactSupportScreen` | Attempts exhausted. |

@@ -23,7 +23,6 @@ export type VerificationStep =
     | 'id-capture-front'
     | 'id-capture-back'
     | 'id-summary'
-    | 'face-detection' // MediaPipe liveness challenge + compare-face API gate
     | 'face-match'
     | 'success'
     | 'contact-support';

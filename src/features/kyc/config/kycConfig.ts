@@ -4,10 +4,9 @@
  * Single source of truth for every threshold, timeout, and constant used
  * across the KYC/verification flow. Works on both client and server (API routes).
  *
- * ─── 4 Sections ──────────────────────────────────────────────────────────────
+ * ─── 2 Sections ──────────────────────────────────────────────────────────────
  *   1. idConfig      — ID & Passport capture (quality, card detection, OCR, MRZ/barcode)
- *   2. faceConfig    — Face liveness detection (pose, centering, retries, timing)
- *   3. compareConfig — Face-to-ID comparison (similarity thresholds, timing)
+ *   2. compareConfig — Face-to-ID comparison (similarity thresholds, timing)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -380,82 +379,7 @@ export const idConfig = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION 2 — FACE DETECTION CONFIG
-// ─────────────────────────────────────────────────────────────────────────────
-export const faceConfig = {
-    // ── AWS Rekognition pose thresholds ───────────────────────────────────────
-    // Rekognition returns yaw in degrees: negative = turned right, positive = left.
-    pose: {
-        /** Maximum absolute yaw [°] for the "look_straight" challenge. */
-        yawStraightMax: 10,
-        /** Minimum absolute yaw [°] required for the "turn_right" / "turn_left" challenges. */
-        yawTurnMin: 20,
-        /** Maximum absolute pitch [°] tolerated during any challenge. */
-        pitchMax: 15,
-        /** CSS `rotateY` degrees applied to the NetMask during a turn challenge. */
-        netMaskRotateYDeg: 28,
-    },
-
-    // ── AWS Rekognition quality gates ────────────────────────────────────────
-    // Applied server-side; much lower than local ID thresholds because Rekognition
-    // compensates for low-light selfies better than Canvas Sobel analysis.
-    quality: {
-        /** Minimum brightness Rekognition must report. */
-        minBrightness: 25,
-        /** Minimum sharpness Rekognition must report. */
-        minSharpness: 25,
-    },
-
-    // ── Centering check ───────────────────────────────────────────────────────
-    // After look_straight passes, the bounding box is used to verify the face
-    // is spatially centred in the frame (not just rotationally aligned).
-    centering: {
-        /**
-         * Maximum allowed horizontal offset of the face centre from the frame centre.
-         * |bbox.left + bbox.width/2 − 0.5| must be < this value.
-         * 0.25 = face centre may be anywhere in the middle 50 % of the frame.
-         */
-        maxHorizontalOffset: 0.25,
-    },
-
-    // ── Attempt limits ────────────────────────────────────────────────────────
-    // Deliberately absent, here and in the KYC Worker. The NestJS backend holds
-    // the challenge's attempt budget and refuses with a 401 when it is spent —
-    // it is the only party that sees every submit, so it is the only one that
-    // can count. A cap in this config could only guess, and disagreed: it cut
-    // people off while the backend still considered them entitled to continue.
-
-    // ── Selfie crop padding (server-side Sharp) ───────────────────────────────
-    cropping: {
-        /** Padding fraction added around the detected face in the selfie crop. */
-        selfieFacePadding: 0.25,
-    },
-
-    // ── Timing ───────────────────────────────────────────────────────────────
-    timing: {
-        /** How long [ms] the user must hold a valid pose before it is accepted. */
-        holdLockedMs: 400,
-        /** Initial pause [ms] before the first challenge starts (camera warm-up). */
-        challengeStartDelayMs: 400,
-        /** Pause [ms] before each individual challenge step attempt. */
-        stepDelayMs: 600,
-        /** Pause [ms] after "Perfect!" before advancing to the next step. */
-        postStepMs: 300,
-        /** Pause [ms] after a rejection so the user can read the error. */
-        rejectionPauseMs: 600,
-        /** Pause [ms] after a centering error before retrying look_straight. */
-        centeringRetryMs: 600,
-        /** Delay [ms] before the first final-capture attempt. */
-        firstCaptureDelayMs: 300,
-        /** Delay [ms] between subsequent final-capture retries. */
-        captureRetryDelayMs: 500,
-        /** How long [ms] to show the success flash before navigating to face-match. */
-        postFlashNavMs: 600,
-    },
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SECTION 3 — COMPARE / FACE-MATCH CONFIG
+// SECTION 2 — COMPARE / FACE-MATCH CONFIG
 // ─────────────────────────────────────────────────────────────────────────────
 export const compareConfig = {
     // ── AWS Rekognition CompareFaces similarity thresholds ────────────────────
@@ -491,11 +415,10 @@ export const compareConfig = {
 // CONVENIENCE RE-EXPORTS
 // Import the whole bundle when you need everything:
 //   import { kycConfig } from '@/features/kyc/config/kycConfig';
-//   kycConfig.face.pose.yawStraightMax
+//   kycConfig.id.cardGeometry.minFillRatio
 // ─────────────────────────────────────────────────────────────────────────────
 export const kycConfig = {
     id: idConfig,
-    face: faceConfig,
     compare: compareConfig,
 } as const;
 

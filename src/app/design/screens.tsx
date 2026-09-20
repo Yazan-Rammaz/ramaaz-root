@@ -160,7 +160,6 @@ export const SCREENS: Record<string, () => ReactNode> = {
     'kyc-face-match': () => <KycStep step="face-match" />,
     'kyc-success': () => <KycStep step="success" />,
     'kyc-contact-support': () => <KycStep step="contact-support" />,
-    'kyc-liveness': () => <KycStep step="face-detection" />,
 
     // The flow as one mounted tree, the way a real sign-in runs it. No handlers
     // are passed, so each step reports "passed" locally and moves on without

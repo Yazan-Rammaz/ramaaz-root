@@ -12,8 +12,9 @@
  * (`app/api/kyc/[...path]/route.ts`) attaches the auth cookie server-side and
  * forwards to the KYC service. That also keeps `connect-src 'self'` intact.
  *
- * Server Actions are deliberately NOT used here: liveness posts camera frames
- * many times per second, which is not what the RSC action protocol is for.
+ * Server Actions are deliberately NOT used here: the capture screens post
+ * camera frames many times per second, which is not what the RSC action
+ * protocol is for.
  *
  * ── Contract note ───────────────────────────────────────────────────────────
  * These functions NEVER throw. They return `ApiResult`, which is the shape
@@ -34,7 +35,6 @@ export type ApiResult<T> =
 
 /** Every endpoint this feature uses, in one table. */
 export const PATHS = {
-    liveness: '/api/kyc/liveness',
     analyzeId: '/api/kyc/analyze-id',
     compareFace: '/api/kyc/compare-face',
     session: '/api/kyc/session',
@@ -112,11 +112,8 @@ const get = <T>(path: string) => request<T>(path, { method: 'GET' });
  *
  * These are the contract this feature needs the backend to satisfy — they are
  * the single most useful thing to check the real API against, because a
- * mismatch here is what "backend drift" looks like. Kept deliberately loose
- * where the caller is already defensive (`liveness` spreads the payload).
+ * mismatch here is what "backend drift" looks like.
  */
-export type LivenessResponse = { faceImageData?: string } & Record<string, unknown>;
-
 export type FaceMatchResponse = {
     isMatch: boolean;
     confidence?: number;
@@ -138,7 +135,6 @@ export type SubmitResponse = { success: boolean; kycRequest?: KycRequest };
 
 export const api = {
     kyc: {
-        liveness: (body: unknown) => post<LivenessResponse>(PATHS.liveness, body),
         analyzeId: <T>(body: unknown) => post<T>(PATHS.analyzeId, body),
         /** Used by httpKycService.matchFaceToID. */
         faceMatch: (body: unknown) => post<FaceMatchResponse>(PATHS.compareFace, body),
