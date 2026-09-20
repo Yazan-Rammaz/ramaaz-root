@@ -27,6 +27,27 @@ export type VerificationStep =
     | 'success'
     | 'contact-support';
 
+/**
+ * Which face check `face-reverify` runs.
+ *
+ * `liveness` — AWS Rekognition Face Liveness (`FaceLivenessScreen`). The real
+ * check, and the default: it streams a short video and AWS decides whether a
+ * live person was in front of the lens.
+ *
+ * `single-frame` — one captured frame compared with CompareFaces
+ * (`FaceScanScreen`). Kept as a fallback for an AWS outage, and **weaker on
+ * purpose to know about**: CompareFaces answers "same face" and nothing else,
+ * so a photograph of the enrolled admin on a second phone passes it. That was
+ * demonstrated, not theorised — it is why the liveness path exists.
+ *
+ * ⚠️ Only the SERVER may choose this. It is read from `KYC_FACE_MODE` in the
+ * route (`faceMode()`), never derived in the browser and never selected in
+ * response to AWS failing. A client-side "liveness broke, fall back" is a
+ * downgrade attack: block the streaming WebSocket and you hand the attacker the
+ * check the photo already defeats.
+ */
+export type FaceMode = 'liveness' | 'single-frame';
+
 export interface LivenessMetrics {
     yaw: number;
     pitch: number;

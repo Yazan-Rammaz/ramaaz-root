@@ -9,6 +9,14 @@ NEST_API_URL="https://staging-backend.ramaaz.store"
 # link's token arrives in the URL at /enter/<token> and is exchanged for a
 # challenge — see src/lib/auth/link.ts.
 
+# Which face check runs at the sign-in's face step. Unset (the default) = AWS
+# Rekognition Face Liveness, which is what ships. `single-frame` falls back to
+# one captured frame + CompareFaces — WEAKER: a photo of the admin on a second
+# phone passes it. It exists for an AWS outage, and flipping it needs BOTH
+# sides: the KYC Worker must accept `liveFaceImageData` for the root tenant
+# again, or the capture ends in a generic failure. Any other value = liveness.
+KYC_FACE_MODE=""
+
 # Unlocks /design in a DEPLOYED environment. Leave unset locally — the gallery
 # is always on in development. In production set it as a Cloudflare SECRET
 # (`npx wrangler secret put DESIGN_GALLERY_KEY`), never as a wrangler.jsonc

@@ -57,7 +57,8 @@ made ONLY in NestJS") and already returns `stepToken`.
 
 | Step | Component | What it does |
 | --- | --- | --- |
-| `face-reverify` | `FaceReverifyScreen` | One live frame → compare to stored photo. 3 attempts, then `contact-support`. **New — written for this flow.** |
+| `face-reverify` | `FaceLivenessScreen` | AWS Rekognition Face Liveness — streams a short video, the Worker fetches the reference image from AWS itself. **What ships.** |
+| `face-reverify` (fallback) | `FaceScanScreen` | One live frame → CompareFaces against the stored photo. **Off by default and weaker** — a photo of the admin on a second phone passes it. See below. |
 | `intro` | `IntroScreen` | Enrolment explainer + consent. |
 | `id-capture-front` / `id-capture-back` | `IDCaptureScreen` | OpenCV document scanner finds the card edges, auto-captures when stable. |
 | `id-summary` | `IDSummaryScreen` | Extracted fields for review before submit. |
@@ -68,6 +69,22 @@ made ONLY in NestJS") and already returns `stepToken`.
 Entry point is `IdentityGate` (`components/IdentityGate.tsx`), mounted by
 `app/(auth)/login/identity/page.tsx`. It picks the opening step and decides what
 happens after the face check passes.
+
+### Switching the face check
+
+`KYC_FACE_MODE` — read server-side by `faceMode()` (`config/faceMode.ts`) in the
+route, passed down as a prop, and the only thing that can select the fallback.
+Unset, or anything other than the exact string `single-frame`, means liveness.
+
+**The browser never chooses**, and specifically never chooses in response to
+liveness failing. "AWS is unreachable, fall back" computed in the client is a
+downgrade attack with a one-line exploit: block the streaming WebSocket and you
+are handed the check a photograph already beats.
+
+**Turning the fallback on takes both sides.** Setting the var only changes which
+screen mounts; the capture posts `liveFaceImageData`, which the KYC Worker
+refuses for the `root` tenant. Re-enable it there first, or the admin holds
+still for a camera and then gets a generic failure.
 
 ---
 

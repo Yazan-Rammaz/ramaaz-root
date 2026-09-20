@@ -13,6 +13,7 @@ import SuccessScreen from './screens/SuccessScreen';
 import ContactSupportScreen from './screens/ContactSupportScreen';
 import { FaceScanScreen } from './screens/FaceScanScreen';
 import { FaceLivenessScreen } from './screens/FaceLivenessScreen';
+import type { FaceMode } from '@/features/kyc/types/verification';
 
 const transition = { duration: 0.35, ease: [0.4, 0, 0.2, 1] as [number, number, number, number] };
 
@@ -49,6 +50,7 @@ export default function VerificationPage({
     onLivenessPassed,
     faceVerified = false,
     onEnroll,
+    faceMode = 'liveness',
 }: {
     /**
      * Submits the captured face. Returns an error to reject it and let the
@@ -86,6 +88,14 @@ export default function VerificationPage({
     onLivenessSession?: (sessionId: string) => Promise<{ error?: string } | void>;
     /** Commits the verified step, after the success animation. */
     onLivenessPassed?: (faceCapturedPhoto: string | null) => Promise<{ error?: string } | void>;
+    /**
+     * Which face check `face-reverify` runs. Comes from the route, which reads
+     * it server-side — see `FaceMode` and `faceMode()`.
+     *
+     * Defaults to the real check, so a caller that says nothing (the design
+     * gallery) never selects the weaker one by omission.
+     */
+    faceMode?: FaceMode;
 } = {}) {
     const { currentStep, direction, setLivenessResult } = useVerification();
 
@@ -107,20 +117,60 @@ export default function VerificationPage({
         exit: { x: direction * -100 + '%', opacity: 0 },
     };
 
+    /**
+     * The single-frame capture: one black frame, yellow corner brackets,
+     * automatic capture once the local gate is satisfied.
+     *
+     * Reached two ways, both of which have to be a deliberate act — see the
+     * `face-reverify` case: the server asking for `single-frame`, or a caller
+     * that passed no sign-in handlers at all (the design gallery).
+     */
+    const singleFrameCapture = () => (
+        <FaceScanScreen
+            verified={faceVerified}
+            onCapture={async (frame) => {
+                // Kept for the enrolment steps that follow: the ID is compared
+                // against THIS frame, so the admin never captures their face
+                // twice.
+                setLivenessResult({
+                    isLive: true,
+                    faceImageData: frame,
+                    timestamp: Date.now(),
+                });
+                const result = await onCapture?.(frame);
+                if (result?.error) return { error: result.error };
+                onReverified?.();
+                return undefined;
+            }}
+        />
+    );
+
     const renderStep = () => {
         switch (currentStep) {
             case 'intro':
                 return <IntroScreen />;
             case 'face-reverify':
+                // ── The server picks the check, and only the server ──────────
+                //
+                // `single-frame` is the WEAKER check: CompareFaces answers "same
+                // face" and nothing about whether a person was there, so a
+                // photograph of the enrolled admin on a second phone passes it.
+                // That is demonstrated, not theoretical, and it is why the
+                // liveness path exists.
+                //
+                // So it is selected by configuration read server-side
+                // (`faceMode()`), never by the browser, and above all never in
+                // response to liveness FAILING. "AWS is unreachable, fall back"
+                // computed here would be a downgrade attack with a one-line
+                // exploit: block the streaming WebSocket and get handed the
+                // check the photo already beats.
+                if (faceMode === 'single-frame') {
+                    return singleFrameCapture();
+                }
                 // AWS Rekognition Face Liveness when the caller supplied a
                 // challenge id and a handler for the session — which the real
-                // sign-in always does. A photograph on a second phone passed the
-                // single-frame check below; this one streams a short video and
-                // AWS decides whether a live person was there.
-                //
-                // FaceScanScreen is still the fallback, and still reachable from
-                // the design gallery, because it is what runs if this component
-                // is ever mounted without that pair.
+                // sign-in always does. It streams a short video and AWS decides
+                // whether a live person was there.
                 if (challengeId && onLivenessSession) {
                     return (
                         <FaceLivenessScreen
@@ -147,44 +197,27 @@ export default function VerificationPage({
                 // ── Half a pair is a broken sign-in, not a weaker one ─────────
                 //
                 // The gallery mounts this with NEITHER, and falls through to the
-                // capture below — that is the fallback's purpose. But the real
-                // flow always passes `onLivenessSession`, so having it WITHOUT a
-                // challenge id means a real sign-in lost its challenge, and
-                // quietly handing that user the single-frame camera would be
-                // downgrading the anti-spoofing check exactly when something has
-                // already gone wrong.
+                // capture below — that is what keeps the fallback screen
+                // rendered and reviewable. But the real flow always passes
+                // `onLivenessSession`, so having it WITHOUT a challenge id means
+                // a real sign-in lost its challenge, and quietly handing that
+                // user the single-frame camera would downgrade the
+                // anti-spoofing check exactly when something has already gone
+                // wrong. A downgrade is a decision; this is an accident.
                 //
-                // It would not even work: the Worker now refuses
-                // `liveFaceImageData` for this tenant, so the capture ends in a
-                // generic failure after the user has held still for it. Saying
-                // so up front costs them nothing and tells them what to do.
+                // It would not even work: the Worker refuses `liveFaceImageData`
+                // for this tenant unless it is re-enabled there, so the capture
+                // ends in a generic failure after the user has held still for
+                // it. Saying so up front costs them nothing and tells them what
+                // to do.
                 if (onLivenessSession && !challengeId) {
                     return <MissingChallenge />;
                 }
-                // The capture designed for this flow: one black frame, yellow
-                // corner brackets, automatic capture once the local gate is
-                // satisfied. The older FaceReverifyScreen carried rdb's own
-                // look and its own 3-attempt counter — attempts now belong to
-                // the backend, which burns the challenge itself.
-                return (
-                    <FaceScanScreen
-                        verified={faceVerified}
-                        onCapture={async (frame) => {
-                            // Kept for the enrolment steps that follow: the ID
-                            // is compared against THIS frame, so the admin never
-                            // captures their face twice.
-                            setLivenessResult({
-                                isLive: true,
-                                faceImageData: frame,
-                                timestamp: Date.now(),
-                            });
-                            const result = await onCapture?.(frame);
-                            if (result?.error) return { error: result.error };
-                            onReverified?.();
-                            return undefined;
-                        }}
-                    />
-                );
+                // No sign-in handlers at all — the design gallery. The older
+                // FaceReverifyScreen carried rdb's own look and its own
+                // 3-attempt counter; attempts now belong to the backend, which
+                // burns the challenge itself.
+                return singleFrameCapture();
             case 'id-capture-front':
             case 'id-capture-back':
                 return <IDCaptureScreen />;

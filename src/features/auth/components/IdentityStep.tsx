@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { IdentityGate } from '@/features/kyc/components/IdentityGate';
 import { createKycService } from '@/features/kyc/services';
 import { isChallengeExpired } from '@/features/kyc/services/httpKycService';
+import type { FaceMode } from '@/features/kyc/types/verification';
 import {
     restartSignInAction,
     submitFaceAction,
@@ -38,11 +39,18 @@ export function IdentityStep({
     needsEnrollment,
     challengeId,
     hasStoredFace = false,
+    faceMode = 'liveness',
 }: {
     needsEnrollment: boolean;
     challengeId: string;
     /** The backend kept a face from earlier in this sign-in. See the page. */
     hasStoredFace?: boolean;
+    /**
+     * Which face check to run, chosen by the route. Both handlers below are
+     * wired either way — this only decides which screen is mounted, and it is
+     * the ONLY thing that can select the single-frame one. See `FaceMode`.
+     */
+    faceMode?: FaceMode;
 }) {
     /**
      * The step token, parked between verifying and committing.
@@ -74,6 +82,7 @@ export function IdentityStep({
             needsEnrollment={needsEnrollment}
             challengeId={challengeId}
             hasStoredFace={hasStoredFace}
+            faceMode={faceMode}
             /**
              * The AWS Face Liveness path, and the reason it exists: a photograph
              * of the enrolled administrator, held up on a second phone, passed

@@ -5,6 +5,7 @@ import { VerificationProvider } from '@/features/kyc/context/VerificationContext
 import { KycSessionProvider } from '@/features/kyc/context/KycSessionContext';
 import VerificationPage from './VerificationPage';
 import type { EnrolmentInput } from './screens/FaceMatchScreen';
+import type { FaceMode } from '@/features/kyc/types/verification';
 
 /**
  * Client shell for the identity flow.
@@ -46,6 +47,7 @@ export function IdentityGate({
     onLivenessSession,
     onLivenessPassed,
     hasStoredFace = false,
+    faceMode = 'liveness',
 }: {
     /** True when this admin has never completed ID enrolment. */
     needsEnrollment: boolean;
@@ -67,6 +69,8 @@ export function IdentityGate({
      * captured frame is React state and a reload drops it.
      */
     hasStoredFace?: boolean;
+    /** Which face check to run — the route's decision. See VerificationPage. */
+    faceMode?: FaceMode;
 }) {
     // ── Who moves the flow off the face check ───────────────────────────────
     // The SERVER does, and `needsEnrollment` is how it says so: a passed face
@@ -131,6 +135,7 @@ export function IdentityGate({
                     that waits out SUCCESS_HOLD_MS. That gap IS the green
                     frame: the capture screen paints the verdict during it. */}
                 <VerificationPage
+                    faceMode={faceMode}
                     challengeId={challengeId}
                     onLivenessSession={onLivenessSession}
                     onLivenessPassed={onLivenessPassed}

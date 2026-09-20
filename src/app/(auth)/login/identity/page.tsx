@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { Screen } from '@/components/ui/Screen';
 import { IdentityStep } from '@/features/auth/components/IdentityStep';
+import { faceMode } from '@/features/kyc/config/faceMode';
 import { readChallenge } from '@/lib/auth/challenge';
 import { redirectIfAuthenticated } from '@/lib/auth/guards';
 import { STAGES } from '@/lib/auth/endpoints';
@@ -56,6 +57,12 @@ export default async function IdentityPage() {
                 // This is what makes a REFRESH here keep the photo: the frame
                 // itself is React state and does not survive a reload.
                 hasStoredFace={Boolean(challenge.faceCaptureUrl)}
+                // Which face check to run. Decided HERE, on the server, and
+                // passed down — never worked out in the browser. See
+                // `FaceMode`: the fallback is the weaker check, so choosing it
+                // has to be a deliberate act of configuration rather than
+                // something a client can talk itself into.
+                faceMode={faceMode()}
             />
         </Screen>
     );
