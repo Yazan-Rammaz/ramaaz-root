@@ -14,14 +14,20 @@
  * wrapper. Nothing here leaks to another Amplify component.
  *
  * ── What is NOT touched, and must not be ────────────────────────────────────
- * The oval itself. It is drawn to a canvas whose geometry comes from the video
- * stream, and the face-fit test that decides whether you are inside it uses the
- * same numbers. Restyle the oval and the guide stops describing the test.
+ * The oval's GEOMETRY. It is drawn to a canvas whose dimensions come from the
+ * video stream, and the face-fit test that decides whether you are inside it
+ * reads the same numbers. Move or resize the oval and the guide stops
+ * describing the test.
  *
- * The one thing done to that box is CROPPING it (see the video-anchor rule),
- * which is safe precisely because the canvas and the video are the same box:
- * crop both together and the oval still sits exactly where the test expects.
- * Scaling only one of them, or stretching either, would break that.
+ * Two things are done to that box, and both preserve its geometry exactly:
+ *
+ *   - CROPPING it (see the video-anchor rule), safe precisely because the
+ *     canvas and the video are the same box — crop both together and the oval
+ *     still sits where the test expects. Scaling only one, or stretching
+ *     either, would break that.
+ *   - RECOLOURING it (see the oval-canvas rule), which moves no pixel: an
+ *     invert plus a blend mode, dropping AWS's white surround while keeping
+ *     their ring where they put it.
  */
 
 /* ── Fill our frame ─────────────────────────────────────────────────────────
@@ -95,12 +101,19 @@
     position: absolute;
 }
 
-/* ── The oval canvas: hidden entirely ───────────────────────────────────────
+/* ── The oval canvas: hidden ────────────────────────────────────────────────
  *
- * AWS paints two things into this canvas — an opaque surround with the oval cut
- * out of it, and the oval's own stroke. Both are gone on request: the surround
- * because it filled the frame with white mid-check, the ring because the mesh
- * overlay is the guide now.
+ * AWS paints THREE things into this one canvas, in this order
+ * (`drawLivenessOvalInCanvas`, service/utils/liveness.mjs):
+ *
+ *   1. an opaque `#fff` fill over the whole box — hardcoded, not a token;
+ *   2. a 3px ellipse stroke in `--amplify-colors-border-secondary`;
+ *   3. a clip to that same ellipse, then a clear — punching the oval
+ *      transparent and taking the inner half of the stroke with it.
+ *
+ * All three are hidden, on request. The white surround reads as a broken
+ * camera in a 350x400 frame, and the ring was judged not to belong in the
+ * design — the yellow corner brackets are the frame's guide.
  *
  * `opacity: 0` rather than `display: none`, and the difference matters. The
  * painter reads this element's `getBoundingClientRect()` to size its backing
@@ -108,17 +121,44 @@
  * hiding it that way feeds zeroes into their drawing code. Transparent keeps
  * the layout — and therefore their maths — exactly as it was.
  *
- * Nothing measured is lost either way: this canvas is presentational. The
- * face-fit test runs on the video stream, not on these pixels, so the oval still
- * exists and still has to be filled — it is simply not drawn. The hint text and
- * the fit bar at the foot are what tell the user where to move.
+ * ⚠️ WHAT THIS COSTS, so it is a decision and not a surprise. The face-fit test
+ * still runs against that oval, on the video stream rather than on these
+ * pixels. So the oval still exists and still has to be filled — it is simply
+ * not drawn. "Move a little closer" is measured against a target the user
+ * cannot see, and the brackets do not describe it: they mark our frame, which
+ * is a different shape in a different place. A tester reported exactly this as
+ * "the camera is bad and you have to get far too close". Hiding the ring does
+ * not make the check less demanding, only less legible.
  *
- * ⚠️ The white surround was ALSO the lamp. The challenge flashes light at the
- * face and the screen provides it, which is why AWS hardcoded that fill rather
- * than exposing a token. Hiding it lowers how much light this screen throws, and
- * what it lit was the anti-spoofing measurement. Not a guess either way — the
- * bench prints the confidence, so run a real face with this rule and without it
- * in the same room. If the score drops, this line is why.
+ * ── Bringing it back, if that trade is ever re-judged ───────────────────────
+ * The surround and the ring are pixels in one bitmap, so no selector separates
+ * them — but a colour trick does. Replace the rule below with
+ *
+ *     filter: invert(1);
+ *     mix-blend-mode: screen;
+ *
+ * and set `border.secondary` to `#000000` in LivenessCamera's theme. Invert
+ * turns the white surround black and the (black) ring white; `screen`
+ * composites black as nothing. Surround gone, ring bright, transparent oval
+ * untouched. Two things to know if you do:
+ *
+ *   - the ring is thin, ~1.2 CSS px: `lineWidth: 3` in stream coordinates,
+ *     scaled by `videoScaledWidth / videoWidth` and then half-cleared by their
+ *     own clip. Thickening it means redrawing, not restyling;
+ *   - `fade-out` animates OPACITY on this wrapper when recording stops, which
+ *     isolates the blend group. `screen` with no backdrop composites normally,
+ *     so the inverted canvas flashes as an opaque BLACK rectangle over the
+ *     face for that second. It needs its own `opacity: 0` rule on
+ *     `.amplify-liveness-oval-canvas.amplify-liveness-fade-out canvas`.
+ *
+ * Two notes an earlier version of this comment got wrong, kept so they are not
+ * re-derived:
+ *
+ *   - the mesh overlay is NOT the guide. It was removed (LivenessCamera.tsx);
+ *     with the ring hidden there is no guide on screen at all;
+ *   - the white surround is NOT the lamp. The flash is `FreshnessCanvas`, a
+ *     separate element (`freshnessColorRef`), so the light that feeds the
+ *     anti-spoofing measurement is unaffected by anything in this rule.
  */
 .rz-liveness .amplify-liveness-oval-canvas canvas {
     opacity: 0;

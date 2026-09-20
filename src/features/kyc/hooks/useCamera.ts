@@ -179,7 +179,11 @@ export function useCamera({
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
         ctx.drawImage(video, 0, 0);
-        return canvas.toDataURL('image/jpeg', 0.8);
+        // 0.92, not 0.8. This frame is read by Textract or by CompareFaces, and
+        // JPEG artefacts fall on the mid-frequency detail both of them depend
+        // on — small print on a card, the corner of an eye. The extra bytes are
+        // nothing against a capture that has to be retaken.
+        return canvas.toDataURL('image/jpeg', 0.92);
     }, []);
 
     useEffect(() => {

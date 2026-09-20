@@ -41,3 +41,43 @@ const BLAZEFACE_MODEL_PATH = '/vendor/blazeface/model.json';
 export function blazefaceModelUrl(): string {
     return new URL(BLAZEFACE_MODEL_PATH, window.location.origin).href;
 }
+
+/**
+ * How far to zoom the camera in before the check runs. 1 = off.
+ *
+ * ── Why this is the only way to stand further back ──────────────────────────
+ * The distance AWS demands is not ours to set. The oval and every threshold
+ * measured against it arrive from the service in the session
+ * (`Challenge.OvalParameters` and `Challenge.ChallengeConfig`, read in
+ * `getFaceMatchStateInLivenessOval`); the browser only draws what it is sent,
+ * and `CreateFaceLivenessSession` takes no parameter for either. There is not
+ * even a "too close" state in their matcher — anything that is not a match
+ * falls through to TOO_FAR, which is why the hint is always "move closer".
+ *
+ * And it is a demanding oval: with `OVAL_HEIGHT_WIDTH_RATIO = 1.618` against
+ * the 640x480 stream they ask for, its height works out at about 97% of the
+ * frame. The face has to fill the picture almost top to bottom.
+ *
+ * So the requirement cannot be lowered — but what the camera SEES can be
+ * narrowed, which comes to the same thing for the person in front of it. At 2x
+ * the face is twice the size at the same distance, so the same oval is filled
+ * from twice as far away.
+ *
+ * ⚠️ It costs image quality, knowingly. Zoom is a crop: fewer real pixels land
+ * on the face, and those pixels are what the anti-spoofing measurement is made
+ * of. Expect `livenessConfidence` to fall. Accepted deliberately — an
+ * administrator who cannot complete the check at all is worse than one whose
+ * score is lower — but it is the number to watch on the bench
+ * (`/design/liveness-lab`) when tuning this, because the whole point of that
+ * check is the margin between a live face and a spoof.
+ *
+ * ⚠️ Not every camera can do it. `zoom` is a capability the device advertises;
+ * most laptop webcams do not, and there it is a silent no-op. Phones generally
+ * do. `LivenessCamera` logs which happened and reports it to `onCameraZoom`,
+ * which the bench puts on screen — worth checking before tuning this number,
+ * since on a device with no zoom every value here does the same nothing.
+ *
+ * It is also clamped to what the device advertises, so asking for more than the
+ * hardware has gets the hardware's maximum rather than a refusal.
+ */
+export const CAMERA_ZOOM = 3;
