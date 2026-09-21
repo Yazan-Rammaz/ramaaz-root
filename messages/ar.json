@@ -53,7 +53,16 @@
         "faceRotateManual": "لن يقوم هذا المتصفح بتدوير الشاشة نيابةً عنك — أدِر الجهاز يدويًا من فضلك.",
         "livenessRecording": "تسجيل",
         "livenessCancel": "إلغاء الفحص",
-        "livenessPhotosensitivity": "يومض هذا الفحص بضوء ملوّن."
+        "livenessPhotosensitivity": "يومض هذا الفحص بضوء ملوّن.",
+        "matchComparing": "يقارن الذكاء الاصطناعي وجهك بهويتك…",
+        "matchDone": "تمت مطابقة الهوية مع صورتك",
+        "matchWrong": "لم تتطابق الهوية مع صورتك",
+        "matchFacePhoto": "صورة الوجه",
+        "matchNoMatch": "الوجه غير مطابق",
+        "matchReview": "تم قبول المطابقة بثقة منخفضة — سيراجع فريقنا عملية التحقق. جارٍ الانتقال إلى الخطوة التالية…",
+        "matchFailed": "لاحظنا اختلافًا في الصورة، وهناك مشكلة في عملية التحقق.",
+        "matchTryAgain": "أعد المحاولة بعد التصحيح",
+        "matchRetry": "إعادة المطابقة"
     },
     "common": {
         "appName": "Ramaaz Root",

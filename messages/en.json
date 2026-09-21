@@ -53,7 +53,16 @@
         "faceRotateManual": "This browser will not turn the screen for you — please rotate the device by hand.",
         "livenessRecording": "Rec",
         "livenessCancel": "Cancel the check",
-        "livenessPhotosensitivity": "This check flashes coloured light."
+        "livenessPhotosensitivity": "This check flashes coloured light.",
+        "matchComparing": "AI is comparing your face with your ID…",
+        "matchDone": "ID Matching With Your Photo Done",
+        "matchWrong": "ID Matching With Your Photo Not Correct",
+        "matchFacePhoto": "Face Photo",
+        "matchNoMatch": "Face did not match",
+        "matchReview": "Match accepted with low confidence — your verification will be reviewed by our team. Continuing to the next step…",
+        "matchFailed": "We noticed a discrepancy in the image and there is an issue with your verification.",
+        "matchTryAgain": "Try Again With The Correction",
+        "matchRetry": "Rematch"
     },
     "common": {
         "appName": "Ramaaz Root",

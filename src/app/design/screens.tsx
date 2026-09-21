@@ -48,7 +48,11 @@ function AuthShell({ children }: { children: ReactNode }) {
         // `h-full` mirrors the real (auth) layout — see the note there on why
         // `h-screen` is wrong on iOS.
         <div className="relative h-full overflow-hidden">
-            <div className="absolute top-30 start-30">
+            {/* `z-10` for the reason the real layout gives: the screens paint
+                after this and fill their box with white, so without it the
+                wordmark is partly covered on every KYC step. Kept in step with
+                (auth)/layout.tsx — this shell exists to be the same shell. */}
+            <div className="absolute top-30 start-30 z-10">
                 <Icon name="auth/rdb" width={72} height={52} alt="Ramaaz Digital Banking" />
                 <p className="text-[#388CFF] text-center mt-4 font-medium">Root</p>
             </div>

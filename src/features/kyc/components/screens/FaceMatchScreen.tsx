@@ -1,15 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Image from 'next/image';
 import { motion, AnimatePresence } from 'motion/react';
+import { useTranslations } from 'next-intl';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import type { IDDocument } from '@/features/kyc/types/verification';
 import { api } from '@/features/kyc/services/kycApi';
 import { useRouter } from 'next/navigation';
 import ExitConfirmDialog from '../ExitConfirmDialog';
-import faceDetectSvg from '@/features/kyc/assets/face-detect.svg';
-import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
 import { FlexSpace } from '@/components/ui/FlexSpace';
 import { fetchStoredFace } from '@/features/kyc/services/storedFace';
 import { Icon } from '@/components/ui/Icon';
@@ -75,8 +73,28 @@ export default function FaceMatchScreen({
     } = useVerification();
     const router = useRouter();
 
+    const t = useTranslations('auth');
     const [matchState, setMatchState] = useState<MatchState>('matching');
-    const [subtitle, setSubtitle] = useState('AI is comparing your face with your ID...');
+    /**
+     * A message the SERVER sent, shown instead of our own line when there is
+     * one.
+     *
+     * Deliberately not translated: it arrives as text, in whatever language the
+     * backend speaks, and inventing a key for a sentence we did not write would
+     * mean showing something other than what it said.
+     */
+    const [serverMessage, setServerMessage] = useState<string | null>(null);
+    /*
+     * The subtitle as a message KEY, not a sentence.
+     *
+     * It used to hold the English text itself, which meant a language change
+     * mid-screen left the previous locale's copy on screen until something
+     * happened to overwrite it — state does not re-render through `t`. Holding
+     * the key and resolving it below fixes that for free.
+     */
+    const [subtitleKey, setSubtitleKey] = useState<
+        'matchComparing' | 'matchDone' | 'matchWrong'
+    >('matchComparing');
     const [showExitDialog, setShowExitDialog] = useState(false);
     /** False for the first FACE_ONLY_MS — the face is shown on its own. */
     const [comparing, setComparing] = useState(false);
@@ -107,17 +125,18 @@ export default function FaceMatchScreen({
      */
     const resolvedFaceRef = useRef<string | null>(null);
 
-    const handleFailure = useCallback(
-        (msg?: string) => {
-            // NOTE: do NOT increment the attempt count here. A failed face
-            // detection / compare is not a "try" — the count is bumped once per
-            // actual submit (see finaliseAfterAnimation). The final block/decision
-            // is owned by the NestJS backend, never the client.
-            setMatchState('failed');
-            setSubtitle(msg || 'ID Matching With Your Photo Not Correct');
-        },
-        [],
-    );
+    const handleFailure = useCallback((msg?: string) => {
+        // NOTE: do NOT increment the attempt count here. A failed face
+        // detection / compare is not a "try" — the count is bumped once per
+        // actual submit (see finaliseAfterAnimation). The final block/decision
+        // is owned by the NestJS backend, never the client.
+        setMatchState('failed');
+        // The server's own words when it gave any, otherwise ours. Its
+        // message is not translated — it is a backend string — so it is shown
+        // as sent rather than guessed at.
+        setServerMessage(msg ?? null);
+        setSubtitleKey('matchWrong');
+    }, []);
 
     const finaliseAfterAnimation = useCallback(async () => {
         // Wait for the comparison if it has not landed yet. The animation is a
@@ -222,7 +241,8 @@ export default function FaceMatchScreen({
                 // to the device step by throwing — but shown when it does
                 // return, so "Done" is only ever true.
                 setMatchState('success');
-                setSubtitle('ID Matching With Your Photo Done');
+                setServerMessage(null);
+                setSubtitleKey('matchDone');
             } else {
                 console.warn('[FaceMatch] Skipping submit — missing:', {
                     hasIdDocument: !!idDocument,
@@ -257,7 +277,7 @@ export default function FaceMatchScreen({
                 confidence: 0,
                 similarity: 0,
                 verdict: 'fail',
-                errorMessage: data.message ?? 'Face did not match',
+                errorMessage: data.message ?? t('matchNoMatch'),
             });
             // Same rule as above: the service's own wording goes to the
             // console, the screen gets the one fixed line.
@@ -280,7 +300,8 @@ export default function FaceMatchScreen({
         matchInFlight.current = true;
 
         setMatchState('matching');
-        setSubtitle('AI is comparing your face with your ID...');
+        setServerMessage(null);
+        setSubtitleKey('matchComparing');
         setAnimDone(false);
         hasFinalisedRef.current = false;
         apiResultRef.current = null;
@@ -443,7 +464,13 @@ export default function FaceMatchScreen({
         // has: if the elastic space runs out the screen scrolls rather than
         // pushing Rematch off the bottom edge. At 932 there is slack, so nothing
         // scrolls and the frame is untouched.
-        <div className="thin-scroll flex min-h-0 h-full flex-col overflow-y-auto bg-white px-40">
+        //
+        // ⚠️ `px-20`, not the `px-40` this carried. On the 430 canvas that left
+        // a 350 content box holding a `w-390` button — 40 over, running off the
+        // side. IDSummaryScreen, which this screen is otherwise a twin of, has
+        // always been `px-20`; the buttons were copied across and the padding
+        // was not.
+        <div className="thin-scroll flex min-h-0 h-full flex-col overflow-y-auto bg-white px-20">
             <ExitConfirmDialog
                 open={showExitDialog}
                 onCancel={() => setShowExitDialog(false)}
@@ -469,23 +496,54 @@ export default function FaceMatchScreen({
             <FlexSpace size={44} share={0.25} />
 
             <h1 className="fz-30 leading-none font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
-                Identity Verification !
+                {t('identityTitle')}
             </h1>
-            <div className="flex shrink-0 items-center justify-center gap-8 mb-11">
-                <Image src={faceDetectSvg} alt="face" className="object-contain w-20 h-20" />
-                <Image src={liveDetectIdSvg} alt="id" className="object-contain w-20 h-20" />
-                <span className="fz-16 font-medium text-[#1D1D1D] whitespace-nowrap">
-                    {subtitle}
+            {/*
+              ⚠️ No `whitespace-nowrap`. This line is not always the short
+              status it was designed around — when the backend sends its own
+              message it can be a full sentence, and a nowrap line that long
+              overflows the container in BOTH directions, running under the
+              logo above and off the edge beside it. Wrapping is the only
+              behaviour that is correct for every message it can be handed.
+
+              `w-full` so the wrap happens at the content width rather than at
+              whatever the flex row happens to be.
+            */}
+            <div className="flex w-full shrink-0 flex-wrap items-center justify-center gap-x-8 gap-y-4 mb-11">
+                {/* `<Icon>`, not `<Image src={svg}>`: the glyphs live in
+                    /public/icons and are recoloured by the mask (AGENTS.md §5).
+                    Decorative here — the sentence beside them says it. */}
+                <Icon name="kyc/face_detect" width={20} height={20} alt="" />
+                <Icon name="kyc/id_detect" width={20} height={20} alt="" />
+                <span className="fz-16 text-center leading-normal font-medium text-[#1D1D1D]">
+                    {serverMessage ?? t(subtitleKey)}
                 </span>
             </div>
 
             {/* Comparison stage: face (back) and ID (front, fading) on the same canvas */}
             <div
-                // `shrink-0` holds this at exactly 350 x 400 everywhere. It is
+                // 280 x 320 — four fifths of the 350 x 400 it was. The screen
+                // has more to say than the camera screens do (a status line
+                // that can run to a sentence, a review banner, two buttons),
+                // and the stage was taking room from all of it. The ID overlay
+                // below is scaled by the same fifth so the composition inside
+                // is unchanged.
+                //
+                // `shrink-0` holds it at exactly that everywhere. It is
                 // the whole point of the screen — the user is being shown the
                 // two images that were compared — so it is the one thing that
                 // must not be resized to make room.
-                className="relative mx-auto shrink-0 overflow-hidden rad-30 transition-colors duration-500 w-350 h-400 bg-[#E9EEEE]"
+                //
+                // LTR in every language, the same exception the camera frames
+                // take (see IDCaptureScreen and FaceLivenessScreen). What is
+                // inside is a photograph and a scanned card pinned to it at
+                // measured offsets, plus the bracket that marks the face on
+                // that card — an arrangement of images, not a line of reading.
+                // Mirrored, the ID slides to the far side of the frame and the
+                // bracket lands on the wrong part of the document. The screen's
+                // own copy is outside this box and still mirrors.
+                dir="ltr"
+                className="relative mx-auto shrink-0 overflow-hidden rad-30 transition-colors duration-500 w-280 h-320 bg-[#E9EEEE]"
                 style={{ border: `2px solid ${borderColor}` }}
             >
                 {/* User face — always rendered */}
@@ -507,7 +565,7 @@ export default function FaceMatchScreen({
                     />
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-gray-400 text-xs">Face Photo</span>
+                        <span className="fz-12 text-[#707070]">{t('matchFacePhoto')}</span>
                     </div>
                 )}
 
@@ -529,7 +587,7 @@ export default function FaceMatchScreen({
                 {/* ID image — crossfades over the face every cycle */}
                 {idImage && matchState === 'matching' && comparing && (
                     <motion.div
-                        className="absolute z-10 w-280 h-157 bottom-11 start-35"
+                        className="absolute z-10 w-224 h-126 bottom-9 start-28"
                         animate={{ opacity: [0.5, 1, 1, 0.5, 0.5] }}
                         transition={{
                             duration: 2,
@@ -559,10 +617,10 @@ export default function FaceMatchScreen({
                                         left: '8%',
                                         width: '28%',
                                         height: '46%',
-                                        borderRadius: '6px',
+                                        borderRadius: '0.375rem',
                                     }}
                                 >
-                                    <div className="absolute inset-0 rounded-md" />
+                                    <div className="absolute inset-0 rad-6" />
                                     {/* ID camera-style corner brackets */}
                                     <span
                                         className="absolute"
@@ -620,17 +678,15 @@ export default function FaceMatchScreen({
             </div>
 
             {matchState === 'review' && (
-                <div className="mt-20 mx-auto max-w-300 rounded-xl border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-16 py-12 text-center">
-                    <p className="text-xs text-center font-medium text-[#92400E]">
-                        Match accepted with low confidence — your verification will be reviewed by
-                        our team. Continuing to the next step…
+                <div className="mt-20 mx-auto max-w-300 rad-12 border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-16 py-12 text-center">
+                    <p className="fz-12 text-center leading-normal font-medium text-[#92400E]">
+                        {t('matchReview')}
                     </p>
                 </div>
             )}
             {matchState === 'failed' && (
-                <p className="fz-14 shrink-0 text-center text-[#1D1D1D] mt-12 mb-20">
-                    We noticed a discrepancy in the image and there is an issue with your
-                    verification.
+                <p className="fz-14 shrink-0 text-center leading-normal text-[#1D1D1D] mt-12 mb-20">
+                    {t('matchFailed')}
                 </p>
             )}
 
@@ -651,16 +707,16 @@ export default function FaceMatchScreen({
                         // secondary way out, not two sections.
                         className="mb-12 w-390 h-60 py-16 rad-20 border border-dashed border-[#5D5C5D]/50 text-[#1D1D1D] fz-16 font-medium"
                     >
-                        Try Again With The Correction
+                        {t('matchTryAgain')}
                     </button>
-                    <button
+                    {/* <button
                         onClick={() => runMatch()}
-                        title="Rematch"
-                        aria-label="Rematch"
+                        title={t('matchRetry')}
+                        aria-label={t('matchRetry')}
                         className="flex h-36 w-36 items-center justify-center rad-12 border border-[#5D5C5D]/40 text-[#4D84FF] transition-colors hover:border-[#4D84FF]"
                     >
                         <Icon name="kyc/retry" size={18} mask />
-                    </button>
+                    </button> */}
                 </div>
             )}
             {/* 12 from the foot, STATIC — the flow-wide rule. */}

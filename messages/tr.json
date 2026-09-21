@@ -53,7 +53,16 @@
         "faceRotateManual": "Bu tarayıcı ekranı sizin için çeviremiyor — lütfen cihazı elle döndürün.",
         "livenessRecording": "Kayıt",
         "livenessCancel": "Kontrolü iptal et",
-        "livenessPhotosensitivity": "Bu kontrol renkli ışık yanıp söner."
+        "livenessPhotosensitivity": "Bu kontrol renkli ışık yanıp söner.",
+        "matchComparing": "Yapay zekâ yüzünüzü kimliğinizle karşılaştırıyor…",
+        "matchDone": "Kimlik fotoğrafınızla eşleşti",
+        "matchWrong": "Kimlik fotoğrafınızla eşleşmedi",
+        "matchFacePhoto": "Yüz fotoğrafı",
+        "matchNoMatch": "Yüz eşleşmedi",
+        "matchReview": "Eşleşme düşük güvenle kabul edildi — doğrulamanız ekibimiz tarafından incelenecek. Sonraki adıma geçiliyor…",
+        "matchFailed": "Görüntüde bir tutarsızlık fark ettik ve doğrulamanızda bir sorun var.",
+        "matchTryAgain": "Düzelterek tekrar deneyin",
+        "matchRetry": "Yeniden eşleştir"
     },
     "common": {
         "appName": "Ramaaz Root",
