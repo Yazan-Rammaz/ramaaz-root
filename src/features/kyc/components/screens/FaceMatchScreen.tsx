@@ -92,9 +92,9 @@ export default function FaceMatchScreen({
      * happened to overwrite it — state does not re-render through `t`. Holding
      * the key and resolving it below fixes that for free.
      */
-    const [subtitleKey, setSubtitleKey] = useState<
-        'matchComparing' | 'matchDone' | 'matchWrong'
-    >('matchComparing');
+    const [subtitleKey, setSubtitleKey] = useState<'matchComparing' | 'matchDone' | 'matchWrong'>(
+        'matchComparing',
+    );
     const [showExitDialog, setShowExitDialog] = useState(false);
     /** False for the first FACE_ONLY_MS — the face is shown on its own. */
     const [comparing, setComparing] = useState(false);
@@ -470,7 +470,7 @@ export default function FaceMatchScreen({
         // side. IDSummaryScreen, which this screen is otherwise a twin of, has
         // always been `px-20`; the buttons were copied across and the padding
         // was not.
-        <div className="thin-scroll flex min-h-0 h-full flex-col overflow-y-auto bg-white px-20">
+        <div className="thin-scroll items-center flex min-h-0 h-full flex-col overflow-y-auto bg-white px-20">
             <ExitConfirmDialog
                 open={showExitDialog}
                 onCancel={() => setShowExitDialog(false)}
@@ -492,10 +492,10 @@ export default function FaceMatchScreen({
               and 35 the frame asks for. Shares total 1: 0.25 top, 0.65 on the
               150 above the buttons, 0.10 at the foot.
             */}
-            <FlexSpace size={56} share={0} />
+            <FlexSpace size={100} share={0} />
             <FlexSpace size={44} share={0.25} />
 
-            <h1 className="fz-30 leading-none font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
+            <h1 className="fz-25 leading-none font-bold text-center text-[#1D1D1D] mb-5 shrink-0">
                 {t('identityTitle')}
             </h1>
             {/*
@@ -509,13 +509,13 @@ export default function FaceMatchScreen({
               `w-full` so the wrap happens at the content width rather than at
               whatever the flex row happens to be.
             */}
-            <div className="flex w-full shrink-0 flex-wrap items-center justify-center gap-x-8 gap-y-4 mb-11">
+            <div className="flex w-full max-w-300 shrink-0 flex-wrap items-center justify-center gap-x-8 gap-y-4 mb-11">
                 {/* `<Icon>`, not `<Image src={svg}>`: the glyphs live in
                     /public/icons and are recoloured by the mask (AGENTS.md §5).
                     Decorative here — the sentence beside them says it. */}
-                <Icon name="kyc/face_detect" width={20} height={20} alt="" />
-                <Icon name="kyc/id_detect" width={20} height={20} alt="" />
-                <span className="fz-16 text-center leading-normal font-medium text-[#1D1D1D]">
+                <Icon name="kyc/face_detect" width={16} height={16} alt="" />
+                <Icon name="kyc/id_detect" width={16} height={16} alt="" />
+                <span className="fz-12 text-center leading-normal font-medium text-[#1D1D1D]">
                     {serverMessage ?? t(subtitleKey)}
                 </span>
             </div>
@@ -543,7 +543,7 @@ export default function FaceMatchScreen({
                 // bracket lands on the wrong part of the document. The screen's
                 // own copy is outside this box and still mirrors.
                 dir="ltr"
-                className="relative mx-auto shrink-0 overflow-hidden rad-30 transition-colors duration-500 w-280 h-320 bg-[#E9EEEE]"
+                className="relative mx-auto shrink-0 overflow-hidden rad-30 transition-colors duration-500 w-300 h-350 bg-[#E9EEEE]"
                 style={{ border: `2px solid ${borderColor}` }}
             >
                 {/* User face — always rendered */}
@@ -685,7 +685,7 @@ export default function FaceMatchScreen({
                 </div>
             )}
             {matchState === 'failed' && (
-                <p className="fz-14 shrink-0 text-center leading-normal text-[#1D1D1D] mt-12 mb-20">
+                <p className="fz-12 max-w-300 shrink-0 text-center leading-normal text-[#1D1D1D] mt-12 mb-20">
                     {t('matchFailed')}
                 </p>
             )}
