@@ -58,13 +58,34 @@ sample").
 - The browser **never** calls NestJS and **never** holds a token.
 - Server-only `src/lib/api/server.ts` (`api.get/post/...`) is the single client
   for the **root backend** (auth, the systems registry). Its base URL is
-  `NEST_API_URL`; the local `root-backend` service was deleted and the remote
-  replacement isn't wired yet, so that var is unset and calls fail with one
-  clear `BackendNotConfiguredError` rather than crashing a render.
+  `NEST_API_URL`, and it **is** set — `https://staging-backend.ramaaz.store`, in
+  `wrangler.jsonc` for the deployed Worker and in `.env.local` / `.dev.vars`
+  locally. (The old local `root-backend` service was deleted; this is its remote
+  replacement.)
+    - The one place it is deliberately unset is **CI** — see §8. That is what
+      `BackendNotConfiguredError` exists for: an unset var yields one clear 503
+      instead of a DNS timeout, `getSession()` reads it as "signed out", and the
+      build still prerenders every route. It is a safety net for that case, not
+      a description of how the app runs.
 - **Auth paths live in one table** — `src/lib/auth/endpoints.ts` (`AUTH_PATHS`),
   used by `features/auth/actions.ts`, `lib/auth/session.ts` and `middleware.ts`.
-  Never hardcode an `/auth/*` path at a call site; add it there. The current
-  entries are the deleted backend's and are UNVERIFIED against the remote one.
+  Never hardcode an `/auth/*` path at a call site; add it there. That file
+  carries a per-endpoint status block probed against staging, plus the questions
+  still open with the backend — read it before trusting any one line.
+- **Every backend call carries the BROWSER's address, country and User-Agent**,
+  not this Worker's — `src/lib/api/edge.ts`, wired into `api` and into the
+  middleware refresh. The backend keys rate limits, a link's country/address
+  conditions, *and* sign-in resumption on the caller; with our own details going
+  out, all three measured the wrong party, and resumption in particular let
+  anyone holding a link pick up somebody else's half-finished sign-in. Gated on
+  the `EDGE_SECRET` Cloudflare secret — unset (local dev) means the headers are
+  omitted entirely, which is the backend's own rule, so there is no dev branch.
+- **Never count attempts, or decide locally that a retry is not allowed.** The
+  backend owns every budget — failed codes, rate limits, challenge lifetime —
+  and says on each response whether another try is possible. A counter kept here
+  can only disagree, and it disagrees by refusing somebody the server would have
+  let through. Same rule for 429: show `Retry-After` and let the person decide;
+  never retry on a timer.
 - **Project data** (regions, currencies, languages, …) lives in the SELECTED
   system's own backend: `src/lib/api/backend.ts` (`backendFetch.get/post/...`)
   resolves the `rdb_sys` cookie against the registry and routes to that
@@ -88,9 +109,13 @@ sample").
   `proxy` convention is locked to the Node.js runtime, and OpenNext/Cloudflare
   only supports an **edge** middleware. The build prints a `proxy`-deprecation
   warning — that's expected; ignore it.
-- The authoritative gate is `requireSession()` / `requireRole()` in protected
-  layouts/pages — they call NestJS `/auth/me`. **Frontend RBAC is for rendering
-  only; NestJS enforces every real rule.**
+- The gate is `requireSession()` / `requireRole()` in protected layouts/pages.
+  ⚠️ It does **not** currently read `GET /v1/me` — that endpoint was returning a
+  sparse projection that made `getSession()` answer null for everybody, so the
+  session comes from the user the `COMPLETED` response already carried, kept in
+  an httpOnly cookie (`lib/auth/session.ts` states plainly what that gives up).
+  `AUTH_PATHS.me` and its schema are kept so restoring it is one line.
+  **Frontend RBAC is for rendering only; the backend enforces every real rule.**
 - Registration is identical for all roles; the backend assigns the role.
 
 ## 4. Validation
@@ -294,13 +319,23 @@ convincing fake of it.
 
 Open items, in priority order:
 
-1. **Confirm/align the NestJS auth contract.** The BFF currently assumes:
-    - `POST /auth/login`, `POST /auth/register`, `POST /auth/refresh` → respond
-      `{ accessToken, refreshToken, accessMaxAge, refreshMaxAge }`
-    - `GET /auth/me` → `{ id, email, name, role, countryCode? }`
-    - `POST /auth/logout` If the real NestJS endpoints differ, update
-      `src/lib/api/server.ts`, `src/features/auth/actions.ts`,
-      `src/lib/auth/session.ts`, and `src/middleware.ts` to match.
+1. **Close the open questions on the auth contract.** The old
+   `/auth/login` + `/auth/me` picture that used to sit here is GONE — the flow is
+   the challenge state machine in `src/lib/auth/endpoints.ts` (`/v1/auth/link`,
+   `/private-code`, `/face`, `/identity-document`, `/refresh`). That file is the
+   one to read and the one to change.
+
+   Outstanding with the backend, all recorded in that file:
+    - **Client IP.** The limiter and the country condition key on the caller's
+      address, and the caller is always this Worker — the browser never reaches
+      the backend. Until they name a forwarded-IP header we can send, those
+      budgets are shared by every administrator at once.
+    - Is `/v1/auth/identity-document` live, and does it take base64 or
+      `evidence: { step_token }`?
+    - Are the stage strings still the `*_REQUIRED` spellings?
+    - Is the face verifier real, or still the accept-anything stub?
+    - On a 429 from `/v1/auth/refresh`, is the refresh token spent? (We keep the
+      cookie and do not retry — see `lib/auth/refresh.ts`.)
 
 2. **Build real screens from XD.** Translate frames using the XD-pixel utilities
    (section 1). Each new domain area = `npm run gen` then wire pages under

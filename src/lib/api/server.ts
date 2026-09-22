@@ -1,6 +1,9 @@
 import "server-only";
+import { headers } from "next/headers";
 import { env } from "@/lib/env";
+import { cfEnv } from "@/lib/cf-env";
 import { getAccessToken } from "@/lib/auth/cookies";
+import { edgeHeaders, FALLBACK_USER_AGENT } from "./edge";
 
 /**
  * THE single way to call the NestJS API. Server-only.
@@ -19,6 +22,17 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public body?: unknown,
+    /**
+     * `Retry-After`, in seconds, when the response carried one.
+     *
+     * Kept on the error because the response object does not survive this
+     * function, and the header is the only place the delay is guaranteed to
+     * be: a 429 from the backend also puts it in
+     * `error.details.retry_after_seconds`, but one raised by an edge or a proxy
+     * in front of it may have no JSON body at all. `retryAfterSeconds()` in
+     * `lib/auth/errors.ts` prefers this and falls back to the body.
+     */
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -26,12 +40,13 @@ export class ApiError extends Error {
 }
 
 /**
- * No backend is wired yet (`NEST_API_URL` unset).
+ * `NEST_API_URL` is unset — which, everywhere the app actually runs, it is not.
+ * It is set in `wrangler.jsonc`, `.env.local` and `.dev.vars`; CI is the one
+ * environment that deliberately omits it (AGENTS.md §8).
  *
- * The local `root-backend` was deleted and the remote one isn't configured, so
- * every call would otherwise fail somewhere deep in fetch with a DNS error. One
- * explicit 503 instead: screens still render, and anything that actually needs
- * data says plainly why it can't have any. `getSession()` reads this as
+ * Without it every call would fail somewhere deep in fetch with a DNS error.
+ * One explicit 503 instead: screens still render, and anything that actually
+ * needs data says plainly why it can't have any. `getSession()` reads this as
  * "unauthenticated", so the app degrades to the login screen rather than
  * crashing the render.
  */
@@ -61,15 +76,33 @@ export class BackendNotConfiguredError extends ApiError {
 }
 
 /**
- * Identifies this client in the backend's logs.
+ * Who the backend should think is calling — see `./edge.ts` for why this
+ * matters more than attribution.
  *
- * Not required to get through: the backend sits behind Cloudflare bot
- * protection, but Node's fetch is not challenged by it (curl is — a `curl/*`
- * UA gets a 403 HTML interstitial, which is a testing gotcha, not a runtime
- * one). Sent anyway so requests are attributable, and so a future tightening of
- * those bot rules doesn't take the dashboard down.
+ * Every value comes from the request the BROWSER made, which `headers()` gives
+ * us inside a Server Component or Action. Outside one — a build-time render —
+ * it throws, and there is no browser to speak for anyway, so the call goes out
+ * unattributed apart from our own User-Agent.
+ *
+ * ⚠️ The User-Agent forwarded here is the browser's, replacing the fixed string
+ * this client used to send. That is not cosmetic: resume matching compares it
+ * exactly, so a constant one made every caller look like every other.
  */
-const USER_AGENT = "RamaazRootDashboard/1.0";
+async function callerHeaders(): Promise<Record<string, string>> {
+  try {
+    const incoming = await headers();
+    return edgeHeaders(
+      {
+        ip: incoming.get("CF-Connecting-IP"),
+        country: incoming.get("CF-IPCountry"),
+        userAgent: incoming.get("User-Agent"),
+      },
+      cfEnv("EDGE_SECRET"),
+    );
+  } catch {
+    return { "User-Agent": FALLBACK_USER_AGENT };
+  }
+}
 
 /**
  * Pull the human-readable message out of an error response.
@@ -96,22 +129,25 @@ type RequestOptions = Omit<RequestInit, "body"> & {
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { json, headers, cache = "no-store", ...rest } = options;
+  // `headers` is renamed on the way out of `options` — the import from
+  // `next/headers` owns that name in this module now.
+  const { json, headers: extraHeaders, cache = "no-store", ...rest } = options;
 
   const base = env.NEST_API_URL;
   if (!base) throw new BackendNotConfiguredError();
 
   const token = await getAccessToken();
+  const caller = await callerHeaders();
 
   const res = await fetch(`${base}${path}`, {
     ...rest,
     cache,
     headers: {
       Accept: "application/json",
-      "User-Agent": USER_AGENT,
+      ...caller,
       ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
+      ...extraHeaders,
     },
     body: json !== undefined ? JSON.stringify(json) : undefined,
   });
@@ -123,7 +159,20 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     .catch(() => undefined as unknown);
 
   if (!res.ok) {
-    throw new ApiError(res.status, errorMessage(payload, res.status), payload);
+    // `Retry-After` is defined as either a delay in seconds or an HTTP date.
+    // This backend sends seconds; anything that does not parse as a positive
+    // integer is dropped rather than guessed at, and the caller falls back to
+    // the body or to a default wait.
+    const header = Number(res.headers.get("Retry-After"));
+    const retryAfter =
+      Number.isInteger(header) && header > 0 ? header : undefined;
+
+    throw new ApiError(
+      res.status,
+      errorMessage(payload, res.status),
+      payload,
+      retryAfter,
+    );
   }
 
   return payload as T;

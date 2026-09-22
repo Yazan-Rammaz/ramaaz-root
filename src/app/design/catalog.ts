@@ -205,6 +205,13 @@ export const DESIGN_CATALOG: DesignEntry[] = [
         note: 'Attack the real AWS check, read the score, run again',
     },
     {
+        slug: 'capture-lab',
+        title: 'Capture bench',
+        group: 'Identity',
+        canvas: 'mobile',
+        note: 'The captured photo, stage by stage — no sign-in, no AWS, no cost',
+    },
+    {
         slug: 'kyc-intro',
         title: 'Intro',
         group: 'Identity',

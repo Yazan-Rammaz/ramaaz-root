@@ -14,7 +14,16 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * route unreachable without a live challenge, and a second copy of the markup
  * for previewing would drift from the first the day either is touched.
  */
-export async function PrivateCodeScreen() {
+export async function PrivateCodeScreen({
+    /**
+     * The deployment's private-code lifetime, from the server. Passed in rather
+     * than read here so the design gallery can render this screen with any
+     * value — or none — without a challenge behind it.
+     */
+    ttlSeconds,
+}: {
+    ttlSeconds?: number;
+} = {}) {
     const t = await getTranslations('auth');
 
     return (
@@ -41,7 +50,7 @@ export async function PrivateCodeScreen() {
                 </p>
 
                 <div style={{ marginTop: rem(88) }}>
-                    <PrivateCodeStep />
+                    <PrivateCodeStep ttlSeconds={ttlSeconds} />
                 </div>
             </div>
         </main>

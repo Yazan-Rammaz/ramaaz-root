@@ -18,6 +18,7 @@ import VerificationPage from '@/features/kyc/components/VerificationPage';
 import { SystemList } from '@/features/system/components/SystemList';
 import { FaceLivenessPreview } from './FaceLivenessPreview';
 import { LivenessLab } from './LivenessLab';
+import { CaptureLab } from './CaptureLab';
 
 // The real route components. These have no guards of their own — the session
 // gate lives in the (dashboard) layout, and `no-access` / `forbidden` are
@@ -154,9 +155,14 @@ export const SCREENS: Record<string, () => ReactNode> = {
             </Screen>
         </AuthShell>
     ),
-    // The bench. No AuthShell and no Screen: it is a tool, not a screen of the
-    // product, and dressing it as one would invite it being read as design.
+    // The benches. No AuthShell and no Screen: they are tools, not screens of
+    // the product, and dressing them as one would invite them being read as
+    // design.
     'liveness-lab': () => <LivenessLab />,
+    // Where the captured photograph is judged. Unlike the liveness bench this
+    // opens no AWS session and costs nothing per run, so it is the one to
+    // reach for when the question is how the picture LOOKS.
+    'capture-lab': () => <CaptureLab />,
     'kyc-intro': () => <KycStep step="intro" />,
     'kyc-id-front': () => <KycStep step="id-capture-front" />,
     'kyc-id-back': () => <KycStep step="id-capture-back" />,

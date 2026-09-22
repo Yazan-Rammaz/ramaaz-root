@@ -1,27 +1,47 @@
 import "server-only";
-import { api } from "@/lib/api/server";
+import { listRegistry, type RegistryEntry } from "@/lib/api/backend";
 import { systemSchema, type System } from "./schema";
 
 /**
- * Single place system endpoints are read. Server-only.
+ * Single place system data is read. Server-only.
  *
- * ⚠️ HOMELESS UNTIL THE REMOTE BACKEND LANDS. The systems registry — the list
- * of company projects and the base URL of each one's backend — used to live in
- * the local `root-backend`, which has been deleted. Nothing serves `/systems`
- * right now, so these calls fail with `BackendNotConfiguredError` (no backend
- * wired) or 404 (wired, but no registry there).
+ * ── There is no /systems route. The registry rides on the session ───────────
+ * The list of company projects used to live in the local `root-backend`, which
+ * was deleted, and this file called a `/systems` that nothing served. The remote
+ * backend serves it as `projects` on `GET /v1/me` instead — confirmed
+ * 2026-09-22 — so `lib/api/backend.ts` owns the read (it needs the same data to
+ * route project calls, and `lib` may not import from `features`) and this maps
+ * it onto the shape the screen renders.
  *
- * That matters beyond this screen: `lib/api/backend.ts` resolves the selected
- * system through here, so every project-data page depends on it. The remote
- * backend needs to either serve this registry or the base URLs need another
- * home. Responses stay schema-parsed so drift fails loud.
+ * For a root administrator the registry is EVERY registered system, so an empty
+ * list means none is registered yet, not that none is visible.
+ *
+ * It carries no base URL, and needs none: the root backend proxies project data
+ * and the entry's `id` becomes a path segment — `/v1/projects/{id}/…`. See
+ * `lib/api/backend.ts`.
  */
-export async function listSystems(): Promise<System[]> {
-  const data = await api.get<unknown>("/systems");
-  return systemSchema.array().parse(data);
+
+/**
+ * Registry entry → the row the UI renders.
+ *
+ * `description` is the one field the wire shape has no equivalent for: the
+ * screen shows a one-line category under each name, and the nearest thing the
+ * backend sends is `project_type`. Falling back to the code keeps the row from
+ * collapsing, and an entry with neither still renders its name.
+ */
+function toSystem(entry: RegistryEntry): System {
+  return {
+    id: entry.id,
+    code: entry.code,
+    name: entry.name,
+    description: entry.projectType ?? entry.code,
+  };
 }
 
-export async function getSystem(id: string): Promise<System> {
-  const data = await api.get<unknown>(`/systems/${encodeURIComponent(id)}`);
-  return systemSchema.parse(data);
+export async function listSystems(): Promise<System[]> {
+  return systemSchema.array().parse((await listRegistry()).map(toSystem));
+}
+
+export async function getSystem(id: string): Promise<System | null> {
+  return (await listSystems()).find((s) => s.id === id) ?? null;
 }

@@ -18,11 +18,15 @@ const schema = z.object({
   /**
    * Base URL of the backend the BFF proxies to (server-side only).
    *
-   * OPTIONAL, deliberately: the local `root-backend` has been deleted and the
-   * remote backend's URL is not known yet. Unset means "no backend wired" —
-   * `lib/api/server.ts` turns that into one clear `BackendNotConfiguredError`
-   * instead of a crash, so every screen still renders for review. Set it and
-   * the whole BFF works again with no other change.
+   * Set everywhere the app actually runs — `https://staging-backend.ramaaz.store`
+   * in `wrangler.jsonc` (deployed) and in `.env.local` / `.dev.vars` (local).
+   *
+   * OPTIONAL in the schema anyway, for the one environment that leaves it out:
+   * CI, deliberately, so the build prerenders every route without a backend
+   * (AGENTS.md §8). Unset means "no backend wired" — `lib/api/server.ts` turns
+   * that into one clear `BackendNotConfiguredError` instead of a crash, and
+   * `getSession()` reads it as "signed out". A safety net for that case, not
+   * the normal state.
    */
   NEST_API_URL: z
     .string()

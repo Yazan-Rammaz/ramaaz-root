@@ -183,11 +183,20 @@ export default function VerificationPage({
                             // branch below has always done this; without it the
                             // liveness path reached the ID-match screen with no
                             // face to compare against.
-                            onFaceCaptured={(frame) => {
-                                if (!frame) return;
+                            onFaceCaptured={(capture) => {
+                                if (!capture) return;
                                 setLivenessResult({
                                     isLive: true,
-                                    faceImageData: frame,
+                                    // The photograph of record — this is what
+                                    // `face-match` posts to CompareFaces.
+                                    faceImageData: capture.stored,
+                                    // Only when it actually differs, so the
+                                    // common case carries no second copy of a
+                                    // ~200KB data URL through context.
+                                    displayImageData:
+                                        capture.display === capture.stored
+                                            ? undefined
+                                            : capture.display,
                                     timestamp: Date.now(),
                                 });
                             }}

@@ -50,10 +50,23 @@ export type ChallengeState = {
    */
   challengeId?: string;
   /**
-   * When the whole sequence dies (10 min from /auth/link). ISO string, drives
-   * the countdown. Authoritative — do not compute a deadline locally.
+   * When the whole sequence dies (10 min from /auth/link). ISO string.
+   * Authoritative — do not compute a deadline locally.
    */
   challengeExpiresAt?: string;
+  /**
+   * How long a private code lives on THIS deployment, in seconds.
+   *
+   * Stored because the screen that needs it is rendered from the cookie, not
+   * from the response: `/auth/link` answers PRIVATE_CODE_REQUIRED, `applyStage`
+   * redirects to /login, and the page reads the challenge. Without it here the
+   * value would be dropped one line after it arrived.
+   *
+   * ⚠️ For COPY ONLY — "valid for about eight minutes". Never a countdown: the
+   * clock starts when the administrator messages WhatsApp, which neither side
+   * observes.
+   */
+  privateCodeTtlSeconds?: number;
   /**
    * The access-link token that opened this challenge. Two jobs:
    *
@@ -257,6 +270,11 @@ export async function applyStage(
     challengeToken: result.challenge_token,
     challengeId: result.challenge_id ?? current.challengeId,
     challengeExpiresAt: result.challenge_expires_at,
+    // Carried forward like challengeId: only PRIVATE_CODE_REQUIRED sends it,
+    // and a later step must not erase what the code screen will need if the
+    // flow comes back to it.
+    privateCodeTtlSeconds:
+      result.private_code_ttl_seconds ?? current.privateCodeTtlSeconds,
     // Carried forward for the same reason as challengeId, and it MUST be: drop
     // it at the first step and `/enter/<token>` stops being idempotent — and
     // "start over" stops working — the moment the administrator types their

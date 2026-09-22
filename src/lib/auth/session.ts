@@ -1,8 +1,14 @@
 import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
+import { api, ApiError } from "@/lib/api/server";
 import { getAccessToken, readSessionUser } from "@/lib/auth/cookies";
-import { wireUserSchema, type WireUser } from "@/lib/auth/endpoints";
+import {
+  AUTH_PATHS,
+  meResponseSchema,
+  wireUserSchema,
+  type WireUser,
+} from "@/lib/auth/endpoints";
 import { hasRole, type Role } from "@/lib/auth/rbac";
 
 export type SessionUser = {
@@ -66,41 +72,60 @@ export function toSessionUser(u: WireUser): SessionUser {
 }
 
 /**
- * Who is signed in — read from the session cookie, NOT from the backend.
+ * Who is signed in — asked of the backend, with the cookie as a fallback.
  *
- * ⚠️ `GET /v1/me` is gone. It was the authoritative read, and while it was
- * broken this function answered `null` for everybody: the request failed, the
- * catch below logged it and returned null, and every protected page redirected
- * to /login. A signed-in administrator could not reach the dashboard at all.
+ * ⚠️ THIS ENDPOINT HAS BEEN BROKEN BEFORE, and the failure was severe: `/v1/me`
+ * returned a sparse projection, `wireUserSchema` rejected it, this function
+ * answered `null` for everybody, and every protected page redirected to /login.
+ * A signed-in administrator could not reach the dashboard at all. The backend
+ * fixed it on 2026-09-22 — it now returns the account as stored, the same shape
+ * as `tokens.user` at sign-in. `cache()` dedupes it across a render pass.
  *
- * So the user is taken from the cookie written at sign-in, where the COMPLETED
- * response handed us the whole record. `cache()` still dedupes across a render
- * pass, which now costs nothing rather than saving a round trip.
+ * ── Why the cookie is still read ────────────────────────────────────────────
+ * Not as a second source of truth, and never in preference to the backend. The
+ * rule is exactly:
  *
- * ── What this gives up, stated plainly ──────────────────────────────────────
- * It no longer asks the backend whether the session is still good. The gate is
- * "does this browser hold an access cookie", not "does the server still accept
- * it" — so a session revoked server-side keeps rendering the shell until its
- * token expires or a real request answers 401.
+ *   401 from the backend   → null. The session really is over — revoked link,
+ *                            signed out elsewhere, expired chain.
+ *   any other failure      → fall back to the cookie snapshot. A timeout, a
+ *                            5xx, or no backend configured at all says nothing
+ *                            about whether this person is signed in, and
+ *                            bouncing them to /login over a blip is a worse
+ *                            answer than rendering a shell from what the
+ *                            COMPLETED response already told us.
  *
- * That is narrower than it sounds, and was already the design: frontend RBAC
- * decides rendering only, and NestJS enforces every real rule (AGENTS.md §3).
- * Every call that touches data still carries the bearer and still gets a 401.
- * What a stale cookie buys is an empty dashboard frame.
+ * The snapshot is written by `applyStage` at sign-in and is never newer than
+ * the backend, so the only thing it can get wrong is staleness — and the access
+ * cookie bounds that: middleware refreshes it while the refresh token is good
+ * and deletes both the moment a refresh is genuinely refused.
  *
- * The access cookie is the signal because middleware maintains it: it refreshes
- * it silently while the refresh token is good, and DELETES BOTH the moment a
- * refresh is refused. A dead session therefore stops rendering on the next
- * request rather than lingering.
- *
- * Restore the endpoint and this becomes one call again — `toSessionUser` and
- * `meResponseSchema` are both still here.
+ * ── What it does NOT do ─────────────────────────────────────────────────────
+ * It does not authorise anything. Frontend RBAC decides rendering only and the
+ * backend enforces every real rule (AGENTS.md §3) — every call that touches
+ * data carries the bearer and gets its own 401.
  */
 export const getSession = cache(async (): Promise<SessionUser | null> => {
-  // The token is what says "signed in"; the snapshot only says who. Without it
-  // there is no session, whatever the snapshot claims.
+  // The token is what says "signed in". Without it there is nothing to ask
+  // with, and the snapshot alone is not a session.
   if (!(await getAccessToken())) return null;
 
+  try {
+    const raw = await api.get<unknown>(AUTH_PATHS.me);
+    return toSessionUser(meResponseSchema.parse(raw).user);
+  } catch (error) {
+    // The session is over. Say so — this is the one failure that means it.
+    if (error instanceof ApiError && error.status === 401) return null;
+
+    console.warn("[auth] /v1/me unavailable, falling back to session cookie:", error);
+    return sessionFromCookie();
+  }
+});
+
+/**
+ * The snapshot written at sign-in. Used only when the backend could not be
+ * asked — see `getSession`.
+ */
+async function sessionFromCookie(): Promise<SessionUser | null> {
   const user = await readSessionUser<WireUser>();
   if (!user) return null;
 
@@ -112,7 +137,7 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
     console.warn("[auth] session cookie did not parse:", error);
     return null;
   }
-});
+}
 
 /** Use at the top of any protected Server Component / layout. */
 export async function requireSession(): Promise<SessionUser> {

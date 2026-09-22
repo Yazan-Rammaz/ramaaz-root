@@ -12,7 +12,6 @@ interface VerificationContextType {
     currentStep: VerificationStep;
     direction: 1 | -1;
     completedSteps: Set<VerificationStep>;
-    attemptCounts: Record<string, number>;
     livenessResult: LivenessResult | null;
     /**
      * The face captured earlier in this sign-in, served by /api/face-capture.
@@ -33,8 +32,6 @@ interface VerificationContextType {
     setSelfieCapture: (data: string | null) => void;
     goTo: (step: VerificationStep, dir?: 1 | -1) => void;
     markCompleted: (step: VerificationStep) => void;
-    incrementAttempt: (step: string) => number;
-    getAttemptCount: (step: string) => number;
     setLivenessResult: (result: LivenessResult | null) => void;
     setIdDocument: (doc: IDDocument | null) => void;
     setMatchResult: (result: MatchResult | null) => void;
@@ -45,9 +42,20 @@ interface VerificationContextType {
 
 const VerificationContext = createContext<VerificationContextType | undefined>(undefined);
 
-// No MAX_ATTEMPTS. `attemptCounts` still counts so a screen can show progress,
-// but nothing in this app turns a count into a refusal — the NestJS backend
-// holds the budget and says when it is spent.
+// ⚠️ THIS FLOW COUNTS NOTHING, and that is deliberate.
+//
+// There is no attempt counter, no MAX_ATTEMPTS, and no local notion of "you
+// have tried too many times". The backend owns the budget and says on EVERY
+// response whether another try is allowed — a wrong private code costs an
+// attempt against the account, a face failure deliberately costs nothing, and
+// when the ceiling is reached the challenge burns and the next call answers
+// CHALLENGE_INVALID. A counter kept here could only ever disagree with that,
+// and the way it disagrees is by refusing somebody the server would have let
+// through.
+//
+// A counter did exist (`attemptCounts` / `incrementAttempt` / `getAttemptCount`,
+// ported from rdb). Nothing ever read it — it incremented and logged — so it
+// was removed rather than left as an invitation to gate on it.
 
 export function VerificationProvider({
     children,
@@ -72,7 +80,6 @@ export function VerificationProvider({
     const [currentStep, setCurrentStep] = useState<VerificationStep>(initialStep);
     const [direction, setDirection] = useState<1 | -1>(1);
     const [completedSteps, setCompletedSteps] = useState<Set<VerificationStep>>(new Set());
-    const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
     const [livenessResult, setLivenessResult] = useState<LivenessResult | null>(null);
     const storedFaceSrc = hasStoredFace ? '/api/face-capture' : null;
     const [idDocument, setIdDocument] = useState<IDDocument | null>(null);
@@ -94,10 +101,6 @@ export function VerificationProvider({
         'face-match',
         'success',
     ];
-
-    useEffect(() => {
-        console.log('attemptCounts', attemptCounts);
-    }, [attemptCounts]);
 
     useEffect(() => {
         if (completedSteps.size === 0) return;
@@ -143,30 +146,10 @@ export function VerificationProvider({
         setCompletedSteps((prev) => new Set(prev).add(step));
     }, []);
 
-    const incrementAttempt = useCallback(
-        (step: string): number => {
-            let newCount = 0;
-            setAttemptCounts((prev) => {
-                newCount = (prev[step] || 0) + 1;
-                return { ...prev, [step]: newCount };
-            });
-            return (attemptCounts[step] || 0) + 1;
-        },
-        [attemptCounts],
-    );
-
-    const getAttemptCount = useCallback(
-        (step: string): number => {
-            return attemptCounts[step] || 0;
-        },
-        [attemptCounts],
-    );
-
     const resetSession = useCallback(() => {
         setCurrentStep('intro');
         setDirection(1);
         setCompletedSteps(new Set());
-        setAttemptCounts({});
         setLivenessResult(null);
         setIdDocument(null);
         setMatchResult(null);
@@ -180,15 +163,12 @@ export function VerificationProvider({
                 currentStep,
                 direction,
                 completedSteps,
-                attemptCounts,
                 livenessResult,
                 storedFaceSrc,
                 idDocument,
                 matchResult,
                 goTo,
                 markCompleted,
-                incrementAttempt,
-                getAttemptCount,
                 setLivenessResult,
                 setIdDocument,
                 setMatchResult,

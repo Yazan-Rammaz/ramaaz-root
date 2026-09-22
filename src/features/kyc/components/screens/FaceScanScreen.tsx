@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
+import { CAPTURE_PORTRAIT } from '@/features/kyc/config/capture';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useFaceGate } from '@/features/kyc/hooks/useFaceGate';
 import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
 import { restartSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
@@ -128,9 +130,30 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
     // whether the model is usable yet, and whether it failed outright.
     const { isReady: modelReady, loadError: modelError } = useFaceLandmarker();
 
+    /*
+     * The retouched preview, over our own camera.
+     *
+     * Paused the moment the frame stops being live: from `verifying` onward the
+     * locked still owns the frame, and a render loop drawing from a video that
+     * has just been stopped is pure waste — worse, it would paint a stale frame
+     * over the capture the user is meant to be looking at.
+     *
+     * It changes nothing about the gate. `useFaceGate` samples the VIDEO
+     * element, and `captureFrame` draws from it too; both read the camera, not
+     * the canvas painted over it.
+     */
+    const liveCanvasRef = useRef<HTMLCanvasElement>(null);
+
     const [phase, setPhase] = useState<Phase>('scanning');
     /** The locked frame. Non-null from capture until the camera reopens. */
     const [shot, setShot] = useState<string | null>(null);
+
+    const live = useLivePreview({
+        videoRef,
+        canvasRef: liveCanvasRef,
+        enabled: phase === 'scanning' && isActive,
+        portrait: CAPTURE_PORTRAIT.enabled,
+    });
 
     // Sampling stops the moment we leave 'scanning': nothing downstream reads
     // the gate again until it is reset, and a paused gate is one less thing
@@ -308,7 +331,24 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                     // Mirrored so moving left moves the image left, which is the
                     // only way a self-view reads correctly. `captureFrame`
                     // returns the UNmirrored pixels regardless — see useCamera.
+                    //
+                    // Transparent, NOT hidden, while the retouched preview is
+                    // painting: the element must keep decoding, because the
+                    // gate samples it and the capture is drawn from it. See
+                    // the same rule in liveness.css.
                     className="h-full w-full -scale-x-100 object-cover"
+                    style={live.active ? { opacity: 0 } : undefined}
+                />
+
+                {/* The live look — the same `applyLook` the capture runs, at a
+                    reduced resolution and under a governor that steps down
+                    rather than compete with the face gate for CPU. Mirrored to
+                    match the video it replaces. */}
+                <canvas
+                    ref={liveCanvasRef}
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
+                    style={live.active ? undefined : { display: 'none' }}
                 />
 
                 {/* The locked frame. Mirrored to match the preview it was taken
@@ -345,18 +385,40 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                     className="pointer-events-none absolute h-1 w-1 opacity-0"
                 />
 
+                {/* The viewfinder's falloff — a gradient at the head and foot
+                    of the picture, the same one the liveness frame carries.
+                    Over the video AND the locked still, so the capture does not
+                    change appearance at the moment it freezes.
+
+                    It stops well short of the middle: the face is untouched,
+                    which matters because the exposure correction in
+                    `captureLook.ts` is measured against the face's own
+                    luminance and a scrim over it would darken the very thing
+                    that decided the number. See globals.css. */}
+                <span
+                    aria-hidden
+                    className="frame-scrim pointer-events-none absolute inset-0"
+                />
+
                 {/* The verdict ring. An OVERLAY, not a border on the frame:
                     a border would take its 2px out of the 350 x 400 box, so the
                     video would shift the moment a verdict arrived — and a
                     transparent border held in reserve to avoid that is just the
                     permanent outline this screen is not supposed to have. Drawn
                     over the picture, it costs the layout nothing and exists only
-                    when there is something to say. */}
+                    when there is something to say.
+
+                    `.verdict-ring` rather than the hairline border this used to
+                    draw, so the two face frames give the same verdict the same
+                    weight — it is an inset ring with a soft inner glow, which
+                    reads as the frame responding rather than as a rectangle
+                    drawn on top. LivenessVerdict has always used it; this
+                    screen drawing a plain 2px line was the odd one out. */}
                 {verdictColor && (
                     <span
                         aria-hidden
-                        className="pointer-events-none absolute inset-0 rad-30 border-2"
-                        style={{ borderColor: verdictColor }}
+                        className="verdict-ring pointer-events-none absolute inset-0 rad-30"
+                        style={{ '--verdict-color': verdictColor } as React.CSSProperties}
                     />
                 )}
 

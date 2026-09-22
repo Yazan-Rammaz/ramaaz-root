@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
+import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 
 /**
  * The liveness bench — attack the AWS check, read the score, go again.
@@ -118,11 +119,15 @@ export function LivenessLab() {
     const sessionId = session?.sessionId ?? null;
 
     const onComplete = useCallback(
-        async (snapshot: string | null) => {
+        async (capture: FaceCapture | null) => {
             // Kept before anything can fail: the point of this page is now the
             // photo as much as the score, and a result fetch that 500s should
             // not also lose the capture.
-            setShot(snapshot);
+            //
+            // `display`, because this page is judging the photograph a person
+            // is shown. The look pipeline is dissected on /design/capture-lab,
+            // which shows both and says which is which.
+            setShot(capture?.display ?? null);
             if (!sessionId) return;
             setPhase('fetching');
             try {
@@ -249,13 +254,20 @@ export function LivenessLab() {
                     </div>
 
                     <p className="fz-10 leading-normal text-[#707070]">
-                        The frame as the camera gave it — no blur, no retouching. This is
-                        byte for byte what would be submitted.
+                        The capture as a person is shown it, through the look pipeline.
+                        To see each stage on its own, what it measured, and the
+                        untouched frame beside it, use the capture bench —
+                        /design/capture-lab. It needs no AWS session.
                     </p>
 
                     <div className="fz-11 flex items-center justify-between text-[#707070]">
-                        {/* The honest size of what we capture. Small, and the
-                            reason is that AWS opens the camera at 640x480. */}
+                        {/* The honest size of what we capture.
+                            AWS asks the camera for 640x480 and offers no prop
+                            to change it; `installCaptureQuality` raises the
+                            request to 1280x960 before it is made. If this still
+                            reads 640-ish, that lift did not take on this device
+                            — which is the first thing to know and the reason
+                            the number is printed. */}
                         <span>
                             captured {shotSize ? `${shotSize.w} × ${shotSize.h}` : '…'} ·{' '}
                             {Math.round((shot.length * 3) / 4 / 1024)} KB

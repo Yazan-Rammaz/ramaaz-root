@@ -508,3 +508,52 @@ body {
         inset 0 0 0 0.1875rem var(--verdict-color),
         inset 0 0 1.25rem color-mix(in srgb, var(--verdict-color) 45%, transparent);
 }
+
+/* =============================================================================
+   The frame's own treatment
+   -----------------------------------------------------------------------------
+   Two additions, both of them things a camera app does to its viewfinder and
+   neither of them a new element on the screen.
+
+   ⚠️ NOT a permanent ring. The design's rule is that the frame carries no
+   outline of its own, and these keep it: the scrim is a gradient that fades to
+   nothing well before the edge, and the bracket shadow is attached to marks
+   that were already there. If either ever reads as a border, that is a bug in
+   the numbers below and not a change of position.
+   ========================================================================== */
+
+/* A gradient at the top and foot of the picture, inside the frame.
+
+   What it fixes: the picture used to meet the rounded corner flat, so on a
+   bright scene the black frame vanished and the capture read as a photograph
+   pasted onto the page rather than something seen through a viewfinder. Every
+   camera UI puts a falloff here, and it is also what gives the corner brackets
+   and the hint pill something to sit against — both of them were previously
+   relying on whatever happened to be behind them, which on a white wall is
+   nothing.
+
+   Stops at 22% / 26%, so the middle 52% of the frame — the face — is untouched.
+   This must never darken skin: the exposure work in `captureLook.ts` is
+   measured against the face's own luminance, and a scrim over it would be
+   correcting a number the screen then changes. */
+.frame-scrim {
+    background:
+        linear-gradient(to bottom, rgb(0 0 0 / 0.34) 0%, rgb(0 0 0 / 0) 22%),
+        linear-gradient(to top, rgb(0 0 0 / 0.42) 0%, rgb(0 0 0 / 0) 26%);
+}
+
+/* The corner brackets, lifted off whatever is behind them.
+
+   Flat #FFEB00 on a pale wall or a lit window is close to invisible, and on a
+   busy background it reads as a rendering artefact rather than a mark. A soft
+   dark shadow separates them at no cost to the colour, which is the XD spec and
+   is unchanged.
+
+   Two shadows: a tight one for the edge and a wide one for the lift. One of
+   either looks like a mistake — tight alone is a hard outline, wide alone is a
+   smudge. */
+.frame-bracket {
+    filter:
+        drop-shadow(0 0.0625rem 0.125rem rgb(0 0 0 / 0.45))
+        drop-shadow(0 0 0.5rem rgb(0 0 0 / 0.25));
+}

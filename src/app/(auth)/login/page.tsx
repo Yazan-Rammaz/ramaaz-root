@@ -7,10 +7,11 @@ import { STAGES, STAGE_ROUTES } from '@/lib/auth/endpoints';
 /**
  * Step 1 of the flow the access link opens: enter the private code.
  *
- * The code arrives in the SAME WhatsApp message as the link, so by the time
- * anyone reaches this screen they are already holding it. There is nothing to
- * request, nothing to wait for, and no resend to offer — which is why this
- * screen is a heading and a field and nothing else.
+ * The administrator PULLS the code — they message the trigger phrase to the
+ * system's WhatsApp number from their registered handset and it comes back
+ * there. No endpoint sends it, so there is no resend to offer and nothing for
+ * this screen to trigger: its whole job is to take the code, and to say what to
+ * do when one is spent.
  *
  * ── This file is the ROUTING; the layout is PrivateCodeScreen ───────────────
  * The markup lives in `features/auth/components/PrivateCodeScreen.tsx` so the
@@ -39,5 +40,5 @@ export default async function LoginPage() {
         redirect(STAGE_ROUTES[challenge.stage ?? ''] ?? '/no-access');
     }
 
-    return <PrivateCodeScreen />;
+    return <PrivateCodeScreen ttlSeconds={challenge.privateCodeTtlSeconds} />;
 }

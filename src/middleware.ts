@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE, matchLocale } from '@/lib/i18n/config';
 import { refreshTokens } from '@/lib/auth/refresh';
+import { edgeHeaders } from '@/lib/api/edge';
 
 /**
  *
@@ -187,12 +188,17 @@ function applySecurityHeaders(res: NextResponse, nonce: string, framable = false
     return res;
 }
 
+/**
+ * Null means "we could not even ask" — no refresh cookie, or no backend URL.
+ * That is NOT a verdict on the session, so the caller leaves the cookies alone.
+ * Only a `dead` outcome licenses clearing them.
+ */
 async function tryRefresh(req: NextRequest) {
     const refreshToken = req.cookies.get(REFRESH)?.value;
     if (!refreshToken) return null;
 
-    // Unset until the remote backend is wired — silently skip the refresh
-    // rather than fetch a broken URL on every request.
+    // Set everywhere the app runs; CI omits it on purpose. If it is missing,
+    // silently skip the refresh rather than fetch a broken URL on every request.
     const base = process.env.NEST_API_URL || globalEnv.NEST_API_URL;
     if (!base) return null;
 
@@ -200,7 +206,23 @@ async function tryRefresh(req: NextRequest) {
     // spent one destroys the whole session. Two tabs idle past the access
     // token's 15 minutes will both arrive holding the same cookie, so the
     // exchange is deduplicated per token — see lib/auth/refresh.ts.
-    return refreshTokens(base, refreshToken);
+    //
+    // The caller headers come from THIS request rather than `next/headers`,
+    // which edge middleware has no access to. `EDGE_SECRET` is read the same
+    // defensive way `NEST_API_URL` is above: the edge runtime may not expose a
+    // global `process`, and an absent secret correctly means "send nothing".
+    return refreshTokens(
+        base,
+        refreshToken,
+        edgeHeaders(
+            {
+                ip: req.headers.get('CF-Connecting-IP'),
+                country: req.headers.get('CF-IPCountry'),
+                userAgent: req.headers.get('User-Agent'),
+            },
+            process.env.EDGE_SECRET || globalEnv.EDGE_SECRET,
+        ),
+    );
 }
 
 export async function middleware(req: NextRequest) {
@@ -260,8 +282,8 @@ export async function middleware(req: NextRequest) {
     const hasAccess = req.cookies.has(ACCESS);
     const hasRefresh = req.cookies.has(REFRESH);
     if (!hasAccess && hasRefresh && !isPrefetch) {
-        const refreshed = await tryRefresh(req);
-        if (refreshed) {
+        const outcome = await tryRefresh(req);
+        if (outcome?.status === 'refreshed') {
             const secure = isProdEnv;
             const opts = {
                 httpOnly: true,
@@ -269,15 +291,30 @@ export async function middleware(req: NextRequest) {
                 sameSite: 'lax' as const,
                 path: '/',
             };
-            res.cookies.set(ACCESS, refreshed.accessToken, {
+            res.cookies.set(ACCESS, outcome.tokens.accessToken, {
                 ...opts,
-                maxAge: refreshed.accessMaxAge,
+                maxAge: outcome.tokens.accessMaxAge,
             });
-            res.cookies.set(REFRESH, refreshed.refreshToken, {
+            res.cookies.set(REFRESH, outcome.tokens.refreshToken, {
                 ...opts,
-                maxAge: refreshed.refreshMaxAge,
+                maxAge: outcome.tokens.refreshMaxAge,
             });
-        } else {
+        } else if (outcome?.status === 'deferred') {
+            // Rate limited, NOT signed out. Keep both cookies and let this
+            // request render unauthenticated — the next one retries, which is
+            // the administrator deciding rather than a timer deciding.
+            //
+            // Clearing here is the bug this branch exists to prevent: the
+            // limiter is keyed on the caller's address and the caller is this
+            // Worker, so the 60/minute budget on /v1/auth/refresh is shared by
+            // every administrator at once. One busy minute would otherwise sign
+            // all of them out while their tokens were perfectly valid.
+            console.warn(
+                `[auth] refresh rate limited${
+                    outcome.retryAfterSeconds ? `, retry after ${outcome.retryAfterSeconds}s` : ''
+                } — keeping cookies`,
+            );
+        } else if (outcome?.status === 'dead') {
             // The refresh failed: the token is expired, already spent, or the
             // backend ended the session because a spent one was replayed.
             //

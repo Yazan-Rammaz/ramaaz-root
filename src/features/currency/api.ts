@@ -4,13 +4,25 @@ import { currencySchema, type Currency } from "./schema";
 /**
  * Single place currency endpoints are read. Server-only.
  *
- * Currencies are PROJECT data — they live in the SELECTED system's own
- * backend (rdb, trydos, …), not in the root backend. MOCK for now; when the
- * project backends expose currencies, swap for the selected-system call and
- * keep the schema.parse boundary exactly as-is:
- *   const data = await backendFetch.get<unknown>("/currencies");
- *   return currencySchema.array().parse(data);
- * (import { backendFetch } from "@/lib/api/backend"). Nothing else changes.
+ * Currencies are PROJECT data — scoped to the system selected on /systems, and
+ * served by the root backend on that project's behalf (it holds the
+ * credentials; we never call a project directly). STILL MOCK, and the swap is:
+ *
+ *   const data = await backendFetch.get<unknown>("/connection/manifest");
+ *   return currencySchema.array().parse(data.currencies);
+ *
+ * (import { backendFetch } from "@/lib/api/backend" — it prefixes
+ * `/v1/projects/{selected}` for you.) Keep the schema.parse boundary exactly.
+ *
+ * ⚠️ NOT SWAPPED YET, and not for want of an endpoint. We do not know what
+ * `manifest.currencies` contains — a list of codes, or objects, and whether
+ * anything on it carries a CATEGORY. The category is load-bearing here: the
+ * header is a four-tab filter (cash/crypto/gold/silver) and the mock below
+ * invents it. If the backend sends no category, either we derive it from
+ * something or the tabs go — a design decision, not a mapping.
+ *
+ * `icon` is ours either way: an asset we ship for the metals, never a backend
+ * field. Asked in `backend docs/frontend-project-data-needs.md`.
  */
 const MOCK_CURRENCIES: unknown[] = [
   { id: "usd", category: "cash", code: "USD", name: "American Dollars" },

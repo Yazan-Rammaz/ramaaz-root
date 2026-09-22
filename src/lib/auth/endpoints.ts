@@ -10,10 +10,24 @@ import { z } from "zod";
  * Sign-in is ONE state machine with two paths through it. The server decides
  * which, and says so in `stage` on every response:
  *
- *   FIRST LOGIN   link → private-code → face → id-document → id-info → device
- *   LATER LOGINS  link → device → face
+ *   FIRST LOGIN   link → private-code → face → id-document → COMPLETED
+ *   LATER LOGINS  link → face → COMPLETED
  *
- * See `root-enrollment.md` in the workspace root for the authoritative writeup.
+ * ⚠️ DEVICE VERIFICATION IS OFF (`ROOT_REQUIRE_DEVICE=false` — see
+ * `backend docs/frontend-security-changes.md` §0), which is why neither path
+ * ends at a passkey. Nothing here was deleted: DEVICE_REQUIRED simply never
+ * arrives, `/login/device` is never routed to, and the two device endpoints
+ * answer 412 PRECONDITION_FAILED if called. The setting is reversible in one
+ * line backend-side, and rule 2 below is what makes that free in either
+ * direction.
+ *
+ * Consequence worth naming: a first login now ENDS at
+ * `/v1/auth/identity-document`. That call returns COMPLETED with the token
+ * pair, where it used to return DEVICE_REQUIRED.
+ *
+ * See `backend docs/root-enrollment.md` for the authoritative writeup, and
+ * `backend docs/frontend-security-changes.md` for the current change notes —
+ * the latter wins where the two disagree, and they do (see rule 3).
  *
  * ── Four rules that hold for every step ─────────────────────────────────────
  *  1. ONE challenge token for the whole attempt — it does NOT rotate. Every
@@ -23,15 +37,55 @@ import { z } from "zod";
  *  2. Branch on `stage`, never on a step counter — a check switched off in a
  *     deployment simply never reports its stage, and a client walking a
  *     hard-coded list would send a request the server refuses.
- *  3. The whole sequence expires (AUTH_CHALLENGE_TTL, 10 min) and tolerates 5
- *     failed attempts across ALL steps combined. Past either, restart at /link.
- *  4. Order is enforced server-side. A step sent early answers CHALLENGE_INVALID
- *     with no hint about what was expected instead.
+ *  3. The whole sequence expires (AUTH_CHALLENGE_TTL, 10 min) and burns after
+ *     repeated failures. Past either, restart at /link.
  *
- * ── Status against staging (probed 2026-08-26) ──────────────────────────────
- *  ✅ live      /v1/auth/link · /private-code · /face · /device/options · /device
- *  ❌ 404       /v1/auth/identity-document · /v1/auth/identity-info
- *  ⚰️ removed   /v1/registration/*  — the old password+OTP+PIN flow is GONE.
+ *     TWO counters, and both apply (§6 of the change notes):
+ *       per sign-in   every failed step — private code, face, document — charges
+ *                     it. Exhausted → CHALLENGE_INVALID, restart at /link.
+ *       per account   wrong PRIVATE CODES only. Five → locked 15 minutes.
+ *
+ *     The document step has its own ceiling of 3 tries inside the sign-in, and a
+ *     failure charges both counters.
+ *
+ *     ⚠️ THE NUMBERS ARE DISPUTED. The change notes say 20 attempts per sign-in
+ *     and a 500-second private code; `root-enrollment.md` still says 5 and 50.
+ *     Open with the backend — and the reason nothing here hard-codes either.
+ *
+ *     ⚠️ NEVER COUNT ATTEMPTS HERE. The server charges them and says on every
+ *     response whether another try is possible. A counter in this app can only
+ *     disagree, and it disagrees by refusing somebody the server would allow.
+ *
+ *     The account lock is INVISIBLE on purpose: a locked account answers the
+ *     same 401 UNAUTHENTICATED that one wrong code does, with the same sentence.
+ *     Never try to detect it and never label it — telling an unauthenticated
+ *     caller that an account is locked tells someone guessing that their
+ *     guessing is working. (It used to answer INVALID_CREDENTIALS, which made
+ *     the lock visible. That was a bug and is fixed, so that code should no
+ *     longer appear on this flow at all.)
+ *
+ *     A locked administrator can still open links and walk to the code screen.
+ *     That is deliberate for the same reason — a link that refused during a lock
+ *     would disclose the lock to whoever holds the link.
+ *  4. Order is enforced server-side. A step sent early answers 412
+ *     PRECONDITION_FAILED with `details.stage` naming where the challenge really
+ *     is — so a client that lost track can route on that rather than restart.
+ *     A step sent against a DEAD challenge answers 401 CHALLENGE_INVALID first.
+ *
+ * ── Status against staging (confirmed by the backend 2026-09-22) ────────────
+ *  ✅ live      /v1/auth/link · /private-code · /face · /identity-document
+ *  ✅ real      the face and document checks are Rekognition-backed, not stubs.
+ *               Staging thresholds are ~1% for testing, so almost any live face
+ *               passes there; production will be strict. Exercise the FAILURE
+ *               screens deliberately — staging will not produce them for you.
+ *  🚫 412       /v1/auth/device/options · /v1/auth/device — dormant while
+ *               device verification is off. The routes exist; no challenge ever
+ *               sits at DEVICE, so they refuse.
+ *  ⚰️ removed   /v1/auth/identity-info · /v1/registration/*
+ *
+ * ⚠️ EVERYTHING ABOVE IS STAGING. The backend has not stated production's host
+ * or settings, and staging's numbers are explicitly test values. Do not assume
+ * they carry over.
  *
  * No `server-only` here on purpose: these are paths, schemas and types with no
  * secrets, and edge middleware imports them too.
@@ -58,35 +112,58 @@ export const AUTH_PATHS = {
    * someone's behalf would prove nothing about who holds the link.
    *
    * Consequence for the UI: there is NO RESEND CALL. They message again.
+   *
+   * ⚠️ ONE ATTEMPT PER CODE. A wrong answer SPENDS the code — there is no
+   * second guess at it. The challenge stays alive (keep the same
+   * `challenge_token`), but the way forward is a new code, so the screen after a
+   * refusal must send them back to messaging the number rather than sit on the
+   * code field. Four digits reachable by anyone holding a link is a small enough
+   * space that allowing retries would make guessing a strategy; spending the
+   * code makes every guess cost a WhatsApp round trip to a handset the guesser
+   * does not have, and the owner watches each one arrive.
+   *
+   * The refusal is `401 UNAUTHENTICATED` — wrong, expired and already-used all
+   * answer the same, and so does a locked account. Do not tell them apart.
    */
   privateCode: "/v1/auth/private-code",
 
   /**
-   * ✅ Face check. Runs on EVERY sign-in — step 4 on a first login, and the
-   * final step before COMPLETED on every later one.
+   * ✅ Face check. Runs on EVERY sign-in — step 3 on a first login, and the
+   * ONLY step on every later one, so it is what returns COMPLETED there.
    *
-   * ⚠️ The verifier is a stub today: it accepts any well-formed `evidence`
-   * object and returns success. Build the capture for real, but never present
-   * the result to anyone as a verified identity.
+   * ✅ REAL as of 2026-09-22: the KYC Worker runs Rekognition liveness and
+   * match, and the backend computes the verdict from its numbers. A failure is
+   * a real failure. (Staging's thresholds are ~1% for testing, so it will pass
+   * almost anything — that is a test setting, not the verifier being a stub.
+   * The stub still exists behind `KYC_INTERNAL_SECRET`/`KYC_SHARED_SECRET` being
+   * unset; the server says so at startup.)
+   *
+   * Takes `evidence: { step_token }` — the Worker's single-use proof, never an
+   * image. ⚠️ Do NOT call this without one: it answers 401 UNAUTHENTICATED and
+   * charges a second attempt on top of the one the failure already cost.
    */
   face: "/v1/auth/face",
 
   /**
-   * First-login ID enrolment — and MID-MIGRATION, so read this before sending
-   * anything.
+   * ✅ First-login ID enrolment, and the LAST step of a first sign-in — so its
+   * response carries the token pair rather than another stage.
    *
-   * ⚠️ The base64 payload this accepts today is going away. `root-enrollment.md`
-   * §5: *"do not build against the payload below… that path is going away."*
-   * It will take `evidence: { step_token }`, minted by `POST /v1/kyc/submit`,
-   * exactly as `/auth/face` does — the document is a photograph of a government
-   * ID with a face on it, so every argument for keeping the selfie out of the
-   * auth backend applies to it with more force, not less.
+   * ⚠️ It used to advance to DEVICE_REQUIRED. With device verification off it
+   * answers COMPLETED with `tokens`, which `applyStage` already handles — but
+   * anything that assumed "the document step is never the last one" is wrong.
    *
-   * It has not moved yet only because `/v1/kyc/submit` is not built: the
-   * backend is waiting on the KYC side's payload schema. Until then the stub
-   * accepts what it always did, and we send it — narrowly, so the sequence can
-   * be walked to the device step. See `StubDocumentEvidence` in
-   * `features/auth/actions.ts` for the swap.
+   * ⚠️ THE BASE64 PAYLOAD IS GONE. `{ document_type, front, back }` now answers
+   * 422. This takes `evidence: { step_token }`, exactly like `/auth/face`, and
+   * `POST /v1/kyc/submit` is what mints it: the Worker sends that route the
+   * images and its measurements over a signed channel, the backend decides, and
+   * only the proof comes back to the browser. The document is a photograph of a
+   * government ID with a face on it, so every argument for keeping the selfie
+   * off the auth path applies to it with more force, not less.
+   *
+   * **3 tries per sign-in** (`KYC_MAX_DOCUMENT_ATTEMPTS`), and each failure also
+   * charges the per-sign-in counter. A fourth answers CHALLENGE_INVALID and the
+   * person restarts at /link. A failed verdict never reaches this endpoint at
+   * all — no step token is minted, so there is nothing to post.
    *
    * There is deliberately no companion `identity-info`. That existed when
    * the protocol expected the administrator to TYPE their ID details as a
@@ -96,6 +173,14 @@ export const AUTH_PATHS = {
   identityDocument: "/v1/auth/identity-document",
 
   /**
+   * 🚫 DORMANT — device verification is off, so no challenge ever sits at the
+   * DEVICE stage and this answers 412 PRECONDITION_FAILED. Kept, with the whole
+   * ceremony, because the backend setting flips in one line; a stage-driven
+   * client needs no change when it does. Do not build against it, do not delete
+   * it.
+   *
+   * Everything below describes the behaviour when it IS on.
+   *
    * ✅ Ask for the WebAuthn ceremony. Answers `{ mode, publicKey }`, where
    * `mode` ("register" | "authenticate") decides which browser call to make.
    * The SERVER decides that from what the link has already enrolled — never
@@ -106,6 +191,9 @@ export const AUTH_PATHS = {
    */
   deviceOptions: "/v1/auth/device/options",
   /**
+   * 🚫 DORMANT for the same reason as `deviceOptions` above — 412 while device
+   * verification is off.
+   *
    * ✅ Submit the ceremony's answer, plus the `label` that IS stored and shown
    * in the administrator's credential list.
    *
@@ -117,20 +205,22 @@ export const AUTH_PATHS = {
   device: "/v1/auth/device",
 
   /**
-   * ⚠️ BROKEN — DO NOT CALL. Nothing in this app does.
+   * ✅ FIXED as of 2026-09-22 — and authoritative again.
    *
-   * This was the authoritative session read, and while it was failing
-   * `getSession()` answered `null` for everybody: every protected page decided
-   * nobody was signed in and redirected to /login. A signed-in administrator
-   * could not reach the dashboard.
+   * It used to rebuild `user` from the access token: `status` was always
+   * "ACTIVE", and `locale`, `timezone` and `created_at` came back empty or as Go
+   * zero values. Requiring any of them made `getSession()` throw, it answered
+   * `null` for everybody, and every protected page redirected to /login — a
+   * signed-in administrator could not reach the dashboard at all. That is why
+   * almost everything in `wireUserSchema` is optional, and it is why the session
+   * cookie exists.
    *
-   * The session now comes from the user the COMPLETED response already carried,
-   * kept in an httpOnly cookie — see `lib/auth/session.ts`, which states plainly
-   * what that gives up.
+   * Now it returns the account as stored, in the same shape as `tokens.user`.
+   * `getSession()` reads this; the cookie is a transport-failure fallback only.
+   * See `lib/auth/session.ts` for the exact rule.
    *
-   * Kept here, with its schema, so restoring the endpoint is a one-line change
-   * rather than an excavation. Re-point `getSession()` at it and delete the
-   * cookie; nothing else in the flow depends on the substitution.
+   * It also carries `projects` — the managed systems registry. See
+   * `meResponseSchema`.
    */
   me: "/v1/me",
 
@@ -168,6 +258,29 @@ export const apiErrorSchema = z.object({
     message: z.string(),
     /** Per-field validation detail, e.g. `{ token: "is required" }`. */
     fields: z.record(z.string(), z.string()).optional(),
+    /**
+     * Code-specific extras. Two are known:
+     *
+     *   RATE_LIMITED         `retry_after_seconds` — the same integer the
+     *                        `Retry-After` HEADER carries. Both are read
+     *                        (header first) in `lib/auth/errors.ts`, because a
+     *                        429 raised by an edge or a proxy may carry the
+     *                        header and no body at all.
+     *   PRECONDITION_FAILED  `stage` — where the challenge ACTUALLY is, when a
+     *                        step was sent out of order. A client that lost
+     *                        track can route on it instead of restarting.
+     *
+     * Passthrough rather than a closed shape: it is a grab-bag the backend adds
+     * to, and an unrecognised key must not fail the parse of an error we are
+     * already in the middle of handling.
+     */
+    details: z
+      .object({
+        retry_after_seconds: z.number().int().optional(),
+        stage: z.string().optional(),
+      })
+      .loose()
+      .optional(),
     correlation_id: z.string().optional(),
   }),
 });
@@ -176,9 +289,28 @@ export type ApiErrorBody = z.infer<typeof apiErrorSchema>;
 /** Error codes worth handling by name. */
 export const ERROR_CODES = {
   /**
-   * The link is unknown, revoked, expired, outside its address range or
-   * country — or the account is suspended. ONE message covers all of them,
-   * because the server gives one. Never guess which condition tripped.
+   * ⚠️ FOUR DIFFERENT THINGS, and what to do differs. Read WHICH CALL got it —
+   * the code alone does not tell you, on purpose.
+   *
+   *   /auth/link            the link is unknown, revoked, expired, outside its
+   *                         address range or country, or the account is
+   *                         suspended. One message covers all of them because
+   *                         the server gives one. Never guess which tripped.
+   *   /auth/private-code    the code was wrong, expired or already used — or
+   *                         the account is locked. THE CHALLENGE IS STILL
+   *                         ALIVE. Keep the token; send them for a new code.
+   *   /auth/face,
+   *   /auth/identity-document   no step token outstanding: the Worker's commit
+   *                         never passed, the proof was for another sign-in, or
+   *                         it expired. THE CHALLENGE IS STILL ALIVE and they
+   *                         may re-capture — it just cost an attempt.
+   *   authenticated calls,
+   *   /auth/refresh         the session has ended — revoked link, or signed out
+   *                         elsewhere. Sign out. This is NOT `TOKEN_REUSED`;
+   *                         revocation never looks like reuse.
+   *
+   * So this does NOT mean "restart the sign-in". Only CHALLENGE_INVALID does —
+   * see `isChallengeDead` in lib/auth/errors.ts.
    */
   unauthenticated: "UNAUTHENTICATED",
   /** A missing field, or `evidence` that is not an object with ≥1 key. */
@@ -188,10 +320,68 @@ export const ERROR_CODES = {
    * order. Restart at /auth/link — do NOT retry the step.
    */
   challengeInvalid: "CHALLENGE_INVALID",
-  /** Wrong private code — costs an attempt, but the user can simply retry. */
+  /**
+   * ⚰️ RETIRED on this flow. A wrong private code — and a locked account —
+   * answer UNAUTHENTICATED now. This code was what a locked account used to
+   * return, which made the lock detectable; the backend calls that a bug and
+   * has fixed it.
+   *
+   * Kept only so an older deployment answering it still maps to a sentence
+   * rather than falling through to a raw message. Do not branch on it in new
+   * code.
+   */
   invalidCredentials: "INVALID_CREDENTIALS",
-  /** Private-code requests from one number: five per fifteen minutes. */
+  /**
+   * Per-caller rate limit, keyed on the caller's network ADDRESS:
+   *   POST /v1/auth/link                       10 / minute
+   *   every other POST /v1/auth/* and /refresh 60 / minute
+   *   any authenticated request (per session) 300 / minute
+   *
+   * ⚠️ THE CALLER IS THIS WORKER, NOT THE ADMINISTRATOR — until we forward the
+   * browser's address. The browser never reaches the backend (AGENTS.md §2), so
+   * every request leaves from `canroot` and the address the limiter sees is
+   * ours. **Today those budgets are shared by every administrator at once**, and
+   * anyone who can load the sign-in page can exhaust the 10/minute on
+   * `/auth/link` for everybody.
+   *
+   * The fix is built backend-side and waiting on us: send `X-Edge-Client-IP`
+   * (`CF-Connecting-IP`), `X-Edge-Client-Country` (`CF-IPCountry`) and
+   * `X-Edge-Secret`, plus the BROWSER's `User-Agent`. They are trusted only with
+   * the secret, so setting them without it gains an attacker nothing. **We do
+   * not hold the secret yet** — that is what blocks it.
+   *
+   * Only one source of 429 reaches us. The WhatsApp per-number limit (5 code
+   * requests / 15 min) is enforced by dropping messages, so it never appears as
+   * an HTTP response — an administrator who "messaged and got nothing" is the
+   * only symptom, and no UI can see it.
+   *
+   * Never auto-retry. `retryAfterSeconds()` in `lib/auth/errors.ts` reads the
+   * delay; show it and let the person decide. A retry loop against a limiter is
+   * how somebody stays locked out for as long as their tab is open.
+   */
   rateLimited: "RATE_LIMITED",
+  /**
+   * Step-up: this action needs a fresh device check before it will run.
+   *
+   * ⚠️ NOT REACHABLE TODAY — the proof it demands is a passkey assertion, and
+   * with device verification off no session has one. The backend refuses to
+   * start with step-up enabled in that combination.
+   *
+   * Listed anyway because it is a 401, and a 401 that reaches a generic handler
+   * gets a refresh and then a sign-out. If it ever arrives, pressing "Issue
+   * link" would sign the administrator out instead of prompting them. Branching
+   * on it costs two lines now and saves a bug hunt later. See §2 of
+   * `backend docs/frontend-security-changes.md` for the ceremony, which we
+   * deliberately have NOT built.
+   */
+  mfaRequired: "MFA_REQUIRED",
+  /**
+   * The request was well formed but the server is not in a state to take it —
+   * a device endpoint called while device verification is off, or a reassert
+   * submitted without asking for options first. Read the message; there is no
+   * useful branching below this.
+   */
+  preconditionFailed: "PRECONDITION_FAILED",
   /**
    * The WhatsApp or one-time-code gateway is down. Say the SERVICE is
    * unavailable — never that the code was wrong. Retrying is safe.
@@ -227,7 +417,12 @@ export const STAGES = {
    * has been confirmed there is nothing further to send.
    */
   idDocument: "ID_DOCUMENT_REQUIRED",
-  /** WebAuthn ceremony: enrol this device, or prove it. */
+  /**
+   * WebAuthn ceremony: enrol this device, or prove it.
+   *
+   * 🚫 Never sent while device verification is off. Kept so the day it comes
+   * back is a backend setting and not a frontend release.
+   */
   device: "DEVICE_REQUIRED",
   /** Signed in; `tokens` is present on this response and nowhere else. */
   completed: "COMPLETED",
@@ -265,6 +460,11 @@ export const STAGE_ROUTES: Record<string, string> = {
   [STAGES.face]: "/login/identity",
   [STAGES.idDocument]: "/login/identity",
 
+  /**
+   * 🚫 Unreachable while device verification is off — no response names this
+   * stage, so nothing routes here. Left in place deliberately: this entry IS
+   * the one-line cost of the setting being flipped back on.
+   */
   [STAGES.device]: "/login/device",
 };
 
@@ -365,9 +565,18 @@ export type DeviceRequest = z.infer<typeof deviceRequestSchema>;
 export const wireUserSchema = z.object({
   id: z.string(),
   full_name: z.string(),
+  /** Arabic name, when the account has one. */
+  full_name_ar: z.string().optional(),
   status: z.string(),
   /** The only privilege flag the API exposes. */
   is_root: z.boolean(),
+
+  /**
+   * ⚠️ OMITTED on most root accounts. They are created over WhatsApp and
+   * usually have no email at all, so an absent `email` is an ordinary account,
+   * NOT a broken one. Never gate anything on its presence.
+   */
+  email: z.string().optional(),
 
   /**
    * ⚠️ Stays `false` FOREVER on a root account — there is no PIN in this
@@ -421,6 +630,35 @@ export type WireTokens = z.infer<typeof wireTokensSchema>;
  */
 export const stepResponseSchema = z.object({
   stage: z.string(),
+  /**
+   * Only on `/auth/link`, and only when re-opening picked up a sign-in already
+   * in progress — same `challenge_id`, a NEW `challenge_token`, and whatever is
+   * left of the original ten minutes (resuming never widens the window).
+   *
+   * Deliberately not branched on anywhere. Treat every `/auth/link` response the
+   * same way — render the stage it names. Resumption is the exception rather
+   * than the rule, and it happens only for a caller that looks like the one that
+   * made the progress: same link, same IP, same `User-Agent`. That last
+   * condition is why forwarding the browser's UA matters (see §1 of the change
+   * notes) — with our own UA going out, no refresh mid-flow can ever resume.
+   */
+  resumed: z.boolean().optional(),
+  /**
+   * How long a private code lives, in seconds, from the deployment's real
+   * setting. Only on `PRIVATE_CODE_REQUIRED`.
+   *
+   * ⚠️ NEVER HARD-CODE THIS. It was a local constant of 50, the change notes
+   * said 500, and both were right — 500 on staging, 50 by default — which is
+   * exactly why the backend now sends it. A number baked in here is wrong on
+   * some deployment.
+   *
+   * ⚠️ AND NEVER BUILD A COUNTDOWN FROM IT. The clock starts when the person
+   * messages WhatsApp, a moment neither we nor the backend ever observes, so
+   * any timer we drew would be counting from the wrong instant. It is for copy
+   * — "valid for about eight minutes" — and the instruction to message the
+   * number again stays on screen permanently rather than appearing on a timer.
+   */
+  private_code_ttl_seconds: z.number().int().positive().optional(),
   challenge_token: z.string().optional(),
   /**
    * Stable for the whole attempt, and NOT a credential — which is exactly why
@@ -460,14 +698,38 @@ export type StepResponse = z.infer<typeof stepResponseSchema>;
 /* ────────────────────── GET /v1/me ────────────────────── */
 
 /**
- * The session read. Wrapped in `user` — and it also carries `projects`, which
- * looks like the systems registry the dashboard lost when root-backend was
- * deleted. Shape of a project entry is unknown (the array was empty), so it is
- * passed through unvalidated rather than guessed at.
+ * One managed system — this IS the registry the dashboard lost when
+ * `root-backend` was deleted, confirmed by the backend 2026-09-22. For a root
+ * administrator `projects` is every registered system, so an empty array means
+ * none is registered yet rather than none is visible.
+ *
+ * ⚠️ NO BASE URL. `lib/api/backend.ts` needs one per system to route project
+ * data (regions, currencies, …) to that project's own backend, and nothing here
+ * carries it. So this unblocks the /systems LIST and nothing downstream of it.
+ * Open with the backend.
+ *
+ * Only `id` is required: the backend documents the rest as present but
+ * `connection_status` and `health_status` are explicitly omitted until a
+ * connection exists, and a registry entry that fails to parse would take the
+ * whole session read down with it.
  */
+export const wireProjectSchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  name_ar: z.string().optional(),
+  /** e.g. "TRYDOS" — the stable handle, and what a per-system API key keys on. */
+  code: z.string().optional(),
+  status: z.string().optional(),
+  project_type: z.string().optional(),
+  connection_status: z.string().optional(),
+  health_status: z.string().optional(),
+});
+export type WireProject = z.infer<typeof wireProjectSchema>;
+
+/** The session read. `user` is the account as stored; `projects` is the registry. */
 export const meResponseSchema = z.object({
   user: wireUserSchema,
-  projects: z.array(z.unknown()).optional(),
+  projects: z.array(wireProjectSchema).optional(),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
 
@@ -503,18 +765,24 @@ export const REFRESH_MAX_AGE = 60 * 60 * 24 * 400;
 
 /**
  * How long the whole challenge lives, per `AUTH_CHALLENGE_TTL` backend-side.
- * Used only as the flow cookie's ceiling — `challenge_expires_at` from the
- * server is the authoritative deadline and is what the countdown reads.
+ * Used ONLY as the flow cookie's fallback ceiling — `challenge_expires_at` from
+ * the server is the authoritative deadline, and `cookieLifetime` in
+ * `lib/auth/challenge.ts` prefers it.
  */
 export const CHALLENGE_MAX_AGE = 10 * 60;
 
-/**
- * `ROOT_PRIVATE_CODE_TTL`. Short by design, and SHORTER THAN WHATSAPP DELIVERY
- * OFTEN TAKES — so the private-code screen shows a live countdown and keeps
- * the "message the number again" instruction permanently on screen rather than
- * in a one-time toast. There is no resend endpoint to offer instead.
+/*
+ * ⚰️ `PRIVATE_CODE_TTL` used to live here, hard-coded at 50 seconds.
+ *
+ * It is gone because it could not be right: 50 is the backend's default and 500
+ * is what staging runs, so any constant here is wrong on some deployment. The
+ * real value now arrives as `private_code_ttl_seconds` on the
+ * PRIVATE_CODE_REQUIRED response — see `stepResponseSchema`.
+ *
+ * The comment it carried also promised a live countdown, which was never built
+ * and must not be: the code's clock starts when the administrator messages
+ * WhatsApp, and nobody on either side sees that moment.
  */
-export const PRIVATE_CODE_TTL = 50;
 
 /**
  * The token pair, in the shape the cookie layer wants it — camelCase, with

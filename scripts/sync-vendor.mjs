@@ -64,6 +64,26 @@ const FACE_MODEL_URL =
 const FACE_MODEL_MIN_BYTES = 2 * 1024 * 1024;
 
 /**
+ * Selfie Segmenter — separates the person from the room behind them.
+ *
+ * `services/portrait.ts` uses it to defocus the background of the captured
+ * face. Tiny next to everything else here (~250 KB) and from the same MediaPipe
+ * bucket as the face landmarker above, so it is fetched the same way and for
+ * the same reason: `script-src`/`connect-src` are `'self'`, and the KYC flow
+ * does not depend on a third-party CDN at runtime.
+ *
+ * ⚠️ Unlike the others, a failure here is purely cosmetic. `loadSegmenter`
+ * returns null when the model is missing and `applyPortrait` hands back the
+ * original photograph untouched — the capture still happens and the sign-in
+ * still completes. That is why the warning below does not say the flow is
+ * broken: it is not.
+ */
+const SEGMENTER_MODEL_URL =
+    'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite';
+/** The real file is ~250 KB. An error page is a few KB. */
+const SEGMENTER_MIN_BYTES = 100 * 1024;
+
+/**
  * Blazeface — the face detector Amazon's Face Liveness component runs in the
  * browser before it will stream anything.
  *
@@ -160,6 +180,33 @@ async function syncFaceModel() {
     } catch (err) {
         console.error(`[sync-vendor] face_landmarker.task FAILED: ${err.message}`);
         console.error('[sync-vendor] The face check will open a camera and never capture.');
+        return false;
+    }
+}
+
+// ── The selfie segmenter model ──────────────────────────────────────────────
+async function syncSegmenterModel() {
+    const dest = join(vendor, 'mediapipe', 'selfie_segmenter.tflite');
+    if (existsSync(dest) && statSync(dest).size >= SEGMENTER_MIN_BYTES) {
+        console.log('[sync-vendor] selfie_segmenter.tflite: already present, skipping');
+        return true;
+    }
+    mkdirSync(join(vendor, 'mediapipe'), { recursive: true });
+    console.log('[sync-vendor] selfie_segmenter.tflite: downloading …');
+    try {
+        const res = await fetch(SEGMENTER_MODEL_URL, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < SEGMENTER_MIN_BYTES) {
+            throw new Error(`got ${buf.length} bytes, expected >= ${SEGMENTER_MIN_BYTES}`);
+        }
+        writeFileSync(dest, buf);
+        console.log(`[sync-vendor] selfie_segmenter.tflite: ${(buf.length / 1024).toFixed(0)} KB`);
+        return true;
+    } catch (err) {
+        console.error(`[sync-vendor] selfie_segmenter.tflite FAILED: ${err.message}`);
+        // Deliberately mild. This one is cosmetic — see the note at the URL.
+        console.error('[sync-vendor] Portrait mode will be skipped; captures are unaffected.');
         return false;
     }
 }
@@ -281,6 +328,10 @@ const faceModelOk = await syncFaceModel();
 const tfjsOk = syncTfjsWasm();
 const blazefaceOk = await syncBlazeface();
 const openCvOk = await syncOpenCv();
+// Not in `ok`: portrait mode is cosmetic and fails soft, so a flaky download
+// here must not print the "completed with errors" line that sends someone
+// hunting for a broken KYC flow.
+await syncSegmenterModel();
 const ok = mediapipeOk && faceModelOk && tfjsOk && blazefaceOk && openCvOk;
 // Do not fail the install: a developer who never touches KYC should not be
 // blocked by a flaky download. The warning above is the signal.

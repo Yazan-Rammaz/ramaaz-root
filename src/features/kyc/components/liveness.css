@@ -251,6 +251,49 @@
  * test uses.
  */
 
+/* ── The retouched live preview ─────────────────────────────────────────────
+ *
+ * `LivenessCamera` paints each camera frame through the look pipeline into a
+ * canvas and puts it FIRST in `.rz-liveness`, so it draws beneath everything
+ * Amplify renders. These two rules are what let it be seen.
+ *
+ * ── Why not z-index ────────────────────────────────────────────────────────
+ * Because the widget's stacking is theirs, and it changes between releases: the
+ * hint, the fit bar, the freshness flash and the oval canvas all sit at indices
+ * this file does not control. Lifting our canvas above the video with a z-index
+ * means guessing a number that keeps it below the freshness flash — and the
+ * freshness flash is the coloured light the anti-spoofing measurement is made
+ * of, so covering it would break the check rather than merely look wrong.
+ *
+ * DOM order does the same job with no number to keep in sync: our canvas is
+ * first, so everything of theirs paints on top of it, in their order. All that
+ * is needed is for the two things directly above it to stop being opaque.
+ *
+ * ⚠️ `opacity: 0` on the video, NEVER `display: none`. The element must keep
+ * decoding — AWS reads frames from it, and so does the capture that produces
+ * the final photograph. A hidden video is a dead check; a transparent one is
+ * just invisible.
+ *
+ * Both rules are gated on `[data-live='on']`, which `LivenessCamera` sets only
+ * once the canvas is actually painting. A device whose governor gave up
+ * therefore falls back to the plain camera rather than to a black frame with a
+ * hidden video behind it.
+ */
+.rz-liveness[data-live='on'] .amplify-liveness-camera-module {
+    background-color: transparent;
+}
+
+.rz-liveness[data-live='on'] .amplify-liveness-video {
+    opacity: 0;
+}
+
+/* Without the attribute the canvas is painting nothing, and a transparent
+   canvas over a black frame is harmless — but hiding it outright means a
+   surrendered preview cannot leave a stale last frame on screen. */
+.rz-liveness:not([data-live='on']) .rz-live-canvas {
+    display: none;
+}
+
 /* ── Type ───────────────────────────────────────────────────────────────────
  * Amplify ships its own font stack. Ours is Quicksand, everywhere.
  */
@@ -294,6 +337,40 @@
 .rz-liveness .amplify-liveness-overlay {
     padding: 0.75rem;
     gap: 0.75rem;
+}
+
+/* ── The viewfinder's falloff, over AWS's camera ────────────────────────────
+ *
+ * The same `.frame-scrim` gradient our own frames carry (globals.css), painted
+ * here because the picture must not CHANGE APPEARANCE at the moment the stream
+ * ends. `LivenessVerdict` draws the scrim over the frozen still; without this
+ * the live view would be flat, the capture would suddenly gain a falloff, and
+ * that switch lands at the single most scrutinised moment on the screen — it
+ * reads as the camera doing something odd at exactly the wrong time.
+ *
+ * ── Why a pseudo-element on the OVERLAY ────────────────────────────────────
+ * Not on the camera module: that box is the video's parent, and the video is
+ * painted after any background it has, so a gradient there is simply hidden.
+ * Not as a sibling element either — the widget's tree is AWS's, and inserting
+ * into it is the kind of thing that breaks on a minor release.
+ *
+ * The overlay is a positioned box already covering the frame, so `z-index: -1`
+ * on its own `::before` puts the gradient BEHIND the hint and the fit bar and
+ * IN FRONT of the video underneath. Which is exactly the stacking wanted: the
+ * hint gains something to sit against, and nothing of AWS's is reordered.
+ *
+ * Absent during `preparing`, when the overlay is not mounted. That frame is
+ * black with three dots on it and has nothing to fall off.
+ */
+.rz-liveness .amplify-liveness-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        linear-gradient(to bottom, rgb(0 0 0 / 0.34) 0%, rgb(0 0 0 / 0) 22%),
+        linear-gradient(to top, rgb(0 0 0 / 0.42) 0%, rgb(0 0 0 / 0) 26%);
 }
 
 .rz-liveness .amplify-liveness-toast,

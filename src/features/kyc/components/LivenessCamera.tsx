@@ -1,13 +1,26 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
 import '@aws-amplify/ui-react/styles.css';
 
 import { TFJS_WASM_PATH, blazefaceModelUrl } from '@/features/kyc/config/liveness';
+import { CAPTURE_PORTRAIT, CAPTURE_RESOLUTION } from '@/features/kyc/config/capture';
+import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
 import { scoreFrameQuality } from '@/features/kyc/services/imageQuality';
+import {
+    frameHasContent,
+    grabFrame,
+    processFrame,
+    type FaceCapture,
+} from '@/features/kyc/services/faceCapture';
+import { kickstartSegmenter } from '@/features/kyc/services/portrait';
+import {
+    installCaptureQuality,
+    uninstallCaptureQuality,
+} from '@/features/kyc/handoff/cameraShim';
 import './liveness.css';
 
 /**
@@ -19,19 +32,6 @@ import './liveness.css';
  * one Sobel pass over it.
  */
 const FRAME_POLL_MS = 200;
-
-/**
- * 0.92, not the 0.85 this shipped with.
- *
- * The only argument for a lower number is payload size, and the difference is a
- * few tens of kilobytes on a frame posted once. What it costs is real: JPEG
- * artefacts land hardest on the mid-frequency detail — eye corners, the edge of
- * the nose — that CompareFaces reads at `face-match`.
- */
-const SNAPSHOT_JPEG_QUALITY = 0.92;
-
-/** The camera frame's shape, 350x400 — what the capture is cropped to. */
-const FRAME_ASPECT = 350 / 400;
 
 /**
  * How long the held frame keeps its slot without being beaten.
@@ -121,16 +121,46 @@ export function LivenessCamera({
      * The stream finished. It does NOT mean the person was live — ask the
      * server.
      *
-     * `snapshot` is the last camera frame as a data URL, for the screen to show
-     * while the servers decide. It is purely presentational: AWS picks the
-     * image it actually judges from the stream, server-side, and the browser
-     * never sees that one. Null if the frame could not be grabbed.
+     * The still kept from the stream, already through the look pipeline
+     * (`services/faceCapture.ts`) — `stored` for the backend, `display` for the
+     * screen. It is purely presentational as far as the VERDICT goes: AWS picks
+     * the image it actually judges from the stream, server-side, and the
+     * browser never sees that one. Null if no frame could be grabbed.
      */
-    onAnalysisComplete: (snapshot: string | null) => Promise<void>;
+    onAnalysisComplete: (capture: FaceCapture | null) => Promise<void>;
     onError: (error: { state?: string; error?: Error }) => void;
 }) {
     const t = useTranslations('auth');
     const frameRef = useRef<HTMLDivElement>(null);
+
+    /**
+     * AWS's own <video>, and the canvas the retouched preview is painted into.
+     *
+     * The element is theirs and appears asynchronously when their machine
+     * mounts, so it is captured by the sampling loop below rather than by a
+     * React ref — there is nothing of ours to attach one to.
+     */
+    const videoElRef = useRef<HTMLVideoElement | null>(null);
+    const liveCanvasRef = useRef<HTMLCanvasElement>(null);
+
+    /*
+     * The look, on the live camera.
+     *
+     * ⚠️ This changes what is on SCREEN and nothing else. AWS streams the
+     * MediaStream track to Rekognition and runs its face-fit test against the
+     * stream's geometry — neither reads the pixels painted over the video, and
+     * the video element itself is untouched apart from being made transparent
+     * (which does not stop it decoding, and does not stop `drawImage` reading
+     * it). The check is performed on the unmodified camera. See the header of
+     * `useLivePreview`; this separation is a security property, not a detail.
+     */
+    const live = useLivePreview({
+        videoRef: videoElRef,
+        canvasRef: liveCanvasRef,
+        // Follows the same switch the capture does, so the preview and the
+        // photograph cannot disagree about whether the room is defocused.
+        portrait: CAPTURE_PORTRAIT.enabled,
+    });
 
     /**
      * The best frame seen so far, with the score that won it the slot.
@@ -159,10 +189,76 @@ export function LivenessCamera({
         at: number;
     } | null>(null);
 
+    /**
+     * The other half of the double buffer — the canvas the next poll draws
+     * into, which is never the one `bestFrame` is holding.
+     *
+     * See the long note in the poll: drawing into the held canvas destroys the
+     * best frame of the check the first time a draw comes back empty, because
+     * `grabFrame` clears before it draws.
+     */
+    const scratch = useRef<HTMLCanvasElement | null>(null);
+
+    /**
+     * Ask the camera for more pixels than AWS does, before AWS asks.
+     *
+     * THE fix for a captured face that looks soft — AWS hardcodes a 640x480
+     * request and offers no prop to change it, so the picture is a VGA frame
+     * upscaled two and a half times into a 350x400 frame on a phone. See
+     * `installCaptureQuality` in cameraShim.ts for why this edits the request
+     * rather than the track, and `CAPTURE_RESOLUTION` for why 1280x960 and not
+     * more.
+     *
+     * ⚠️ INSTALLED DURING RENDER, and it has to be. This is the one thing about
+     * this file that looks wrong and is not.
+     *
+     * The obvious home is an effect. Effects run CHILD FIRST, and
+     * `FaceLivenessDetectorCore` — which is our child — starts its state
+     * machine from its own mount. So an effect here, of either kind, runs after
+     * AWS has already begun acquiring the camera, the patch lands too late, and
+     * the stream is VGA anyway. The failure mode is silent: no error, no
+     * warning, just a setting that appears to do nothing. `/design/capture-lab`
+     * prints the delivered stream size precisely so that this is visible rather
+     * than believed.
+     *
+     * A parent's RENDER always precedes a child's mount, so this is the only
+     * point in the lifecycle that is early enough. `useMemo` is the standard
+     * way to say "once, during render" — the value is discarded; the call is
+     * the point. Idempotent, so React's double-render in development costs
+     * nothing.
+     *
+     * The removal stays in an effect, where cleanup belongs.
+     */
+    useMemo(() => {
+        if (!CAPTURE_RESOLUTION.enabled) return;
+        installCaptureQuality({
+            width: CAPTURE_RESOLUTION.width,
+            height: CAPTURE_RESOLUTION.height,
+        });
+    }, []);
+
+    useEffect(() => () => uninstallCaptureQuality(), []);
+
+    /**
+     * Start the segmentation model downloading now, not at capture.
+     *
+     * It is ~250KB and the capture happens the instant the stream ends, so
+     * fetching it then would add a visible stall between the last frame and the
+     * verdict — on the one screen where a pause reads as a problem. Fails soft:
+     * `applyPortrait` returns the original photograph when the model never
+     * arrives.
+     */
+    useEffect(() => {
+        if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
+    }, []);
+
     useEffect(() => {
         const id = setInterval(() => {
             const video = frameRef.current?.querySelector('video');
             if (!video?.videoWidth) return;
+            // Hand the element to the live preview, which has no other way to
+            // find it — it is created inside AWS's tree.
+            videoElRef.current = video;
 
             const held = bestFrame.current;
             const score = scoreFrameQuality(video);
@@ -182,54 +278,89 @@ export function LivenessCamera({
             }
 
             /*
-             * Cropped to the frame's shape, centred — the same crop
-             * `object-fit: cover` performs on screen.
-             *
-             * Keeping the whole sensor frame files a landscape photograph for a
-             * portrait flow, and then every place that shows it crops it again
-             * to something slightly different. Capturing what the user was
-             * looking at is the only version that cannot disagree with the
-             * preview.
+             * The whole sensor frame — `grabFrame` owns that decision now, and
+             * `CAPTURE_FRAMING` explains it. In short: this used to pre-crop to
+             * the viewfinder's 0.875 and threw away a third of the width doing
+             * it, which is most of what "the picture is a face and nothing
+             * else" was describing. The 350x400 frame crops it at display
+             * instead, to the same pixel, over more picture.
              */
-            const sw = video.videoWidth;
-            const sh = video.videoHeight;
-            const cropW = Math.min(sw, sh * FRAME_ASPECT);
-            const cropH = Math.min(sh, sw / FRAME_ASPECT);
+            /*
+             * ── Double-buffered, and it has to be ───────────────────────────
+             *
+             * Reuse is not optional: the capture is the full sensor frame now,
+             * ~4.9MB of backing store at 1280x960, so allocating one per poll
+             * hands the browser a quarter of a gigabyte of short-lived
+             * canvases over a ten-second check. It discards backing stores
+             * under that, and a discarded canvas is transparent — which
+             * encodes to a BLACK JPEG.
+             *
+             * ⚠️ But reusing the HELD canvas is worse, and that was the first
+             * attempt at this fix. `grabFrame` assigns width/height (which
+             * CLEARS the canvas) and then draws — so a draw that produces
+             * nothing wipes the good frame we were holding, IN PLACE, because
+             * the thing being drawn into is the very object `bestFrame` points
+             * at. One bad poll and the best frame of the whole check is blank.
+             *
+             * So: draw into a scratch canvas, and only once it is known good,
+             * SWAP it with the held one. Two canvases alive, never more, and
+             * the held frame is never written to while it is the held frame.
+             */
+            const canvas = grabFrame(video, scratch.current);
+            if (!canvas) return;
+            scratch.current = canvas;
 
-            const canvas = held?.canvas ?? document.createElement('canvas');
-            if (canvas.width !== Math.round(cropW)) {
-                canvas.width = Math.round(cropW);
-                canvas.height = Math.round(cropH);
-            }
-            try {
-                canvas
-                    .getContext('2d')
-                    ?.drawImage(
-                        video,
-                        (sw - cropW) / 2,
-                        (sh - cropH) / 2,
-                        cropW,
-                        cropH,
-                        0,
-                        0,
-                        canvas.width,
-                        canvas.height,
-                    );
-                bestFrame.current = {
-                    canvas,
-                    sharpness: score?.sharpness ?? 0,
-                    at: Date.now(),
-                };
-            } catch {
-                // A tainted canvas would throw. Same-origin stream, so it should
-                // not — and a missing still must never break the check.
-            }
+            /*
+             * Never keep a blank.
+             *
+             * `grabFrame` already refuses a video with no decoded frame, so
+             * this catches what that guard cannot see — a backing store
+             * discarded between one poll and the next, or a decoded frame that
+             * is genuinely empty. Without it, a blank that happens to be the
+             * last frame kept becomes the photograph on the identity record.
+             *
+             * NOT a quality floor. A dim room still keeps its frame; see the
+             * note above about the checking state going black.
+             */
+            if (!frameHasContent(canvas)) return;
+
+            // The swap. The old best becomes the next scratch, so nothing is
+            // allocated and nothing that is still needed is drawn over.
+            scratch.current = held?.canvas ?? null;
+            bestFrame.current = {
+                canvas,
+                sharpness: score?.sharpness ?? 0,
+                at: Date.now(),
+            };
         }, FRAME_POLL_MS);
         return () => clearInterval(id);
     }, []);
 
     return (
-        <div ref={frameRef} className="rz-liveness absolute inset-0">
+        <div
+            ref={frameRef}
+            className="rz-liveness absolute inset-0"
+            // Drives the two rules in liveness.css that make AWS's video
+            // transparent and their module's backdrop see-through, so the
+            // canvas below shows instead. Only set once the canvas is actually
+            // painting — otherwise a device whose governor gave up would be
+            // left looking at a black frame with a hidden video behind it.
+            data-live={live.active ? 'on' : undefined}
+        >
+            {/*
+              The retouched preview.
+
+              FIRST in the DOM on purpose, so it paints beneath everything
+              Amplify renders — their chrome, the hint pill and the freshness
+              flash all stay on top with no z-index to keep in sync. The two
+              CSS rules keyed off `data-live` are what let it show through.
+            */}
+            <canvas
+                ref={liveCanvasRef}
+                aria-hidden
+                className="rz-live-canvas pointer-events-none absolute inset-0 h-full w-full object-cover"
+            />
+
             <ThemeProvider theme={livenessTheme}>
                 <FaceLivenessDetectorCore
                     sessionId={sessionId}
@@ -283,23 +414,44 @@ export function LivenessCamera({
                         waitingCameraPermissionText: t('faceLoading'),
                         retryCameraPermissionsText: t('deviceRetry'),
                     }}
-                    onAnalysisComplete={() => {
+                    onAnalysisComplete={async () => {
                         /*
-                         * The frame as the camera gave it, encoded once.
+                         * The kept frame, through the look pipeline.
                          *
+                         * ── What changed, and what did not ─────────────────
                          * A background-blur and relighting pipeline used to sit
-                         * here. It is gone: every version of it that looked
-                         * right in one situation looked wrong in another, and a
-                         * photograph of a real person for a real identity record
-                         * is a poor place to keep guessing. `git log` has it if
-                         * it is ever wanted back.
+                         * inline here and was reverted, because every version
+                         * of it that looked right in one room looked wrong in
+                         * the next (`git log` 7cecf4b, 5d7f21c). What runs now
+                         * is not that: the corrections in `captureLook` are
+                         * MEASURED off each frame rather than dialled in, which
+                         * is the property the reverted version lacked and the
+                         * only reason to expect this one to hold up. The
+                         * portrait blur — the part that genuinely is a look —
+                         * is off by default and judged on /design/capture-lab.
+                         *
+                         * `processFrame` never throws and never returns
+                         * nothing: every stage inside it falls back to the
+                         * frame as the camera gave it. The floor here is the
+                         * photograph that shipped before any of this existed.
                          */
                         const canvas = bestFrame.current?.canvas;
-                        return onAnalysisComplete(
-                            canvas?.width
-                                ? canvas.toDataURL('image/jpeg', SNAPSHOT_JPEG_QUALITY)
-                                : null,
-                        );
+                        if (!canvas?.width) return onAnalysisComplete(null);
+
+                        // Checked once more HERE, at the only moment that
+                        // actually matters. The poll rejects blanks as they
+                        // arrive, but the kept canvas sat in memory for the
+                        // length of the check and the browser may have
+                        // reclaimed it in between. Reporting no capture is
+                        // honest and the screens already handle it; filing a
+                        // black rectangle as somebody's identity photograph is
+                        // not.
+                        if (!frameHasContent(canvas)) {
+                            console.warn('[liveness] kept frame was blank — no capture filed');
+                            return onAnalysisComplete(null);
+                        }
+
+                        return onAnalysisComplete(await processFrame(canvas));
                     }}
                     onError={onError}
                 />

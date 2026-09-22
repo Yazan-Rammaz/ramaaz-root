@@ -17,6 +17,24 @@ NEST_API_URL="https://staging-backend.ramaaz.store"
 # again, or the capture ends in a generic failure. Any other value = liveness.
 KYC_FACE_MODE=""
 
+# Proves to the backend that the X-Edge-Client-IP / -Country headers came from
+# this Worker and may be trusted. See src/lib/api/edge.ts.
+#
+# ⚠️ DELIBERATELY ABSENT LOCALLY, and absent from this file on purpose — do not
+# add it to .dev.vars. The backend's rule for local development is to send no
+# edge headers at all rather than empty ones, and that falls out of the secret
+# being unset: no secret, no headers, and your machine is treated as the caller
+# with its own rate-limit budget. Development links are issued without address
+# or country conditions, so nothing needs a country.
+#
+# In a deployed environment set it as a Cloudflare SECRET
+# (`npx wrangler secret put EDGE_SECRET`), one value PER ENVIRONMENT — staging
+# and production never share one — and never as a wrangler.jsonc `vars` entry,
+# which would shadow the secret and commit the value.
+#
+# Rotation needs no lockstep deploy: the backend accepts the old and new values
+# while a rotation is in progress.
+
 # Unlocks /design in a DEPLOYED environment. Leave unset locally — the gallery
 # is always on in development. In production set it as a Cloudflare SECRET
 # (`npx wrangler secret put DESIGN_GALLERY_KEY`), never as a wrangler.jsonc

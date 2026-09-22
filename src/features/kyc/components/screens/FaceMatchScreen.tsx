@@ -67,7 +67,6 @@ export default function FaceMatchScreen({
         livenessResult,
         idDocument,
         setMatchResult,
-        incrementAttempt,
         resetSession,
         storedFaceSrc,
     } = useVerification();
@@ -179,28 +178,35 @@ export default function FaceMatchScreen({
             const selfie = livenessResult?.faceImageData ?? resolvedFaceRef.current;
 
             if (idDocument && selfie) {
-                // ── Enrolment goes to the AUTH backend, in one call ──────────
+                // ── Two calls, and no KYC session ────────────────────────────
                 //
-                // Not to the KYC Worker's /submit. That route is RDB's: three
-                // uploads to /media/upload/direct, a country lookup against
-                // /countries, then URLs posted to /kyc/submit. All three answer
-                // 404 on the root backend, which never had that contract — and
+                // The images go to the WORKER, which analyses them and commits
+                // what it measured to POST /v1/kyc/submit over a signed
+                // channel; the backend decides and mints a single-use
+                // stepToken, and only THAT is posted to
+                // /v1/auth/identity-document. The images never reach the auth
+                // path — posting them there now answers 422.
+                //
+                // What this is NOT is RDB's flow: three uploads to
+                // /media/upload/direct, a country lookup against /countries,
+                // then URLs posted to /kyc/submit. All of those 404 here, and
                 // the first symptom was this screen dying on "session start
                 // failed: Unauthorized", because /session is guarded by an
                 // access token that does not exist mid sign-in.
                 //
-                // Root's whole document step is POST /v1/auth/identity-document
-                // with the images inline (root-enrollment.md §5). There is no
-                // KYC session to start: the challenge carries the flow, which
-                // is why nothing here fetches one.
+                // There is no KYC session to start at all: the challenge
+                // carries the flow, which is why nothing here fetches one.
+                // See `backend docs/root-enrollment.md` §5.
                 //
-                // The action redirects on success — the backend answers
-                // DEVICE_REQUIRED and applyStage() sends the browser to the
-                // passkey ceremony. So there is no navigation to write here,
-                // and no 'success' step on this path: the device screen IS
-                // what comes next.
-                incrementAttempt('face-match');
-
+                // The action redirects on success — applyStage() routes on
+                // whatever stage the backend named, so there is no navigation
+                // to write here and no 'success' step on this path.
+                //
+                // With device verification off that answer is COMPLETED with
+                // the tokens, and the administrator lands in the dashboard.
+                // It used to be DEVICE_REQUIRED and the passkey screen. Which
+                // one arrives is the server's business, not this screen's —
+                // do not hard-code either.
                 if (!onEnroll) {
                     // No enrolment seam supplied. Loud in the console, because
                     // the alternative is a screen that looks like it verified
@@ -284,7 +290,7 @@ export default function FaceMatchScreen({
             if (data.message) console.error('[FaceMatch] compare failed:', data.message);
             handleFailure();
         }
-    }, [handleFailure, setMatchResult, goTo, incrementAttempt]);
+    }, [handleFailure, setMatchResult, goTo]);
 
     const runMatch = useCallback(async () => {
         // One comparison at a time.
@@ -450,13 +456,21 @@ export default function FaceMatchScreen({
      * What to DRAW. Falls back to the stored capture so a refresh shows a face
      * instead of a grey "Face Photo" box.
      *
-     * ⚠️ Not what gets SUBMITTED. The enrolment above still requires
-     * `livenessResult.faceImageData` — the real bytes — because this fallback
-     * is a URL, and a URL posted as `selfie` is not an image. So a reloaded
-     * page can show you your face and still, correctly, refuse to submit a
-     * capture it does not have.
+     * ⚠️ Not what gets SUBMITTED, and now for two reasons rather than one.
+     *
+     * The enrolment above still requires `livenessResult.faceImageData` — the
+     * real bytes — because this fallback is a URL, and a URL posted as `selfie`
+     * is not an image. So a reloaded page can show you your face and still,
+     * correctly, refuse to submit a capture it does not have.
+     *
+     * `displayImageData` is the second reason. It is the same frame carrying
+     * display-only edits (the portrait blur), which softens the room behind the
+     * subject and with it the boundary at the hair and jaw. Perfectly good to
+     * look at; not something to hand CompareFaces. It is absent unless such an
+     * edit actually ran — see `CAPTURE_OUTPUT` in `config/capture.ts`.
      */
-    const liveFace = livenessResult?.faceImageData ?? storedFaceSrc;
+    const liveFace =
+        livenessResult?.displayImageData ?? livenessResult?.faceImageData ?? storedFaceSrc;
     const idImage = idDocument?.frontImageData || idDocument?.idFaceImageData;
 
     return (

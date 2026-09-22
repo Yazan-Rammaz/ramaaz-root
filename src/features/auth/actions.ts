@@ -17,14 +17,12 @@ import { clearAuthCookies } from "@/lib/auth/cookies";
 import {
   AUTH_PATHS,
   deviceOptionsResponseSchema,
-  ERROR_CODES,
   stepResponseSchema,
   type DeviceRequest,
   type EvidenceRequest,
   type PrivateCodeRequest,
 } from "@/lib/auth/endpoints";
 import {
-  errorCode,
   isChallengeDead,
   signInError,
   signInDiag,
@@ -52,6 +50,17 @@ export type ActionState = {
    * access link, because no retry of this step can now succeed.
    */
   restart?: boolean;
+  /**
+   * The private code was consumed by this attempt — wrong, expired or already
+   * used, which the server deliberately does not distinguish.
+   *
+   * Only `submitPrivateCodeAction` sets it. There is ONE attempt per code, so a
+   * refusal leaves nothing to retype: the way forward is a new code, which only
+   * the administrator can pull by messaging the number again. The screen uses
+   * this to lead with that instruction instead of sitting on a field whose
+   * contents can no longer work.
+   */
+  codeSpent?: boolean;
   /**
    * What the backend ACTUALLY said — status, error code, correlation id — as
    * distinct from `error`, which is the sentence for the screen.
@@ -102,27 +111,27 @@ export async function submitPrivateCodeAction(
     if (error instanceof UnknownStageError) {
       return { ok: false, error: error.message };
     }
-    // A wrong code costs one of five attempts across the whole sequence and
-    // alerts the other root administrators — somebody holding a link and
-    // guessing is the shape of a forwarded link. It is still just a retry.
-    // A dead challenge is not: only a fresh start recovers.
+    // A wrong code alerts the other root administrators — somebody holding a
+    // link and guessing is the shape of a forwarded link — and it SPENDS the
+    // code: one attempt per code, no second guess. But the challenge survives
+    // it. Only CHALLENGE_INVALID says the sequence itself is gone, and
+    // `isChallengeDead` is now exactly that test.
     //
-    // ⚠️ `CHALLENGE_INVALID` ONLY — deliberately NOT `isChallengeDead`, which
-    // also counts `UNAUTHENTICATED`.
-    //
-    // The private code lives 50 seconds (PRIVATE_CODE_TTL), which is shorter
-    // than WhatsApp delivery often takes, so "that code is not valid, get a new
-    // one" is the NORMAL outcome here rather than an exceptional one. Treating
-    // it as a dead challenge tore the input off the screen and left "start
-    // over" as the only move — when the right move is to message the number
-    // again and type the new code into the same challenge, which is still
-    // perfectly alive. The sequence survives a wrong code; it is only
-    // CHALLENGE_INVALID that says the sequence itself is gone.
+    // The code's life is short — shorter than WhatsApp delivery often takes —
+    // so "that code is not valid, get a new one" is the NORMAL outcome here
+    // rather than an exceptional one. Treating it as a dead challenge tore the
+    // input off the screen and left "start over" as the only move, when the
+    // right move is to message the number again and type the new code into the
+    // same, perfectly alive, challenge.
     return {
       ok: false,
       error: signInError(error, "That code is not correct"),
       diag: signInDiag(error),
-      restart: errorCode(error) === ERROR_CODES.challengeInvalid,
+      restart: isChallengeDead(error),
+      // The code is spent whatever happened to it — wrong, expired or already
+      // used all answer the same. So the screen's next move is "message the
+      // number again", not "type it again".
+      codeSpent: !isChallengeDead(error),
     };
   }
 
@@ -137,10 +146,14 @@ export async function submitPrivateCodeAction(
  * The frame arrives already gated: `useFaceGate` will not release one until a
  * single face is present, centred, facing the camera, lit, sharp and still. So
  * a rejection here is a real mismatch, not a bad photograph — which matters,
- * because the backend counts failures against a challenge that tolerates five
- * in total and then kills the session itself. The frontend deliberately keeps
- * no attempt counter of its own: two authorities disagreeing about how many
- * tries remain is worse than one.
+ * because every failure is charged against the challenge and the backend kills
+ * it when the budget is gone. The frontend deliberately keeps no attempt
+ * counter of its own: two authorities disagreeing about how many tries remain
+ * is worse than one.
+ *
+ * ⚠️ Never call this without a step token. The backend answers 401 and charges
+ * a SECOND attempt on top of the one the failure already cost — which is what
+ * the guard below is for.
  *
  * The image goes to the KYC Worker, never to the auth backend — see
  * `docs/kyc-integration.md`. What reaches `/v1/auth/face` is the Worker's
@@ -223,67 +236,23 @@ export async function submitFaceAction(
 }
 
 /**
- * The evidence the document step will take, ONCE `/v1/kyc/submit` exists.
+ * The evidence the document step takes. The only shape it takes.
  *
- * Identical in shape to the face step, and for the same reason: the image goes
- * to the KYC Worker, the Worker commits what it measured over its own signed
- * channel, the backend mints a single-use token, and only that token is posted
- * here. No biometric and no government document touches the auth path.
+ * Identical to the face step, and for the same reason: the images go to the KYC
+ * Worker, the Worker commits what it measured over its own signed channel,
+ * `POST /v1/kyc/submit` decides and mints a single-use token, and only that
+ * token is posted here. No biometric and no government document touches the
+ * auth path.
  *
- * Nothing mints one yet — see `StubDocumentEvidence` below.
+ * ⚠️ The base64 payload that used to live beside this is GONE — posting
+ * `{ document_type, front, back }` now answers 422. `/v1/kyc/submit` is live, so
+ * there is no interim to keep.
  */
 export type DocumentStepTokenEvidence = { step_token: string };
 
 /**
- * ⚠️ INTERIM. The base64 payload the stub accepts today, and a dead end.
- *
- * `root-enrollment.md` §5 is unambiguous that this path is going away: *"do not
- * build against the payload below… What you must not build is a path that posts
- * base64 images to /auth/identity-document, because that path is going away."*
- * The document step will become `{ step_token }` — one line identical to the
- * face step — as soon as `POST /v1/kyc/submit` is built to mint one.
- *
- * It is still sent, deliberately and narrowly: the stub exists, in the doc's
- * own words, "kept only so the sequence can be walked end to end", and without
- * it the flow dead-ends at ID_DOCUMENT_REQUIRED and the device step cannot be
- * reached or tested at all. That is the whole justification — walking the
- * sequence. It is NOT a contract, the field names below were never agreed, and
- * a green run proves only that a stub accepts any object with one key.
- *
- * ── Removing this ───────────────────────────────────────────────────────────
- * When `/v1/kyc/submit` lands, delete this type and change the ONE call site in
- * `IdentityStep.tsx` to pass `{ step_token }`. The action already accepts both
- * — that is what the union below is for — so nothing here needs to change.
- */
-export type StubDocumentEvidence = {
-  document_type: "NATIONAL_ID" | "PASSPORT" | "DRIVING_LICENSE";
-  /** Data URLs. `back` is absent for a passport — one page, no reverse. */
-  front: string;
-  back?: string;
-  /** The frame captured at the face step, reused rather than re-shot. */
-  selfie?: string;
-  /** Read off the document by the Worker's OCR. */
-  full_name?: string;
-  document_number?: string;
-  birth_date?: string;
-  expiry_date?: string;
-  country?: string;
-  country_iso3?: string;
-  /** What the Worker measured comparing that selfie to the document photo. */
-  selfie_vs_id_score?: number;
-  liveness_confidence?: number;
-};
-
-/**
- * Either shape. The union is the migration: both compile, both post, and the
- * switch is made at the call site rather than by rewriting this file.
- */
-export type IdentityDocumentEvidence =
-  | DocumentStepTokenEvidence
-  | StubDocumentEvidence;
-
-/**
- * Stage 4 — first-login ID enrolment, and the LAST step before the device.
+ * Stage 4 — first-login ID enrolment, and now the LAST step of the whole
+ * sign-in.
  *
  * ── Nothing here starts a KYC session ───────────────────────────────────────
  * Root has no session concept at all: the challenge carries the flow from
@@ -295,24 +264,36 @@ export type IdentityDocumentEvidence =
  * the Worker's `/session` is guarded by an access token that does not exist
  * mid sign-in.
  *
- * ── This step is mid-migration ──────────────────────────────────────────────
- * Today it posts the stub's base64 payload; tomorrow it posts
- * `{ step_token }`, exactly like `/auth/face`. See the evidence types above for
- * why, and for what changes when `/v1/kyc/submit` is built. This function is
- * indifferent to which — it forwards whatever it is handed.
+ * ── One shape, and the migration is done ────────────────────────────────────
+ * It posts `{ step_token }`, exactly like `/auth/face`. The base64 interim is
+ * gone: `/v1/kyc/submit` is live and mints the proof, and the old payload now
+ * answers 422.
  *
- * The response advances to DEVICE_REQUIRED, so `applyStage` sends the browser
- * to the passkey ceremony — the step that actually binds the account.
+ * Three document tries per sign-in, and a failure charges the sign-in's counter
+ * too. A failed verdict never reaches here — no step token is minted, so
+ * `IdentityStep` shows the failure and the person re-captures.
+ *
+ * ── Where this now ends ─────────────────────────────────────────────────────
+ * The response is COMPLETED and carries the token pair, so `applyStage` stores
+ * them and the administrator is in. It used to advance to DEVICE_REQUIRED and
+ * hand off to the passkey ceremony; device verification is off
+ * (`ROOT_REQUIRE_DEVICE=false` — see endpoints.ts), so that stage never comes.
+ *
+ * Nothing here had to change for that, and that is the point: this function
+ * forwards whatever it is handed and `applyStage` obeys whatever comes back. If
+ * the setting is flipped, the passkey step reappears with no edit.
  */
 export async function submitIdentityDocumentAction(
-  evidence: IdentityDocumentEvidence,
+  evidence: DocumentStepTokenEvidence,
 ): Promise<ActionState> {
-  // Guards the one field each shape cannot be useful without, so an empty
-  // payload fails here rather than spending an attempt against the challenge —
-  // it tolerates five across all steps before burning.
-  const empty =
-    "step_token" in evidence ? !evidence.step_token : !evidence.front;
-  if (empty) return { ok: false, error: "No document evidence" };
+  // An empty proof fails here rather than spending an attempt against the
+  // challenge — and it would spend TWO, since calling this without a step token
+  // is itself charged on top of whatever failure lost the token.
+  //
+  // A SHAPE guard, not an attempt counter: nothing in this app keeps a failure
+  // count or decides a retry is not allowed. The backend owns that and says so
+  // on every response — see rule 3 in lib/auth/endpoints.ts.
+  if (!evidence.step_token) return { ok: false, error: "No document evidence" };
 
   const challenge = await readChallenge();
   if (!challenge.challengeToken) redirect("/no-access");
@@ -352,9 +333,13 @@ export async function submitIdentityDocumentAction(
  *
  * For the failures where retrying is not merely unlikely to work but CANNOT:
  * a 401 from a step route means the challenge behind it has expired, been
- * spent, or burned through its five attempts. The backend will answer the same
- * way every time, so a screen that keeps offering "try again" is inviting
- * somebody to press a button that has already been decided against.
+ * spent, or burned through whatever failure budget the backend holds for it.
+ * The backend will answer the same way every time, so a screen that keeps
+ * offering "try again" is inviting somebody to press a button that has already
+ * been decided against.
+ *
+ * Note what decides that: the BACKEND'S answer, not a count kept here. We never
+ * predict the ceiling, we only obey the refusal when it arrives.
  *
  * Lands on /no-access, which is where a dead sign-in belongs — and because the
  * link token is carried over first, that screen can offer to open the SAME link

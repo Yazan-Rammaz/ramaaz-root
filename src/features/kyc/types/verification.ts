@@ -62,7 +62,23 @@ export interface LivenessMetrics {
 }
 
 export interface LivenessResult {
+    /**
+     * The photograph of record: submitted to the backend and given to
+     * CompareFaces at `face-match`. Every SUBMIT path reads this one.
+     */
     faceImageData: string;
+    /**
+     * The same photograph with display-only edits applied — currently the
+     * portrait blur, which softens the room behind the subject and therefore
+     * also the boundary at the hair and jaw. Fine to look at, not something to
+     * hand a face comparison.
+     *
+     * Absent when nothing display-only was applied, which is the common case.
+     * Every DISPLAY site reads `displayImageData ?? faceImageData`; nothing
+     * reads it alone. See `CAPTURE_OUTPUT` in `config/capture.ts` for which
+     * stages are baked and why.
+     */
+    displayImageData?: string;
     isLive: boolean;
     timestamp: number;
     challengeStep?: 'look_straight' | 'turn_right' | 'turn_left';
@@ -109,7 +125,7 @@ export interface VerificationSession {
     currentStep: VerificationStep;
     direction: 1 | -1;
     completedSteps: Set<VerificationStep>;
-    attemptCounts: Record<string, number>;
+    /** No attempt count. The backend owns the budget — see VerificationContext. */
     livenessResult: LivenessResult | null;
     idDocument: IDDocument | null;
     matchResult: MatchResult | null;

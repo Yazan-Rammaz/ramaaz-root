@@ -11,8 +11,15 @@ import { getSystem } from "./api";
  */
 export async function selectSystem(id: string): Promise<void> {
   // Resolve against the registry first — an unknown id (stale UI, tampering)
-  // must not land in the cookie. getSystem throws on 404.
+  // must not land in the cookie.
+  //
+  // `getSystem` answers null rather than throwing now: the registry is a list
+  // on the session response, not a route that can 404, so "not in it" is an
+  // ordinary answer. Refuse silently — the id came from our own list, so a miss
+  // means that list moved, and re-rendering shows the current one.
   const system = await getSystem(id);
+  if (!system) return;
+
   await setSelectedSystemCookie(system.id);
   // The data source of every project page just changed.
   revalidatePath("/", "layout");

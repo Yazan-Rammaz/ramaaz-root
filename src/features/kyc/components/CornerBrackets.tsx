@@ -62,7 +62,12 @@ export function CornerBrackets({
                     key={pos}
                     aria-hidden
                     className={cn(
-                        'pointer-events-none absolute h-18 w-18 transition-all duration-500 ease-out motion-reduce:transition-none',
+                        // `frame-bracket` is the drop shadow that lifts these
+                        // off the picture — flat #FFEB00 on a pale wall or a
+                        // lit window is close to invisible, and on a busy
+                        // background it reads as an artefact. The colour is
+                        // untouched; see globals.css.
+                        'frame-bracket pointer-events-none absolute h-18 w-18 transition-all duration-500 ease-out motion-reduce:transition-none',
                         pos,
                         edges,
                         className,

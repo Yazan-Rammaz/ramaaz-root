@@ -1,5 +1,19 @@
 /**
- * The shim that makes the phone's camera look like this computer's camera.
+ * The one place `navigator.mediaDevices` is patched.
+ *
+ * TWO features live here, and they live here together on purpose. The hand-off
+ * (below) replaces the camera; the quality lift (`installCaptureQuality`) only
+ * edits the constraints on the way past. Both need the same global, and two
+ * independent patchers over one global is a bug waiting for the session where
+ * both are live — each captures "the original" at install time, so whichever
+ * uninstalls second restores the other one's patch and the page is left unable
+ * to open a real camera.
+ *
+ * So there is one patch slot and one pair of saved originals. `apply()` rebuilds
+ * the patched methods from whatever is currently switched on, and the real
+ * methods go back only when nothing is.
+ *
+ * ── The shim that makes the phone's camera look like this computer's camera ──
  *
  * ── Why replace getUserMedia rather than pass a stream around ───────────────
  * Because the screens that need it do not all accept one.
@@ -34,9 +48,15 @@ type EnumerateDevices = typeof navigator.mediaDevices.enumerateDevices;
 
 let original: { gum: GetUserMedia; enumerate: EnumerateDevices } | null = null;
 
+/** The relayed stream, when a hand-off is live. */
+let relayStream: MediaStream | null = null;
+
+/** The resolution to ask cameras for, when the quality lift is on. */
+let qualityBoost: { width: number; height: number } | null = null;
+
 /** Is a hand-off currently feeding this page's cameras? */
 export function isShimInstalled(): boolean {
-    return original !== null;
+    return relayStream !== null;
 }
 
 /**
@@ -116,12 +136,111 @@ const HANDOFF_DEVICE_LABEL = 'Phone camera';
 const HANDOFF_DEVICE_ID = 'ramaaz-handoff-camera';
 const HANDOFF_GROUP_ID = 'ramaaz-handoff';
 
-export function installCameraShim(stream: MediaStream): void {
-    const md = navigator.mediaDevices;
+/**
+ * Raise the resolution every camera request asks for.
+ *
+ * ── Why this is necessary at all ────────────────────────────────────────────
+ * AWS hardcodes what Face Liveness asks the camera for — `STATIC_VIDEO_
+ * CONSTRAINTS` in `@aws-amplify/ui-react-liveness/.../utils/helpers.mjs`:
+ *
+ *     width: { min: 320, ideal: 640 }   height: { min: 240, ideal: 480 }
+ *
+ * and `FaceLivenessDetectorCore` exposes no prop that overrides it. The check
+ * therefore runs on VGA, and the still kept from that stream is painted into a
+ * 350x400 frame that is 1050x1200 real pixels on a phone. That upscale is THE
+ * reason the captured face looks soft, and no amount of colour work fixes a
+ * picture that does not have the detail in it.
+ *
+ * ── Why editing the constraints, and not the track ──────────────────────────
+ * `track.applyConstraints()` after the fact was the obvious alternative and is
+ * the wrong one: AWS derives the oval's geometry and the face-fit test from the
+ * stream's dimensions, so changing them mid-session races code that has already
+ * read the old numbers. Editing the request means AWS is handed a stream that
+ * was the right size from the first frame, and every downstream read — oval,
+ * fit test, anchor — is consistent because all of them read the live stream.
+ *
+ * AWS's own floor is 320x240, so a larger stream satisfies every constraint it
+ * set. `ideal` is also never a rejection: a camera that cannot manage 960 lines
+ * returns what it has rather than throwing OverconstrainedError.
+ *
+ * ── What it deliberately does not touch ─────────────────────────────────────
+ * `facingMode`, `frameRate`, `deviceId`, `aspectRatio` and any `exact` the
+ * caller set — all passed through untouched. Only `width`/`height` `ideal` move,
+ * and only upward: a caller that already asked for more keeps what it asked for.
+ * `useCamera` asks for 1500x900 and is unaffected by this.
+ */
+export function installCaptureQuality(size: { width: number; height: number }): void {
+    qualityBoost = size;
+    apply();
+}
 
+export function uninstallCaptureQuality(): void {
+    qualityBoost = null;
+    apply();
+}
+
+/** Raise `ideal` width/height without disturbing anything else the caller set. */
+function boostConstraints(video: MediaTrackConstraints): MediaTrackConstraints {
+    if (!qualityBoost) return video;
+
+    // `exact` is a hard requirement the caller chose; overriding it would turn
+    // a working request into an OverconstrainedError. Left alone.
+    const hasExact =
+        (typeof video.width === 'object' && 'exact' in video.width) ||
+        (typeof video.height === 'object' && 'exact' in video.height);
+    if (hasExact) return video;
+
+    const idealOf = (c: ConstrainULong | undefined): number =>
+        typeof c === 'number' ? c : typeof c === 'object' ? (c.ideal ?? 0) : 0;
+
+    // Never downward. A caller asking for more than the boost knows something
+    // this function does not.
+    const width = Math.max(qualityBoost.width, idealOf(video.width));
+    const height = Math.max(qualityBoost.height, idealOf(video.height));
+
+    return {
+        ...video,
+        width: { ...(typeof video.width === 'object' ? video.width : {}), ideal: width },
+        height: { ...(typeof video.height === 'object' ? video.height : {}), ideal: height },
+    };
+}
+
+export function installCameraShim(stream: MediaStream): void {
     // Before anything asks: the relayed track has to be able to describe
     // itself, or AWS rejects it sight unseen. See describeRelayedTrack.
     stream.getVideoTracks().forEach(describeRelayedTrack);
+    relayStream = stream;
+    apply();
+}
+
+/**
+ * Install, replace or remove the patch to match what is currently switched on.
+ *
+ * Called by every installer and uninstaller. The originals are captured on the
+ * first patch and restored only when BOTH features are off, which is the
+ * property that makes the two safe to use together in any order.
+ */
+function apply(): void {
+    /*
+     * There is no camera stack on the server.
+     *
+     * Load-bearing since `installCaptureQuality` moved into LivenessCamera's
+     * RENDER — see the note there on why it had to. Client components are still
+     * server-rendered, so this function now runs during SSR, where
+     * `navigator` does not exist and reaching for `.mediaDevices` throws
+     * during prerender. Nothing to patch there and nothing to restore.
+     */
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+    const md = navigator.mediaDevices;
+
+    if (!relayStream && !qualityBoost) {
+        if (original) {
+            md.getUserMedia = original.gum;
+            md.enumerateDevices = original.enumerate;
+            original = null;
+        }
+        return;
+    }
 
     if (!original) {
         original = {
@@ -129,38 +248,54 @@ export function installCameraShim(stream: MediaStream): void {
             enumerate: md.enumerateDevices.bind(md),
         };
     }
+    const real = original;
 
     md.getUserMedia = async (constraints?: MediaStreamConstraints) => {
         // Audio is never relayed — this hand-off carries video only. A caller
         // that asks for audio would otherwise get a stream with no audio track
         // and fail somewhere less obvious than here.
-        if (constraints?.audio && !constraints.video) {
-            if (!original) throw new Error('camera shim not installed');
-            return original.gum(constraints);
+        if (constraints?.audio && !constraints.video) return real.gum(constraints);
+
+        if (relayStream) {
+            // Re-describe on EVERY call, not just at install.
+            //
+            // A retry re-mounts the capture screen and asks for a camera again,
+            // and by then the track may not be the one that was patched: WebRTC
+            // can replace a remote track mid-connection, and a caller that
+            // stopped the previous one leaves a track whose description no
+            // longer applies. An unpatched track reports no frameRate, and AWS
+            // answers CAMERA_FRAMERATE_ERROR — the same failure as before the
+            // shim existed, reappearing only on the second attempt, which is
+            // how it was missed.
+            //
+            // Idempotent: describing an already-described track just rewrites
+            // the same two properties.
+            relayStream.getVideoTracks().forEach(describeRelayedTrack);
+
+            // The SAME MediaStream for every caller, deliberately. Cloning per
+            // call would let one screen's `stop()` kill the tracks another still
+            // needs, and the hand-off owns this stream's lifetime, not its
+            // consumers.
+            //
+            // The quality lift does not apply here and must not: the resolution
+            // of a relayed stream is the phone's decision, made by
+            // `PhoneCamera`'s own constraints at the other end of the link.
+            return relayStream;
         }
 
-        // Re-describe on EVERY call, not just at install.
-        //
-        // A retry re-mounts the capture screen and asks for a camera again, and
-        // by then the track may not be the one that was patched: WebRTC can
-        // replace a remote track mid-connection, and a caller that stopped the
-        // previous one leaves a track whose description no longer applies. An
-        // unpatched track reports no frameRate, and AWS answers
-        // CAMERA_FRAMERATE_ERROR — the same failure as before the shim existed,
-        // reappearing only on the second attempt, which is how it was missed.
-        //
-        // Idempotent: describing an already-described track just rewrites the
-        // same two properties.
-        stream.getVideoTracks().forEach(describeRelayedTrack);
-
-        // The SAME MediaStream for every caller, deliberately. Cloning per call
-        // would let one screen's `stop()` kill the tracks another still needs,
-        // and the hand-off owns this stream's lifetime, not its consumers.
-        return stream;
+        // Quality lift only — a real camera, asked for more pixels.
+        const video = constraints?.video;
+        if (!video || video === true) {
+            return real.gum({ ...constraints, video: boostConstraints({}) });
+        }
+        return real.gum({ ...constraints, video: boostConstraints(video) });
     };
 
     md.enumerateDevices = async () => {
-        const real = original ? await original.enumerate().catch(() => []) : [];
+        const devices = await real.enumerate().catch(() => []);
+        // Only the hand-off invents a device. With just the quality lift on,
+        // the real list is the right answer.
+        if (!relayStream) return devices;
 
         const phone = {
             deviceId: HANDOFF_DEVICE_ID,
@@ -178,16 +313,14 @@ export function installCameraShim(stream: MediaStream): void {
 
         // Ours FIRST: callers that pick a camera generally take the first
         // videoinput, and on the machines this exists for there is no other.
-        return [phone, ...real.filter((d) => d.kind !== 'videoinput')];
+        return [phone, ...devices.filter((d) => d.kind !== 'videoinput')];
     };
 }
 
 /** Hand the page's real camera stack back, exactly as it was. */
 export function uninstallCameraShim(): void {
-    if (!original) return;
-    navigator.mediaDevices.getUserMedia = original.gum;
-    navigator.mediaDevices.enumerateDevices = original.enumerate;
-    original = null;
+    relayStream = null;
+    apply();
 }
 
 /**

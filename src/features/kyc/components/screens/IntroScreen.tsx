@@ -64,7 +64,12 @@ export default function IntroScreen() {
      * which is the whole reason this screen used to show a grey box to anybody
      * who reloaded.
      */
-    const photo = livenessResult?.faceImageData ?? storedFaceSrc;
+    // `displayImageData` first — the same frame with display-only edits (the
+    // portrait blur). It is absent whenever nothing display-only ran, which is
+    // the default, so this is usually `faceImageData` verbatim. Never reach for
+    // it alone: it does not exist on every capture.
+    const photo =
+        livenessResult?.displayImageData ?? livenessResult?.faceImageData ?? storedFaceSrc;
 
     return (
         <div className="mx-auto flex h-full w-390 flex-col">

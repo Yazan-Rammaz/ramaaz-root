@@ -9,6 +9,7 @@ import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import { isShimInstalled } from '@/features/kyc/handoff/cameraShim';
+import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
 import {
@@ -243,7 +244,7 @@ export function FaceLivenessScreen({
      *
      * Presentational, like the still itself: this is not the image AWS judged.
      */
-    onFaceCaptured?: (frame: string | null) => void;
+    onFaceCaptured?: (capture: FaceCapture | null) => void;
 }) {
     const t = useTranslations('auth');
 
@@ -402,12 +403,28 @@ export function FaceLivenessScreen({
     const sessionId = session?.sessionId ?? null;
 
     const handleComplete = useCallback(
-        async (shot: string | null) => {
+        async (capture: FaceCapture | null) => {
             if (!sessionId) return;
+            /*
+             * Two images, and they are not interchangeable.
+             *
+             * `display` carries any edit that is worth showing but not worth
+             * submitting — the portrait blur, which softens the hair and jaw
+             * boundary along with the room. `stored` is the photograph of
+             * record, and every path that hands the image to a server takes
+             * that one. `config/capture.ts` (CAPTURE_OUTPUT) decides which
+             * stages land in which, and argues each.
+             *
+             * They are the same string whenever nothing display-only ran,
+             * which is the default.
+             */
+            const shot = capture?.stored ?? null;
+            const shown = capture?.display ?? shot;
+
             // The still goes up first so the checking state has a face to scan
             // rather than a black box for the second or two this takes.
-            setSnapshot(shot);
-            onFaceCaptured?.(shot);
+            setSnapshot(shown);
+            onFaceCaptured?.(capture);
             setPhase('checking');
 
             try {
@@ -433,7 +450,11 @@ export function FaceLivenessScreen({
             // Recorded BEFORE the commit below, because the commit redirects
             // and the redirect is what remounts this screen. Written any later
             // and the remount would race it and start a session anyway.
-            PASSED.set(challengeId, shot);
+            // The DISPLAYED still, because this is only ever read back to
+            // repaint this frame after a remount — see the note at PASSED.
+            // Seeding it with `stored` would make the picture change the moment
+            // the screen re-mounted, which reads as a second, different capture.
+            PASSED.set(challengeId, shown);
             setPhase('passed');
 
             // Let the success pulse play before committing, because committing

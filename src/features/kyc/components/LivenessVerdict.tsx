@@ -97,6 +97,14 @@ export function LivenessVerdict({
                 />
             )}
 
+            {/* The viewfinder's falloff, over the frozen face — the same
+                treatment the live frame carries, so the picture does not change
+                appearance at the moment the camera stops. Gradient only, well
+                short of the middle; the face is untouched. See globals.css. */}
+            {snapshot && !showRetry && (
+                <span aria-hidden className="frame-scrim pointer-events-none absolute inset-0" />
+            )}
+
             {/* Scanning the still while the servers decide. */}
             {phase === 'checking' && (
                 <span

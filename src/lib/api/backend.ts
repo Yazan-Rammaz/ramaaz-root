@@ -1,37 +1,63 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { z } from "zod";
-import { api, ApiError } from "./server";
+// `ApiError` is no longer thrown here — `api` raises it, with the backend's own
+// error envelope and Retry-After already read off the response.
+import { api } from "./server";
+import { AUTH_PATHS, meResponseSchema } from "@/lib/auth/endpoints";
 
 /**
- * THE single way to call a PROJECT's own backend (RDB, Trydos, …). Server-only.
+ * THE single way to read a PROJECT's data (RDB, Trydos, …). Server-only.
  *
- * The root dashboard manages several company projects; each row in the systems
- * registry carries the base URL of that project's backend. The user picks a
- * system on /systems (stored in the httpOnly `root_sys` cookie), and every
- * project-data page (regions, currencies, languages, …) reads and mutates
- * through `backendFetch` — same verbs as `api`, but routed to the SELECTED
- * system's backend instead of the root backend.
+ * ── We never talk to a project backend. We talk to ours ─────────────────────
+ * This file used to resolve a per-system `baseUrl` from the registry and fetch
+ * that host directly. That design is gone, and it was never going to work:
+ * confirmed in round 2 §2, the credentials for each managed system are held by
+ * the root backend, encrypted at rest, and never leave it. There is no base URL
+ * on a project entry and there won't be, and nothing authenticates US to a
+ * project — the per-system keys live between the root backend and each system.
  *
- * ⚠️ The registry itself is currently unserved — see `features/system/api.ts`.
- * Until the remote backend provides it, `getSelectedSystem()` cannot resolve
- * and every call here fails before it reaches a project.
+ * So the root backend proxies, and every call here is an ordinary call to it
+ * under `/v1/projects/{projectId}/…`. One trust boundary instead of N.
  *
- * Same BFF rules as `src/lib/api/server.ts`: the browser never calls a project
- * backend and never sees these URLs; Server Components read via features'
- * api.ts, browser mutations go through Server Actions.
+ * The user still picks a system on /systems (httpOnly `root_sys` cookie), and
+ * every project-data page reads through `backendFetch` — but the selection is
+ * now a PATH SEGMENT rather than a host.
+ *
+ * ── What exists today ───────────────────────────────────────────────────────
+ *   currencies          GET …/connection/manifest → `currencies`
+ *   regions, branches   GET …/org-units  (the unit's `type` says which)
+ *   unit types          GET …/unit-types
+ *   employees           GET …/employees
+ *
+ * ⚠️ Languages does NOT exist yet, and the exact response shapes for the other
+ * two are still unconfirmed — which is why the feature api modules are still
+ * mocked. See `backend docs/frontend-project-data-needs.md`.
+ *
+ * Same BFF rules as `src/lib/api/server.ts`: the browser never calls a backend
+ * directly; Server Components read via features' api.ts, browser mutations go
+ * through Server Actions.
  */
 
 const SELECTED_SYSTEM = "root_sys";
 
-/** What backendFetch needs from the registry — parsed defensively. */
-const registryEntrySchema = z.object({
-  id: z.string(),
-  code: z.string(),
-  name: z.string(),
-  baseUrl: z.string(),
-});
-export type RegistryEntry = z.infer<typeof registryEntrySchema>;
+/**
+ * What backendFetch needs from the registry.
+ *
+ * A plain type, not a zod schema: the wire shape is already parsed by
+ * `meResponseSchema` where it arrives, and a second parse of our own mapping
+ * would only re-check fields we just wrote.
+ *
+ * No `baseUrl`. There is nothing to hold one — the id below IS the routing,
+ * because it becomes a path segment on our own backend.
+ */
+export type RegistryEntry = {
+  /** Also the `{projectId}` in every project-scoped path. */
+  id: string;
+  code: string;
+  name: string;
+  /** The backend's own category for the project, when it sent one. */
+  projectType?: string;
+};
 
 /** Thrown when no system is selected — pages can catch it and prompt. */
 export class NoSystemSelectedError extends Error {
@@ -41,13 +67,12 @@ export class NoSystemSelectedError extends Error {
   }
 }
 
-/** Thrown when the selected system has no base URL configured yet. */
-export class SystemNotConfiguredError extends Error {
-  constructor(code: string) {
-    super(`System "${code}" has no backend base URL yet — set it in the systems registry`);
-    this.name = "SystemNotConfiguredError";
-  }
-}
+/*
+ * ⚰️ `SystemNotConfiguredError` used to live here — "this system has no backend
+ * base URL yet". There is no such state any more: a system in the registry is
+ * reachable by definition, because reaching it means asking our own backend
+ * about an id it just gave us.
+ */
 
 export async function getSelectedSystemId(): Promise<string | null> {
   return (await cookies()).get(SELECTED_SYSTEM)?.value ?? null;
@@ -69,67 +94,68 @@ export async function setSelectedSystemCookie(id: string) {
  * nothing is selected. Deleted system → null too (stale cookie), so callers
  * degrade to the "pick a system" state.
  */
+/**
+ * THE registry read — every managed system, from `projects` on `GET /v1/me`.
+ *
+ * It lives here rather than in `features/system/api.ts` because this file needs
+ * it too, and `lib` may not import from `features`. The feature module maps
+ * these onto its own UI shape; nothing else should read `projects` directly.
+ *
+ * `code` and `name` fall back to the id: they are documented as present, but an
+ * entry that arrived without one must still be selectable rather than take the
+ * whole list down.
+ */
+export async function listRegistry(): Promise<RegistryEntry[]> {
+  const raw = await api.get<unknown>(AUTH_PATHS.me);
+  const projects = meResponseSchema.parse(raw).projects ?? [];
+
+  return projects.map((p) => ({
+    id: p.id,
+    code: p.code ?? p.id,
+    name: p.name ?? p.code ?? p.id,
+    projectType: p.project_type,
+  }));
+}
+
 export async function getSelectedSystem(): Promise<RegistryEntry | null> {
   const id = await getSelectedSystemId();
   if (!id) return null;
-  // Root backend call, not a project call; api.get attaches the access token.
-  try {
-    const data = await api.get<unknown>(`/systems/${encodeURIComponent(id)}`);
-    return registryEntrySchema.parse(data);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null;
-    throw error;
-  }
+
+  // A system that has since been removed resolves to null (stale cookie), so
+  // callers degrade to the "pick a system" state rather than erroring.
+  return (await listRegistry()).find((s) => s.id === id) ?? null;
 }
 
-type RequestOptions = Omit<RequestInit, "body"> & {
-  json?: unknown;
-  cache?: RequestCache;
-};
-
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/**
+ * Prefix a project-scoped path with the selected system.
+ *
+ * `/org-units` → `/v1/projects/01ABC…/org-units`. That is the entire job now:
+ * no second host, no second fetch, no second set of credentials.
+ */
+async function projectPath(path: string): Promise<string> {
   const system = await getSelectedSystem();
   if (!system) throw new NoSystemSelectedError();
-  if (!system.baseUrl) throw new SystemNotConfiguredError(system.code);
 
-  const { json, headers, cache = "no-store", ...rest } = options;
-
-  const res = await fetch(`${system.baseUrl}${path}`, {
-    ...rest,
-    cache,
-    headers: {
-      Accept: "application/json",
-      ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
-      // Auth to project backends is per-system API keys (planned) — attach the
-      // key for `system.code` here once the projects expose their admin APIs.
-      ...headers,
-    },
-    body: json !== undefined ? JSON.stringify(json) : undefined,
-  });
-
-  if (res.status === 204) return undefined as T;
-
-  const payload = await res.json().catch(() => undefined as unknown);
-
-  if (!res.ok) {
-    const message =
-      (payload as { message?: string } | undefined)?.message ??
-      `${system.code} request failed (${res.status})`;
-    throw new ApiError(res.status, message, payload);
-  }
-
-  return payload as T;
+  return `/v1/projects/${encodeURIComponent(system.id)}${path}`;
 }
 
+/**
+ * Same verbs as `api`, scoped to the selected project.
+ *
+ * Every one of these is an ordinary root-backend call underneath, so it
+ * inherits the bearer token, the caller headers from `./edge.ts`, the error
+ * envelope and the `Retry-After` handling without restating any of it. The only
+ * thing this adds is the path prefix and the "nothing selected" refusal.
+ */
 export const backendFetch = {
-  get: <T>(path: string, options?: RequestOptions) =>
-    request<T>(path, { ...options, method: "GET" }),
-  post: <T>(path: string, json?: unknown, options?: RequestOptions) =>
-    request<T>(path, { ...options, method: "POST", json }),
-  patch: <T>(path: string, json?: unknown, options?: RequestOptions) =>
-    request<T>(path, { ...options, method: "PATCH", json }),
-  put: <T>(path: string, json?: unknown, options?: RequestOptions) =>
-    request<T>(path, { ...options, method: "PUT", json }),
-  delete: <T>(path: string, options?: RequestOptions) =>
-    request<T>(path, { ...options, method: "DELETE" }),
+  get: async <T>(path: string, options?: Parameters<typeof api.get>[1]) =>
+    api.get<T>(await projectPath(path), options),
+  post: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.post>[2]) =>
+    api.post<T>(await projectPath(path), json, options),
+  patch: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.patch>[2]) =>
+    api.patch<T>(await projectPath(path), json, options),
+  put: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.put>[2]) =>
+    api.put<T>(await projectPath(path), json, options),
+  delete: async <T>(path: string, options?: Parameters<typeof api.delete>[1]) =>
+    api.delete<T>(await projectPath(path), options),
 };
