@@ -345,6 +345,7 @@ export function LivenessCamera({
     credentialProvider,
     onAnalysisComplete,
     onStreamEnded,
+    onStreamStopped,
     onCameraLive,
     onFaceMetrics,
     onError,
@@ -394,6 +395,23 @@ export function LivenessCamera({
      * and behave as before.
      */
     onStreamEnded?: (capture: FaceCapture | null) => void;
+    /**
+     * The camera stopped — fired IMMEDIATELY, with the raw kept frame.
+     *
+     * ⚠️ This exists because `onStreamEnded` is not immediate. That one waits
+     * for `processFrame`, which runs the whole look pipeline over a 1280x960
+     * still — exposure, white balance, skin, lighting — and takes a beat. For
+     * that beat the camera is already dead, so the frame is BLACK, and whatever
+     * was drawn over the live preview is still drawn over nothing. Reported as
+     * exactly that: the mesh hanging in the dark before the AI mark appeared.
+     *
+     * So the still is handed over twice. This is the raw sensor frame as a data
+     * URL, available the instant recording stops, good enough to put something
+     * true on screen; `onStreamEnded` follows with the processed one and
+     * replaces it. The swap is invisible — both are the same photograph, and
+     * the second is only better lit.
+     */
+    onStreamStopped?: (rawStill: string | null) => void;
     /**
      * The camera is now showing a picture — fired once, on the first frame with
      * real dimensions.
@@ -924,6 +942,12 @@ export function LivenessCamera({
     useEffect(() => {
         streamEndedRef.current = onStreamEnded;
     }, [onStreamEnded]);
+
+    /** Same treatment, same reason — see the note on `streamEndedRef`. */
+    const streamStoppedRef = useRef(onStreamStopped);
+    useEffect(() => {
+        streamStoppedRef.current = onStreamStopped;
+    }, [onStreamStopped]);
 
     /** Same treatment, same reason — see the note on `streamEndedRef`. */
     const cameraLiveRef = useRef(onCameraLive);
@@ -1699,6 +1723,29 @@ export function LivenessCamera({
 
             if (sawVideo.current && !announcedEnd.current && ended) {
                 announcedEnd.current = true;
+
+                /*
+                 * ── Get something on screen NOW ─────────────────────────────
+                 *
+                 * Before `processFrame`, before anything async. The camera is
+                 * already black at this point and every overlay drawn over the
+                 * live preview is now drawn over nothing.
+                 *
+                 * The raw frame is encoded synchronously — a JPEG of an
+                 * already-decoded canvas, tens of milliseconds — and handed
+                 * straight over. The processed version follows and replaces it.
+                 */
+                if (frameRef.current) frameRef.current.dataset.stream = 'ended';
+                try {
+                    const raw = bestFrame.current?.canvas;
+                    streamStoppedRef.current?.(
+                        raw?.width ? raw.toDataURL('image/jpeg', 0.85) : null,
+                    );
+                } catch {
+                    // A tainted canvas cannot be encoded. The processed handover
+                    // below is unaffected; this was only the earlier of the two.
+                    streamStoppedRef.current?.(null);
+                }
                 // One line, once per check. The signal that fired is the first
                 // thing worth knowing if this ever mistimes again, and there is
                 // no other way to see it from outside.

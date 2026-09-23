@@ -912,6 +912,27 @@ export function FaceLivenessScreen({
                          * null for a moment — LivenessVerdict renders the glass
                          * over black in that case, which is the point.
                          */
+                        onStreamStopped={(raw) => {
+                            /*
+                             * The camera is dead as of this instant. Move to
+                             * `checking` NOW, with the raw frame behind it.
+                             *
+                             * ⚠️ This is the fix for a black frame with a
+                             * wireframe hanging in it. `onStreamEnded` below
+                             * cannot do this job: it waits for `processFrame`,
+                             * and for that beat the preview is black while the
+                             * overlays drawn over it are still drawn.
+                             *
+                             * The processed still replaces this one a moment
+                             * later and the swap is invisible — same
+                             * photograph, better exposed.
+                             */
+                            if (raw) {
+                                setSnapshot(raw);
+                                setPlainSnapshot(raw);
+                            }
+                            setPhase('checking');
+                        }}
                         onStreamEnded={(capture) => {
                             /*
                              * The still FIRST, then the phase.

@@ -900,3 +900,22 @@
     z-index: 2;
     pointer-events: none;
 }
+
+/* ── Once the stream has stopped, the overlays go with it ───────────────────
+ *
+ * The camera goes black the instant recording ends, but the mesh and the glass
+ * are OURS and would happily keep drawing over nothing — a green wireframe
+ * hanging in the dark while the still is being processed. Reported as exactly
+ * that.
+ *
+ * `LivenessCamera` sets `data-stream="ended"` the moment it detects the end,
+ * in the same tick it hands over the raw frame, so this and the checking state
+ * arrive together.
+ *
+ * A data attribute rather than unmounting: the detector must stay mounted
+ * through the analysis, and this needs no re-render to take effect.
+ */
+.rz-liveness[data-stream='ended'] .rz-live-mesh,
+.rz-liveness[data-stream='ended'] .rz-live-glass {
+    display: none;
+}
