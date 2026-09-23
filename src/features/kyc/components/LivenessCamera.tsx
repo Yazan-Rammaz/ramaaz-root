@@ -9,10 +9,13 @@ import '@aws-amplify/ui-react/styles.css';
 import { TFJS_WASM_PATH, blazefaceModelUrl } from '@/features/kyc/config/liveness';
 import {
     CAPTURE_LIVE_GLASS,
+    CAPTURE_LIVE_MESH,
     CAPTURE_MIRROR,
     CAPTURE_PORTRAIT,
     CAPTURE_RESOLUTION,
 } from '@/features/kyc/config/capture';
+import { kickstartLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { FaceMesh } from '@/features/kyc/components/FaceMesh';
 import { GlassFilter } from '@/features/kyc/components/GlassFilter';
 import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
 import { scoreFrameQuality } from '@/features/kyc/services/imageQuality';
@@ -22,7 +25,7 @@ import {
     processFrame,
     type FaceCapture,
 } from '@/features/kyc/services/faceCapture';
-import { kickstartSegmenter, segmentToMask } from '@/features/kyc/services/portrait';
+import { kickstartSegmenter } from '@/features/kyc/services/portrait';
 import { measureSkin } from '@/features/kyc/services/skinMask';
 import {
     installCaptureQuality,
@@ -305,41 +308,29 @@ export function LivenessCamera({
     const faceCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const faceAtRef = useRef(0);
 
-    /**
-     * The glass's silhouette mask: the composite, when it last ran, whether a
-     * run is in flight, and how many times segmentation has failed in a row.
+    /*
+     * ── There is no segmentation here, and that is a decision ───────────────
      *
-     * `busy` is not a nicety. `segmentToMask` is async and slower than the
-     * poll, so without it a device that cannot keep up queues a new
-     * segmentation every tick and spends the whole check falling further
-     * behind — on the one screen where losing frames fails the check outright.
-     * Blocking means a slow device quietly runs the outline at a lower rate.
-     */
-    const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    /**
-     * The blurred silhouette — how close each pixel is to the person.
+     * A version of this cut the glass around the person's whole SILHOUETTE,
+     * using the Selfie Segmenter. It was removed, for three reasons that
+     * compounded:
      *
-     * Its own canvas rather than a second pass on the mask: the blur has to
-     * happen to the silhouette ALONE. Blurring the composite would smear the
-     * far field's flat `maxGlass` into the answer and there would be no
-     * distance measure left in it.
-     */
-    const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const maskAtRef = useRef(0);
-    const maskBusyRef = useRef(false);
-    const maskFailsRef = useRef(0);
-
-    /**
-     * The last face measurement, and how long the pane stays down for.
+     *   - AWS's oval makes the face FILL the frame, so "everything except the
+     *     person" was a narrow border. The 10→75 gradient had nowhere to live
+     *     and the pane read as a flat wash.
+     *   - a segmented outline is stale by its own runtime, not by the clock —
+     *     up to 400ms — so it lagged behind anybody moving, which is the entire
+     *     activity on a screen that keeps saying "move a little closer". It
+     *     needed a dilate-while-moving hack to stay off their face.
+     *   - it was a third neural network on this screen, beside the face mesh
+     *     and AWS's own BlazeFace, with a 15fps floor underneath all of it.
      *
-     * `movingUntil` is a DEADLINE rather than a boolean: every measurement that
-     * shows movement pushes it further out, so the pane only returns after a
-     * genuinely quiet stretch. A boolean would flicker the glass back on
-     * between two frames of a continuous movement, which is worse than either
-     * state on its own.
+     * The head-shaped hole below comes from `measureSkin` instead: a chroma
+     * scan over a 160px probe, running at `FACE_TRACK_MS` and eased by the
+     * registered custom properties. Cheaper by orders of magnitude, never
+     * stale, and the body now takes glass — which is what made the gradient
+     * visible at all.
      */
-    const facePrevRef = useRef<{ cx: number; cy: number; faceWidth: number } | null>(null);
-    const movingUntilRef = useRef(0);
 
     /*
      * The look, on the live camera.
@@ -463,13 +454,19 @@ export function LivenessCamera({
      */
     useEffect(() => {
         // Two consumers now, and the live one needs it SOONER: the capture can
-        // afford to wait for a download, but the glass's silhouette is wanted
-        // the moment the camera opens and falls back to the ellipse until it
-        // arrives. `kickstartSegmenter` loads both running modes and is
-        // idempotent, so one call covers both.
-        if (CAPTURE_PORTRAIT.enabled || CAPTURE_LIVE_GLASS.silhouette.enabled) {
-            kickstartSegmenter();
-        }
+        // afford to wait for a download. The live glass no longer segments —
+        // see the note by the mask refs — so this is the capture's model alone.
+        if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
+        /*
+         * The mesh model, started here rather than left to its own hook.
+         *
+         * `useFaceLandmarker` loads it on mount, which is the same moment — but
+         * this runs whether or not the mesh is enabled to render, and more to
+         * the point it states the cost in one place: TWO models are downloaded
+         * and warmed for this screen, on top of AWS's own BlazeFace. If this
+         * screen is ever slow to become usable, that is where to look.
+         */
+        if (CAPTURE_LIVE_MESH.enabled) kickstartLandmarker();
     }, []);
 
     /**
@@ -634,9 +631,14 @@ export function LivenessCamera({
                         glass.clientWidth && glass.clientHeight
                             ? glass.clientWidth / glass.clientHeight
                             : 350 / 400;
-                    const w = CAPTURE_LIVE_GLASS.silhouette.enabled
-                        ? CAPTURE_LIVE_GLASS.silhouette.maskWidth
-                        : 128;
+                    /*
+                     * 160 rather than 128: `measureSkin` samples on a step
+                     * grid, and the hole it produces is now the ONLY thing
+                     * placing the glass — there is no segmenter behind it to
+                     * correct a coarse read. The extra rows cost one larger
+                     * `drawImage` onto something still smaller than an icon.
+                     */
+                    const w = 160;
                     const drew = drawProbe(c, video, w, frameAspect);
                     const h = c.height;
                     const ctx = drew ? c.getContext('2d', { willReadFrequently: true }) : null;
@@ -667,10 +669,12 @@ export function LivenessCamera({
                              *
                              * `faceWidth` is the face's width as a fraction of
                              * the frame, so half of it is the face's own radius.
-                             * 0.95 is a little under twice that — the hole
-                             * comfortably contains the head, including the hair
-                             * and jaw shadow that a skin measure reads as
-                             * background.
+                             * 0.7 is about 1.4x that — enough to contain the
+                             * head including the hair and jaw shadow a skin
+                             * measure reads as background, and NO MORE. The
+                             * body is deliberately left outside it now: the
+                             * shoulders and arms taking glass is what gives the
+                             * gradient enough of the frame to be seen at all.
                              *
                              * ⚠️ The FLOOR is the important number, not the
                              * multiplier.
@@ -687,36 +691,10 @@ export function LivenessCamera({
                              * one that is too small costs the check.
                              */
                             const clear = Math.min(
-                                0.58,
-                                Math.max(0.32, face.faceWidth * 0.95),
+                                0.42,
+                                Math.max(0.22, face.faceWidth * 0.7),
                             );
                             glass.style.setProperty('--live-glass-clear', clear.toFixed(3));
-
-                            /*
-                             * ── Are they moving? ───────────────────────────
-                             *
-                             * Position and size together, because coming
-                             * CLOSER is the movement this screen asks for and
-                             * it barely shifts the centre — AWS's whole hint is
-                             * "move a little closer", so a test that only
-                             * watched cx/cy would miss the one motion that
-                             * matters and glass their face while they made it.
-                             */
-                            const prev = facePrevRef.current;
-                            if (prev) {
-                                const moved =
-                                    Math.hypot(face.cx - prev.cx, face.cy - prev.cy) +
-                                    Math.abs(face.faceWidth - prev.faceWidth);
-                                if (moved > CAPTURE_LIVE_GLASS.settle.moveThreshold) {
-                                    movingUntilRef.current =
-                                        tick + CAPTURE_LIVE_GLASS.settle.holdMs;
-                                }
-                            }
-                            facePrevRef.current = {
-                                cx: face.cx,
-                                cy: face.cy,
-                                faceWidth: face.faceWidth,
-                            };
 
                             // Reported on the same clock it was measured on —
                             // the caller needs no loop of its own.
@@ -725,16 +703,13 @@ export function LivenessCamera({
                                 cx: face.cx,
                                 cy: face.cy,
                             });
-                        } else {
-                            /*
-                             * No face found — a turn, a hand across the lens,
-                             * somebody stepping out of shot. The mask describes
-                             * a person who is not there, so the pane comes down
-                             * for the same reason it does while they move.
-                             */
-                            movingUntilRef.current =
-                                tick + CAPTURE_LIVE_GLASS.settle.holdMs;
                         }
+                        /*
+                         * No face found leaves the last values in place rather
+                         * than snapping the hole back to the middle. A
+                         * momentary miss — a turn, a hand across the lens —
+                         * should not make the pane jump.
+                         */
                     }
                 } catch {
                     // A tainted or not-yet-ready frame. The pane keeps whatever
@@ -742,208 +717,6 @@ export function LivenessCamera({
                 }
             }
 
-            /*
-             * ⚠️ NOTHING HIDES THE PANE HERE, deliberately.
-             *
-             * An earlier version faded the whole thing out whenever anybody
-             * moved. It was wrong in both directions: the smallest shift took
-             * the glass away, and it took the ROOM's glass with it when the
-             * only thing at risk was the person. Movement is handled where it
-             * belongs — by growing the cutout while the mask is being rebuilt
-             * (see `settle.grow` in the silhouette block above), so the pane
-             * over everything else never moves.
-             */
-
-            /*
-             * ── The silhouette: glass over everything EXCEPT the person ──────
-             *
-             * The ellipse in `liveness.css` is a circle around a face. This is
-             * the actual outline — head, shoulders, arms — so the room is
-             * glassed and the administrator is not, which is the whole ask.
-             *
-             * ⚠️ Reuses the probe the face track just drew, and that is not
-             * only an optimisation: the two must agree about WHERE things are.
-             * A mask built from a differently-cropped frame than the one the
-             * ramp is positioned in lands offset from the person it is cut
-             * around, and the symptom is a glassy edge down one side of them.
-             *
-             * `busy` blocks overlap; see the ref's note. `giveUpAfter` stops a
-             * missing model from being asked the same question 150 times.
-             */
-            const sil = CAPTURE_LIVE_GLASS.silhouette;
-            const probe = faceCanvasRef.current;
-            if (
-                sil.enabled &&
-                glass &&
-                probe?.width &&
-                !maskBusyRef.current &&
-                maskFailsRef.current < sil.giveUpAfter &&
-                tick - maskAtRef.current > sil.refreshMs
-            ) {
-                maskAtRef.current = tick;
-                maskBusyRef.current = true;
-                void (async () => {
-                    try {
-                        /*
-                         * `VIDEO` mode with a monotonic timestamp — MediaPipe
-                         * rejects a frame whose timestamp did not advance, and
-                         * the poll's own `Date.now()` is exactly that.
-                         */
-                        const person = await segmentToMask(probe, {
-                            mode: 'VIDEO',
-                            timestamp: tick,
-                        });
-                        if (!person) {
-                            // Includes the sanity bounds: a mask claiming the
-                            // whole frame or none of it is not a person in a
-                            // room, and the ellipse is better than a guess.
-                            maskFailsRef.current += 1;
-                            return;
-                        }
-                        maskFailsRef.current = 0;
-
-                        const w = probe.width;
-                        const h = probe.height;
-                        const out = (maskCanvasRef.current ??=
-                            document.createElement('canvas'));
-                        if (out.width !== w || out.height !== h) {
-                            out.width = w;
-                            out.height = h;
-                        }
-                        const mctx = out.getContext('2d');
-                        if (!mctx) return;
-                        mctx.clearRect(0, 0, w, h);
-
-                        /*
-                         * ── The gradient, measured from the PERSON'S OUTLINE ──
-                         *
-                         * Three steps, and the middle one is the whole idea.
-                         *
-                         * A radial gradient cannot express this. Distance from
-                         * a silhouette is not distance from a point — it has
-                         * the shape of the person — and the previous version
-                         * measured from their face's centre, which put the
-                         * entire useful range inside the area that then got
-                         * erased. See `spread` in capture.ts.
-                         *
-                         * Blurring the silhouette IS a distance measure: a wide
-                         * Gaussian over a filled shape stays at 1 inside it and
-                         * decays smoothly outward, so at any pixel the result
-                         * says "how close is the nearest part of this person".
-                         * One `drawImage` with a filter, no per-pixel work.
-                         */
-                        const { minGlass, maxGlass, spread, settle } =
-                            CAPTURE_LIVE_GLASS;
-                        // ⚠️ /100 — these are PERCENTAGES. Canvas alpha is
-                        // 0..1, and 75 clamps to 1, which paints the whole pane
-                        // opaque and looks exactly like the gradient failing.
-                        const maxA = maxGlass / 100;
-                        const minA = minGlass / 100;
-
-                        // 1. The far field: uniform, at full strength.
-                        mctx.fillStyle = `rgba(0, 0, 0, ${maxA.toFixed(4)})`;
-                        mctx.fillRect(0, 0, w, h);
-
-                        // 2. Take it back down toward `minGlass` near them.
-                        const halo = (haloCanvasRef.current ??=
-                            document.createElement('canvas'));
-                        if (halo.width !== w || halo.height !== h) {
-                            halo.width = w;
-                            halo.height = h;
-                        }
-                        const hctx = halo.getContext('2d');
-                        if (!hctx) return;
-                        hctx.clearRect(0, 0, w, h);
-                        hctx.filter = `blur(${Math.max(1, Math.round(spread * w * 0.5))}px)`;
-                        hctx.drawImage(person.alpha, 0, 0, w, h);
-                        hctx.filter = 'none';
-
-                        /*
-                         * `destination-out` leaves `dst * (1 - src)`, which is
-                         * multiplicative — so the amount removed has to be
-                         * expressed as a FRACTION of what is there, not as a
-                         * difference. At `globalAlpha = (max - min) / max` and
-                         * a halo of 1 the result is exactly `min`; at a halo of
-                         * 0 it is untouched at `max`. Everything between is the
-                         * gradient.
-                         */
-                        mctx.globalCompositeOperation = 'destination-out';
-                        mctx.globalAlpha = maxA > 0 ? (maxA - minA) / maxA : 0;
-                        mctx.drawImage(halo, 0, 0, w, h);
-                        mctx.globalAlpha = 1;
-
-                        /*
-                         * 3. The person themselves: fully clear. Their alpha
-                         * arrives FEATHERED, which is what keeps this from
-                         * reading as a cut-out around the hair.
-                         */
-                        mctx.drawImage(person.alpha, 0, 0, w, h);
-
-                        /*
-                         * ── Grown while they are moving ────────────────────
-                         *
-                         * The outline is up to `refreshMs` old, so somebody
-                         * leaning toward the camera is already outside it — and
-                         * the glass slides onto their face, at the exact moment
-                         * AWS is telling them to come closer.
-                         *
-                         * Widening the CUTOUT fixes that without touching the
-                         * pane over the room, which is not stale and has no
-                         * reason to flinch. A blurred silhouette drawn
-                         * repeatedly pushes its soft edge outward — each pass
-                         * multiplies what is left by `(1 - src)` — which is a
-                         * cheap dilation and costs three composites of an
-                         * image already in hand.
-                         */
-                        if (settle.enabled && Date.now() < movingUntilRef.current) {
-                            mctx.filter = `blur(${Math.max(1, Math.round(settle.grow * w))}px)`;
-                            for (let pass = 0; pass < 3; pass++) {
-                                mctx.drawImage(person.alpha, 0, 0, w, h);
-                            }
-                            mctx.filter = 'none';
-                        }
-
-                        mctx.globalCompositeOperation = 'source-over';
-
-                        /*
-                         * ⚠️ DECODED BEFORE IT IS APPLIED. Assigning a
-                         * mask-image the browser has not decoded yet paints the
-                         * element UNMASKED for those frames — a full-strength
-                         * blur across the whole camera, twice a second. It
-                         * reads as flickering, and the cause is invisible.
-                         */
-                        const url = out.toDataURL('image/png');
-                        const img = new Image();
-                        img.src = url;
-                        await img.decode();
-
-                        const value = `url("${url}")`;
-                        for (const prop of ['mask-image', '-webkit-mask-image']) {
-                            glass.style.setProperty(prop, value);
-                        }
-                        /*
-                         * ⚠️ The composite MUST be reset to `add`.
-                         *
-                         * The stylesheet's fallback is two layers combined with
-                         * `intersect`. This is one layer, and `intersect` on a
-                         * single layer intersects it with the transparent
-                         * backdrop — which is empty, so the pane would vanish
-                         * entirely rather than merely look wrong.
-                         */
-                        glass.style.setProperty('mask-composite', 'add');
-                        glass.style.setProperty('-webkit-mask-composite', 'source-over');
-                        glass.style.setProperty('mask-size', '100% 100%');
-                        glass.style.setProperty('-webkit-mask-size', '100% 100%');
-                    } catch {
-                        // A tainted frame, a lost WebGL context, a model that
-                        // never arrived. The ellipse in the stylesheet is still
-                        // in force until a mask is successfully applied.
-                        maskFailsRef.current += 1;
-                    } finally {
-                        maskBusyRef.current = false;
-                    }
-                })();
-            }
 
             if (glass && video?.srcObject && glass.srcObject !== video.srcObject) {
                 glass.srcObject = video.srcObject;
@@ -1318,6 +1091,7 @@ export function LivenessCamera({
                                  */
                                 '--live-glass-max': CAPTURE_LIVE_GLASS.maxGlass / 100,
                                 '--live-glass-min': CAPTURE_LIVE_GLASS.minGlass / 100,
+                                '--live-glass-spread': CAPTURE_LIVE_GLASS.spread,
                                 '--live-glass-clear': CAPTURE_LIVE_GLASS.clear,
                                 /*
                                  * `none` at zero, and that is the fallback
@@ -1336,6 +1110,12 @@ export function LivenessCamera({
                     />
                 </>
             )}
+
+            {/* The mesh. After the glass so it draws over it — the tracery is
+                on the FACE, which is the one part the glass deliberately leaves
+                clear, so putting it under the pane would hide it exactly where
+                it is meant to be. */}
+            <FaceMesh videoRef={videoElRef} />
 
             <ThemeProvider theme={livenessTheme}>
                 <FaceLivenessDetectorCore

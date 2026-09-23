@@ -696,7 +696,17 @@
 @property --live-glass-clear {
     syntax: '<number>';
     inherits: false;
-    initial-value: 0.46;
+    initial-value: 0.3;
+}
+
+/* How far the climb from `minGlass` to `maxGlass` takes, past the hole's edge.
+   Registered for the same reason as the three above: the mask's stops are all
+   computed from it, and an unset custom property would invalidate every one of
+   them at once — dropping `mask-image` and leaving a flat unmasked blur. */
+@property --live-glass-spread {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0.4;
 }
 
 .rz-live-glass {
@@ -742,91 +752,64 @@
         blur(var(--live-glass-blur, 1rem))
         saturate(var(--live-glass-saturation, 1.2));
 
-    /* ── TWO mask layers, multiplied ────────────────────────────────────────
+    /* ── ONE gradient: the hole, then the climb ─────────────────────────────
      *
-     * ⚠️ One gradient cannot express this, and the single-gradient version that
-     * was here did not do what its own numbers said.
+     * Everything the pane does is a function of ONE distance — how far a pixel
+     * is from the face — so it is one radial gradient, centred on the face and
+     * sized to `clear + spread`:
      *
-     * The two things being asked for are measured against DIFFERENT boxes. The
-     * clear hole is sized to the FACE — it has to be, or it stops protecting the
-     * thing it exists for. The 10%→50% ramp is measured to the FRAME's corners,
-     * because "the rest of the screen" is the frame and nothing else. A single
-     * `radial-gradient` has one size, so writing both into it means the ramp
-     * inherits the face's, and the face's box is roughly a third of the frame.
+     *     0 .. clear          transparent. The head, untouched.
+     *     clear .. clear+sp   the climb, `minGlass` to `maxGlass`.
+     *     beyond              stays at `maxGlass` — a gradient's last stop
+     *                         extends forever, so the corners need no stop.
      *
-     * What that produced, measured: the pane reached its full `edge` alpha only
-     * at a radius well outside the frame, so the bottom corners came out around
-     * 45% while the LEFT AND RIGHT EDGES SAT AT ABOUT 7%. The strong end of the
-     * gradient was mostly off-screen. That is why it has read as "barely there"
-     * every time it was looked at — not the blur, not the filter, the stop
-     * positions.
+     * ⚠️ THE STOPS ARE COMPUTED, not written as constants, and they have to be.
+     * `--live-glass-clear` is measured from the face several times a second, so
+     * the fraction of this gradient the hole occupies MOVES. Fixed percentages
+     * would put the ramp's start inside the hole on a large face and outside it
+     * on a small one — which is the "flat wash" bug, arrived at from a third
+     * direction.
      *
-     * So: one layer for the ramp, one for the hole, composited with `intersect`
-     * — which multiplies their alphas. Outside the hole the cut layer is fully
-     * opaque, so the result IS the ramp; inside it the cut layer is transparent,
-     * so the result is zero whatever the ramp says. Each layer now says one
-     * thing and is sized for the box that thing belongs to.
-     *
-     * ⚠️ `mask-composite` is load-bearing, not decoration. Its default is `add`,
-     * and with two layers that saturates to fully opaque everywhere outside the
-     * hole — a solid pane instead of a 50% one. If this ever renders as a hard
-     * frosted border with a hole punched in it, this property is what did not
-     * apply.
+     * ── What this replaced ──────────────────────────────────────────────────
+     * Two mask layers combined with `mask-composite: intersect`: one ramp sized
+     * to the frame, one cut sized to the person's segmented silhouette. That is
+     * gone with the segmenter (see the note by the mask refs in
+     * LivenessCamera). A single gradient can say all of this precisely because
+     * the hole is now a shape a gradient can draw.
      */
 
-    /* The ramp: 10% just off the face, 50% at the frame's farthest corner.
-       `farthest-corner` is the whole point — it makes 100% of the gradient land
-       exactly at the corner of the frame, so `edge` is a number about the frame
-       rather than about wherever the face happened to be. The straight edges
-       come out a little under it, which is correct: a corner is farther away. */
-    /* How far between `centre` and `edge` the pane is, at each stop. These are
-       `CAPTURE_LIVE_GLASS.falloff` written out — see that table for why the
-       curve is not a straight line, and keep the two in step. */
+    /* Where the climb ends, as a fraction of the frame's width. */
+    --live-glass-reach: calc(var(--live-glass-clear) + var(--live-glass-spread, 0.4));
+    /* Where the hole ends, as a percentage of THIS gradient. */
+    --live-glass-hole: calc(var(--live-glass-clear) / var(--live-glass-reach) * 100%);
     --live-glass-span: calc(var(--live-glass-max, 0.8) - var(--live-glass-min, 0.12));
 
-    --live-glass-ramp: radial-gradient(
-        farthest-corner at calc(var(--live-glass-cx) * 100%)
-            calc(var(--live-glass-cy) * 100%),
-        rgb(0 0 0 / var(--live-glass-min, 0.12)) 0%,
-        rgb(0 0 0 / calc(var(--live-glass-min, 0.12) + var(--live-glass-span) * 0.45))
-            22%,
-        rgb(0 0 0 / calc(var(--live-glass-min, 0.12) + var(--live-glass-span) * 0.82))
-            55%,
+    /*
+     * Ellipse rather than circle, and centred above the middle, because that is
+     * where a head sits in a portrait frame — a circular hole leaves the chin
+     * glassed and the forehead clear, which is backwards.
+     *
+     * The curve is eased rather than linear: a straight climb puts the pane at
+     * its midpoint halfway out, so most of the picture sits in the middle of
+     * the range and the whole thing reads as one strength. Rising fast and then
+     * flattening concentrates the visible change close to the face, which is
+     * where the eye already is.
+     */
+    --live-glass-mask: radial-gradient(
+        ellipse calc(var(--live-glass-reach) * 100%) calc(var(--live-glass-reach) * 115%)
+            at calc(var(--live-glass-cx) * 100%) calc(var(--live-glass-cy) * 100%),
+        transparent 0%,
+        /* Clear through most of the hole, then feathered over its last fifth —
+           a hard edge here draws a visible ring around the head. */
+        transparent calc(var(--live-glass-hole) * 0.8),
+        rgb(0 0 0 / var(--live-glass-min, 0.12)) var(--live-glass-hole),
+        rgb(0 0 0 / calc(var(--live-glass-min, 0.12) + var(--live-glass-span) * 0.55))
+            calc(var(--live-glass-hole) + (100% - var(--live-glass-hole)) * 0.35),
         rgb(0 0 0 / var(--live-glass-max, 0.8)) 100%
     );
 
-    /*
-     * The hole: positioned and sized from the FACE, not from the frame.
-     *
-     * `--live-glass-cx/cy` and `--live-glass-clear` are written onto this
-     * element by `LivenessCamera`, which measures where the face actually is
-     * several times a second. A fixed hole is wrong the moment somebody sits
-     * off-centre or leans back — and being wrong here means glassing the one
-     * thing that has to stay sharp.
-     *
-     * Ellipse rather than circle, and centred above the middle, because that is
-     * where a head sits in a portrait frame — a circular hole leaves the chin
-     * glassed and the shoulders clear, which is backwards.
-     *
-     * `clear` now means what it is documented to mean: its value IS the radius
-     * as a fraction of the frame's width. Fully clear through 62% of that, then
-     * feathered to fully glassed at the rim. The old 190%/165% multipliers were
-     * compensating for the stop positions above and made the number unreadable.
-     */
-    --live-glass-cut: radial-gradient(
-        ellipse calc(var(--live-glass-clear) * 100%)
-            calc(var(--live-glass-clear) * 115%) at calc(var(--live-glass-cx) * 100%)
-            calc(var(--live-glass-cy) * 100%),
-        transparent 0%,
-        transparent 62%,
-        #000 100%
-    );
-
-    mask-image: var(--live-glass-ramp), var(--live-glass-cut);
-    mask-composite: intersect;
-    -webkit-mask-image: var(--live-glass-ramp), var(--live-glass-cut);
-    /* WebKit's legacy spelling of the same operation. */
-    -webkit-mask-composite: source-in;
+    mask-image: var(--live-glass-mask);
+    -webkit-mask-image: var(--live-glass-mask);
 
     /* The hole moves with the person; easing it stops a jittery measurement
        from making the pane twitch. Slow enough to absorb noise, quick enough
@@ -867,9 +850,32 @@
  * strictly above the pane so no such question arises.
  */
 .rz-liveness .amplify-liveness-overlay {
-    z-index: 2;
+    z-index: 3;
 }
 
 .rz-liveness .amplify-liveness-freshness-canvas {
-    z-index: 3;
+    z-index: 4;
+}
+
+/* ── The face mesh ──────────────────────────────────────────────────────────
+ *
+ * Above the glass (1) and below the guidance (3). The tracery belongs ON the
+ * face, which is the one region the pane deliberately leaves clear — under the
+ * glass it would be hidden precisely where it is meant to be seen, and over the
+ * toast it would draw hairlines across the only words telling somebody why the
+ * oval will not accept them.
+ *
+ * ⚠️ Below the freshness canvas (4) too, and that one is not about looks: it is
+ * the coloured light the anti-spoofing measurement is made of. Nothing of ours
+ * goes above it.
+ *
+ * `pointer-events: none` throughout — AWS's cancel control sits under here.
+ */
+.rz-live-mesh {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
 }

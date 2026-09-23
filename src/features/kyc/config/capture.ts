@@ -795,6 +795,96 @@ export const CAPTURE_CHECKING_GLASS = {
 } as const;
 
 /**
+ * ── 11b. The face mesh on the live camera ───────────────────────────────────
+ *
+ * The 478-point Face Mesh drawn over the preview, shining and sparkling the way
+ * the AI mark and the Face ID glyph do, and tracking the face smoothly.
+ *
+ * ⚠️ THIS EXISTED BEFORE AND WAS REMOVED. `LivenessCamera` still carries the
+ * note: it drew a second ML model's landmarks over AWS's camera and "did not
+ * read well" — a flat green wireframe on a face. What is different this time is
+ * only the drawing: the same landmarks, dressed like the rest of this flow.
+ * If it reads as a debug overlay again, that is the failure mode to watch for.
+ *
+ * ── Two clocks, and that is the whole design ────────────────────────────────
+ * "Smooth, high frame rate" and "a neural network per frame" are different
+ * requests, and only the first one is wanted. So:
+ *
+ *   DETECT runs at `detectFps` — the model, throttled.
+ *   DRAW runs on requestAnimationFrame — every frame the display has.
+ *
+ * Between detections the mesh EASES toward the latest landmarks (`smoothing`)
+ * rather than holding still, so it moves at the display's rate while the model
+ * runs at a fraction of it. Detecting per frame would look no better: the
+ * model's own output jitters, and this filter is what removes that.
+ *
+ * ⚠️ It is still the largest CPU cost on this screen, and this screen already
+ * encodes and uploads video to Rekognition — which errors below 15fps
+ * (`CAMERA_FRAMERATE_ERROR`, hit once here already). `detectFps` is the lever;
+ * `enabled` is the hammer. Both are cheaper to reach for than debugging a
+ * liveness check that fails only on weak devices.
+ */
+export const CAPTURE_LIVE_MESH = {
+    enabled: true,
+
+    /**
+     * How often the landmarks are recomputed, per second.
+     *
+     * NOT the frame rate of the animation — see the two-clock note above. 22 is
+     * comfortably above the rate at which a head changes shape on screen, and
+     * roughly a third of the work of running it per frame.
+     */
+    detectFps: 22,
+
+    /**
+     * How far each drawn frame moves toward the latest landmarks, 0..1.
+     *
+     * An exponential filter, and it does two jobs at once: it fills the gaps
+     * between detections with motion, and it removes the model's own per-frame
+     * jitter. Lower is smoother and laggier. Above ~0.6 the jitter comes back;
+     * below ~0.15 the mesh visibly swims behind the face.
+     */
+    smoothing: 0.34,
+
+    /**
+     * Draw every Nth edge of the tessellation.
+     *
+     * The full mesh is ~2600 segments. All of them, every frame, is both
+     * expensive and TOO DENSE — it reads as a solid veil over the face rather
+     * than as a mesh, which is most of why the first version looked wrong.
+     * Every second edge keeps the structure legible and halves the path.
+     */
+    decimate: 2,
+
+    /** Stroke width in XD px. Hairline — this is a tracery, not a cage. */
+    lineWidth: 0.7,
+
+    /** Resting opacity of the mesh, before the shine passes over it. */
+    baseAlpha: 0.3,
+
+    /** How long the shine takes to sweep across the face once, in ms. */
+    shineMs: 2600,
+
+    /**
+     * How many landmarks twinkle.
+     *
+     * Each runs on its own period and phase, like the three stars of the AI
+     * mark — the point is that they never pulse together, because things that
+     * pulse together read as a loading indicator.
+     */
+    sparkles: 9,
+
+    /**
+     * Cap on the overlay's pixel ratio.
+     *
+     * A phone at devicePixelRatio 3 would rasterise this at 1050x1200 every
+     * frame for a tracery of hairlines nobody is inspecting. 2 is past the
+     * point where the lines stop looking stepped.
+     */
+    maxDpr: 2,
+} as const;
+
+/**
  * ── 10. Mirroring ───────────────────────────────────────────────────────────
  *
  * Whether a SELF-view is flipped left-to-right, like a mirror.
@@ -921,12 +1011,20 @@ export const CAPTURE_LIVE_GLASS = {
      * they cannot align or read guidance against. The clear hole is sized to
      * hold a head at capture distance.
      *
+     * ⚠️ A HEAD, and deliberately not a BODY. An earlier version cut the whole
+     * segmented silhouette clear — shoulders and arms included — and the result
+     * was almost no glass at all: AWS's oval makes the face fill the frame, so
+     * "everything except the person" is a narrow border with nowhere for a
+     * gradient to live. Letting the body take glass is what made the effect
+     * visible, and it costs nothing the check cares about: only the FACE has to
+     * stay legible.
+     *
      * ⚠️ Keep this in step with `@property --live-glass-clear`'s `initial-value`
      * in liveness.css. That registration is what gives the property a value
      * before the first measurement; this is only read by the inline style, and
      * the two disagreeing means the pane's first frames differ from its rest.
      */
-    clear: 0.46,
+    clear: 0.3,
 
     /**
      * Blur on the copy, in XD px.
@@ -983,209 +1081,22 @@ export const CAPTURE_LIVE_GLASS = {
     warpBlur: 1.4,
 
     /**
-     * ── The PERSON is what stays clear, not a circle around their face ──────
-     *
-     * The glass covers the whole picture except the administrator — their head,
-     * their shoulders, their arms — cut out along their actual outline.
-     *
-     * ── Why this is not the ellipse it replaced ─────────────────────────────
-     * The ellipse was sized from a skin-tone estimate and could only ever be a
-     * circle in the middle. That gets it wrong in both directions at once: the
-     * shoulders and arms are glassed even though they are the person, and the
-     * wall beside their head is clear even though it is the room. The falloff
-     * looked right in a screenshot of somebody sitting perfectly centred and
-     * wrong the moment anyone moved.
-     *
-     * The silhouette comes from the Selfie Segmenter — the same model the
-     * capture's portrait blur uses, already vendored at
-     * `/vendor/mediapipe/selfie_segmenter.tflite` and already warmed earlier in
-     * this flow. `segmentToMask` returns a FEATHERED alpha, which matters: a
-     * hard cut-out around hair is the artefact that sank the first portrait
-     * attempt (see §4).
-     *
-     * ⚠️ THE COST IS THE WHOLE RISK, and it is on the one screen that cannot
-     * absorb it. This is a neural network running while the device encodes and
-     * uploads video to Rekognition, and AWS errors any camera it measures below
-     * 15fps (`CAMERA_FRAMERATE_ERROR` — already hit once in this codebase).
-     *
-     * Three things keep it affordable, and none of them is optional:
-     *   - it runs on `refreshMs`, not per frame. The BLUR is CSS on a video
-     *     element and stays GPU-cheap at 60fps; only the outline is recomputed.
-     *   - it runs at `maskWidth`, not at display resolution.
-     *   - it never overlaps itself — a refresh already in flight blocks the
-     *     next one, so a slow device silently drops to a lower rate instead of
-     *     queueing work it cannot finish.
-     *
-     * ⚠️ TURN THIS OFF FIRST if a check starts failing on framerate. The pane
-     * falls back to the ellipse mask in `liveness.css`, which is pure CSS and
-     * costs nothing. `warpScale: 0` is the next lever, then `enabled` above.
-     *
-     * It also fails soft on its own: no model, no WebGL, or a mask claiming
-     * less than 8% or more than 95% of the frame (`CAPTURE_PORTRAIT`'s sanity
-     * bounds, which `segmentToMask` enforces), and the ellipse is what renders.
-     */
-    /**
-     * The SHAPE of the falloff from the person out to the frame's corner.
-     *
-     * `[position, mix]` — position is the fraction of the way from the person
-     * to the farthest corner; mix is how far between `centre` and `edge` the
-     * pane is there. So `[0.22, 0.45]` reads: a fifth of the way out, the glass
-     * is already nearly half way to full strength.
-     *
-     * ── Why this is not a straight line ─────────────────────────────────────
-     * Because a straight line does not look like what it is. Interpolating
-     * evenly from 0.1 at the person to 0.5 at the corner puts the pane at 0.3
-     * halfway out — so most of the frame sits in the middle of the range and
-     * the whole thing reads as ONE FLAT WASH with no sense of direction. The
-     * falloff is there mathematically and invisible to look at.
-     *
-     * This curve rises fast and then flattens: the room is at four-fifths
-     * strength by just past halfway and holds it, while the drop happens close
-     * in, right around the person. That is what "stronger at the edges, easing
-     * off as it approaches you" actually looks like — the change has to be
-     * concentrated where the eye is, and the eye is on the face.
-     *
-     * ⚠️ Both mask paths read this — the silhouette's canvas ramp and the
-     * ellipse fallback in liveness.css. Change the numbers and the stylesheet's
-     * hand-written `calc()` stops must move with them, or the pane's appearance
-     * changes at the moment segmentation takes over.
-     */
-    falloff: [
-        [0, 0],
-        [0.22, 0.45],
-        [0.55, 0.82],
-        [1, 1],
-    ] as ReadonlyArray<readonly [number, number]>,
-
-    /**
      * How far the gradient takes to climb from `minGlass` to `maxGlass`,
-     * measured OUTWARD FROM THE PERSON'S OUTLINE, as a fraction of the frame's
-     * width.
+     * measured OUTWARD FROM THE EDGE OF THE CLEAR HOLE, as a fraction of the
+     * frame's width.
      *
-     * ⚠️ FROM THE OUTLINE — not from their centre, and that distinction is the
-     * whole reason the gradient was invisible.
+     * ⚠️ FROM THE HOLE'S EDGE — not from the face's centre, and that
+     * distinction is why the gradient was once invisible. Measuring from the
+     * centre spent most of the range inside the area that is cut clear, so
+     * everything actually glassed sat at or near `maxGlass` and read as one
+     * flat wash. `liveness.css` places the stops so the climb starts exactly
+     * where the hole ends.
      *
-     * The first version measured distance from the face's CENTRE out to the
-     * frame's corner. But the person is cut out of the pane, so the glass does
-     * not begin until their silhouette ends — and by then most of the distance
-     * to the corner has already been spent. Everything actually glassed sat in
-     * the flat top of the curve at or near `maxGlass`, which is precisely the
-     * "static, all one strength" it looked like. The gradient was real,
-     * correct, and entirely inside the region that had been erased.
-     *
-     * Measuring from the outline puts the whole range where it can be seen:
-     * `minGlass` hugging the person, climbing to `maxGlass` this far away.
-     *
-     * 0.4 — roughly the distance from a shoulder to the edge of the frame at
-     * capture distance, so the climb completes right about where the picture
-     * ends. Smaller concentrates the change near the person; larger spreads it
-     * out and, past the point where nothing is that far from them, stops
-     * reaching `maxGlass` anywhere at all.
+     * 0.4 — a little over a head's width at capture distance, so the climb
+     * completes around the shoulders and the frame's border is fully at
+     * `maxGlass`. Smaller concentrates the change close to the face; larger
+     * spreads it out and, past the point where nothing is that far away, never
+     * reaches `maxGlass` anywhere at all.
      */
     spread: 0.4,
-
-    /**
-     * ── The pane stands down while the person is MOVING ─────────────────────
-     *
-     * The outline is recomputed every `refreshMs`, so between refreshes it
-     * describes where somebody WAS. Hold still and that is invisible. Move —
-     * which is the entire activity on this screen, since AWS is telling them to
-     * come closer — and the cutout lags behind them, so the glass slides across
-     * their face. It is at its worst exactly when they are doing what they were
-     * asked to do.
-     *
-     * Chasing it with a faster refresh does not work: the lag is the model's
-     * runtime, not the clock, and running a neural network more often on this
-     * screen is what threatens the 15fps floor AWS fails a check below.
-     *
-     * So the pane fades out while they move and fades back once they settle.
-     * A glassed room is decoration; a glassed face is an obstacle, and the
-     * honest answer to "the mask is stale" is to not show a stale mask.
-     *
-     * Free to measure: `measureSkin` already reports where the face is for the
-     * ramp, so this is the difference between two numbers it had anyway.
-     */
-    settle: {
-        enabled: true,
-
-        /**
-         * How far the face may travel between measurements and still count as
-         * still — in fractions of the frame, summed across position and size.
-         *
-         * Small enough to catch somebody leaning in, large enough to ignore the
-         * measurement's own noise. ⚠️ This is a skin-tone estimate, so its
-         * centre jitters by a percent or so even against a motionless face; set
-         * this below that and the cutout never shrinks back.
-         */
-        moveThreshold: 0.014,
-
-        /**
-         * How long after the last movement the cutout stays grown, in ms.
-         *
-         * ⚠️ MUST EXCEED `silhouette.refreshMs`, or it tightens back onto the
-         * outline that was already stale when they stopped — the exact artefact
-         * it exists to prevent, half a second later. Longer than the refresh
-         * guarantees a fresh mask lands before it narrows.
-         */
-        holdMs: 620,
-
-        /**
-         * How far the cutout is GROWN while they move, as a fraction of the
-         * frame's width.
-         *
-         * ── What this replaced, and why ─────────────────────────────────────
-         * The first version of this faded the whole pane out while anyone
-         * moved, which was wrong twice over: the glass disappeared on the
-         * smallest shift, and it took the ROOM's glass with it — when the only
-         * thing at risk was the person. The room is not stale; it is not
-         * moving.
-         *
-         * So the pane stays exactly where it is and only the cutout changes.
-         * Moving widens the clear area enough to cover wherever the person has
-         * got to since the outline was computed; holding still lets it settle
-         * back onto them. The glass over everything else never flinches.
-         *
-         * Sized against how far somebody travels in one refresh: at 400ms, a
-         * normal lean toward the camera moves their edge a few percent of the
-         * frame, so 6% covers it with room to spare.
-         */
-        grow: 0.06,
-    },
-
-    silhouette: {
-        enabled: true,
-
-        /**
-         * How often the outline is recomputed, in ms.
-         *
-         * Slower than the face track's 320ms on purpose — this is a whole
-         * neural network against a per-pixel scan that costs single digits.
-         * A head and shoulders do not change OUTLINE appreciably in 400ms;
-         * they change position, and the feathered edge absorbs that.
-         */
-        refreshMs: 400,
-
-        /**
-         * Width the segmenter is fed, in px. Height follows the frame's shape.
-         *
-         * The model resamples its input to 256x256 internally, so feeding it
-         * more than this buys nothing at all — it only costs the `drawImage`
-         * and the per-pixel label scan, both of which are linear in this
-         * number. The resulting mask is upscaled to the frame, which is
-         * harmless because it is a feathered silhouette rather than detail.
-         */
-        maskWidth: 160,
-
-        /**
-         * Consecutive failures before this stops trying for the rest of the
-         * check.
-         *
-         * A missing model or a dead WebGL context fails every time, and
-         * retrying it two and a half times a second for the length of a
-         * liveness check is pure cost against an answer that will not change.
-         * A few attempts covers the case that actually recovers — the model
-         * still downloading — without grinding on the one that cannot.
-         */
-        giveUpAfter: 6,
-    },
 } as const;
