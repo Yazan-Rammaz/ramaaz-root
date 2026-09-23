@@ -693,20 +693,18 @@
     initial-value: 0.42;
 }
 
-@property --live-glass-clear {
+/* The oval's radii, as fractions of the frame's width and height. Written from
+   the face mesh's own bounding box — see `ovalPad` in capture.ts. */
+@property --live-glass-rx {
     syntax: '<number>';
     inherits: false;
     initial-value: 0.3;
 }
 
-/* How far the climb from `minGlass` to `maxGlass` takes, past the hole's edge.
-   Registered for the same reason as the three above: the mask's stops are all
-   computed from it, and an unset custom property would invalidate every one of
-   them at once — dropping `mask-image` and leaving a flat unmasked blur. */
-@property --live-glass-spread {
+@property --live-glass-ry {
     syntax: '<number>';
     inherits: false;
-    initial-value: 0.4;
+    initial-value: 0.36;
 }
 
 .rz-live-glass {
@@ -752,60 +750,35 @@
         blur(var(--live-glass-blur, 1rem))
         saturate(var(--live-glass-saturation, 1.2));
 
-    /* ── ONE gradient: the hole, then the climb ─────────────────────────────
+    /* ── AN OVAL ON THE FACE ────────────────────────────────────────────────
      *
-     * Everything the pane does is a function of ONE distance — how far a pixel
-     * is from the face — so it is one radial gradient, centred on the face and
-     * sized to `clear + spread`:
+     * One ellipse of glass, sitting over the face, at a single strength. The
+     * mesh draws above it (`z-index: 2` against this element's 1), so the
+     * wireframe reads as being ON the pane and the face behind both.
      *
-     *     0 .. clear          transparent. The head, untouched.
-     *     clear .. clear+sp   the climb, `minGlass` to `maxGlass`.
-     *     beyond              stays at `maxGlass` — a gradient's last stop
-     *                         extends forever, so the corners need no stop.
+     * ⚠️ THIS IS THE INVERSE OF WHAT WAS HERE. Every earlier version cut the
+     * person CLEAR and glassed the room around them, with a gradient running
+     * outward. That is gone entirely — no hole, no ramp, no `minGlass` /
+     * `maxGlass` / `spread`. If any of those names turn up in this file again
+     * they are from a revert, not a refinement.
      *
-     * ⚠️ THE STOPS ARE COMPUTED, not written as constants, and they have to be.
-     * `--live-glass-clear` is measured from the face several times a second, so
-     * the fraction of this gradient the hole occupies MOVES. Fixed percentages
-     * would put the ramp's start inside the hole on a large face and outside it
-     * on a small one — which is the "flat wash" bug, arrived at from a third
-     * direction.
+     * Tracking comes from `--live-glass-cx/cy/rx/ry`, which `LivenessCamera`
+     * writes from the FACE MESH's own bounding box — so the pane is exactly the
+     * wireframe's footprint. `measureSkin` fills them in until the mesh model
+     * has loaded. Eased by the registrations above.
      *
-     * ── What this replaced ──────────────────────────────────────────────────
-     * Two mask layers combined with `mask-composite: intersect`: one ramp sized
-     * to the frame, one cut sized to the person's segmented silhouette. That is
-     * gone with the segmenter (see the note by the mask refs in
-     * LivenessCamera). A single gradient can say all of this precisely because
-     * the hole is now a shape a gradient can draw.
-     */
-
-    /* Where the climb ends, as a fraction of the frame's width. */
-    --live-glass-reach: calc(var(--live-glass-clear) + var(--live-glass-spread, 0.4));
-    /* Where the hole ends, as a percentage of THIS gradient. */
-    --live-glass-hole: calc(var(--live-glass-clear) / var(--live-glass-reach) * 100%);
-    --live-glass-span: calc(var(--live-glass-max, 0.8) - var(--live-glass-min, 0.12));
-
-    /*
-     * Ellipse rather than circle, and centred above the middle, because that is
-     * where a head sits in a portrait frame — a circular hole leaves the chin
-     * glassed and the forehead clear, which is backwards.
-     *
-     * The curve is eased rather than linear: a straight climb puts the pane at
-     * its midpoint halfway out, so most of the picture sits in the middle of
-     * the range and the whole thing reads as one strength. Rising fast and then
-     * flattening concentrates the visible change close to the face, which is
-     * where the eye already is.
+     * ⚠️ The rim is FEATHERED, and that is not decoration. A hard-edged
+     * ellipse of frost on a face reads as a sticker — the eye finds the cut
+     * immediately, and it is the single thing that makes an overlay look pasted
+     * on rather than present.
      */
     --live-glass-mask: radial-gradient(
-        ellipse calc(var(--live-glass-reach) * 100%) calc(var(--live-glass-reach) * 115%)
-            at calc(var(--live-glass-cx) * 100%) calc(var(--live-glass-cy) * 100%),
-        transparent 0%,
-        /* Clear through most of the hole, then feathered over its last fifth —
-           a hard edge here draws a visible ring around the head. */
-        transparent calc(var(--live-glass-hole) * 0.8),
-        rgb(0 0 0 / var(--live-glass-min, 0.12)) var(--live-glass-hole),
-        rgb(0 0 0 / calc(var(--live-glass-min, 0.12) + var(--live-glass-span) * 0.55))
-            calc(var(--live-glass-hole) + (100% - var(--live-glass-hole)) * 0.35),
-        rgb(0 0 0 / var(--live-glass-max, 0.8)) 100%
+        ellipse calc(var(--live-glass-rx) * 100%) calc(var(--live-glass-ry) * 100%) at
+            calc(var(--live-glass-cx) * 100%) calc(var(--live-glass-cy) * 100%),
+        rgb(0 0 0 / var(--live-glass-amount, 0.4)) 0%,
+        rgb(0 0 0 / var(--live-glass-amount, 0.4))
+            calc((1 - var(--live-glass-feather, 0.22)) * 100%),
+        transparent 100%
     );
 
     mask-image: var(--live-glass-mask);
@@ -817,7 +790,8 @@
     transition:
         --live-glass-cx 260ms linear,
         --live-glass-cy 260ms linear,
-        --live-glass-clear 260ms linear;
+        --live-glass-rx 260ms linear,
+        --live-glass-ry 260ms linear;
 }
 
 /* ── What must stay ON TOP of the pane ──────────────────────────────────────

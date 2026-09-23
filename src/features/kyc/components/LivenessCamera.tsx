@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
@@ -293,6 +293,38 @@ export function LivenessCamera({
      * cannot copy a video).
      */
     const glassVideoRef = useRef<HTMLVideoElement>(null);
+    /**
+     * Has the face mesh taken over placing the glass oval?
+     *
+     * Two things can size that pane — the mesh's own bounding box and
+     * `measureSkin` — and they must never both write it. They disagree by a few
+     * percent, so alternating between them makes the oval twitch at whichever
+     * rate the slower one runs. The mesh is exact (it IS the wireframe the pane
+     * sits behind) and wins permanently once it has reported; the skin measure
+     * covers only the window before the model has loaded.
+     */
+    const meshPlacesGlassRef = useRef(false);
+
+    /**
+     * Put the glass oval exactly on the wireframe.
+     *
+     * `useCallback` with no deps: `FaceMesh` reads it through a ref, but a new
+     * function identity every render would still churn that ref pointlessly on
+     * a component that re-renders for unrelated reasons.
+     */
+    const handleMeshBounds = useCallback(
+        (b: { cx: number; cy: number; rx: number; ry: number }) => {
+            const glass = glassVideoRef.current;
+            if (!glass) return;
+            meshPlacesGlassRef.current = true;
+            const pad = CAPTURE_LIVE_GLASS.ovalPad;
+            glass.style.setProperty('--live-glass-cx', b.cx.toFixed(4));
+            glass.style.setProperty('--live-glass-cy', b.cy.toFixed(4));
+            glass.style.setProperty('--live-glass-rx', (b.rx * pad).toFixed(4));
+            glass.style.setProperty('--live-glass-ry', (b.ry * pad).toFixed(4));
+        },
+        [],
+    );
     /**
      * A tiny scratch canvas for finding the face, and when it last ran.
      *
@@ -643,65 +675,56 @@ export function LivenessCamera({
                     const h = c.height;
                     const ctx = drew ? c.getContext('2d', { willReadFrequently: true }) : null;
                     if (ctx) {
-                        const face = measureSkin(ctx.getImageData(0, 0, w, h).data, w, h);
-                        if (face.box && face.share > 0.02) {
-                            glass.style.setProperty('--live-glass-cx', face.cx.toFixed(3));
-                            glass.style.setProperty('--live-glass-cy', face.cy.toFixed(3));
+                        const face_ = measureSkin(ctx.getImageData(0, 0, w, h).data, w, h);
+                        if (face_.box && face_.share > 0.02) {
                             /*
-                             * The hole is wider than the face. A head is not
-                             * skin all the way to its edge — hair, ears and jaw
-                             * shadow all read as background to a skin measure —
-                             * so a hole cut to the measured width would frost
-                             * the outline of the very thing it is protecting.
+                             * ⚠️ FALLBACK ONLY. Once `FaceMesh` has reported,
+                             * it owns the oval — see `meshPlacesGlassRef`. This
+                             * covers the seconds before its model has loaded,
+                             * so the pane is placed roughly rather than sitting
+                             * in the middle of the frame.
                              */
-                            /*
-                             * The clear hole's RADIUS, as a fraction of the
-                             * frame's width — which is exactly what
-                             * `--live-glass-clear` now means in the stylesheet.
-                             *
-                             * ⚠️ These three numbers changed with the mask, and
-                             * they are not a re-tune for looks. The old mask
-                             * multiplied this by 190% before using it, so the
-                             * same value described a hole nearly twice this
-                             * size. Carrying the old numbers across would have
-                             * left a clear area covering most of the frame and
-                             * no visible gradient at all.
-                             *
-                             * `faceWidth` is the face's width as a fraction of
-                             * the frame, so half of it is the face's own radius.
-                             * 0.7 is about 1.4x that — enough to contain the
-                             * head including the hair and jaw shadow a skin
-                             * measure reads as background, and NO MORE. The
-                             * body is deliberately left outside it now: the
-                             * shoulders and arms taking glass is what gives the
-                             * gradient enough of the frame to be seen at all.
-                             *
-                             * ⚠️ The FLOOR is the important number, not the
-                             * multiplier.
-                             *
-                             * This is a skin-tone estimate, not a detector, and
-                             * when it is wrong it is wrong about where the face
-                             * is. A small hole placed slightly off frosts the
-                             * one thing that must stay sharp, and the person
-                             * cannot align to an oval they cannot see through a
-                             * blur. AWS then times out waiting for a match.
-                             *
-                             * So the hole is never small. A clear area larger
-                             * than it needs to be costs a little of the effect;
-                             * one that is too small costs the check.
-                             */
-                            const clear = Math.min(
-                                0.42,
-                                Math.max(0.22, face.faceWidth * 0.7),
-                            );
-                            glass.style.setProperty('--live-glass-clear', clear.toFixed(3));
+                            if (!meshPlacesGlassRef.current) {
+                                glass.style.setProperty(
+                                    '--live-glass-cx',
+                                    face_.cx.toFixed(3),
+                                );
+                                glass.style.setProperty(
+                                    '--live-glass-cy',
+                                    face_.cy.toFixed(3),
+                                );
+                                /*
+                                 * Wider than the skin measure finds, because a
+                                 * head is not skin all the way to its edge —
+                                 * hair, ears and jaw shadow all read as
+                                 * background to a chroma test. Bounded at both
+                                 * ends: this is an ESTIMATE, and the floor
+                                 * stops the pane collapsing to a dot on a bad
+                                 * read while the cap stops it swallowing the
+                                 * frame when something skin-coloured fills the
+                                 * background.
+                                 */
+                                const rx = Math.min(
+                                    0.42,
+                                    Math.max(0.22, face_.faceWidth * 0.7),
+                                );
+                                glass.style.setProperty(
+                                    '--live-glass-rx',
+                                    rx.toFixed(3),
+                                );
+                                // Taller than wide, because a head is.
+                                glass.style.setProperty(
+                                    '--live-glass-ry',
+                                    (rx * 1.3).toFixed(3),
+                                );
+                            }
 
                             // Reported on the same clock it was measured on —
                             // the caller needs no loop of its own.
                             faceMetricsRef.current?.({
-                                faceWidth: face.faceWidth,
-                                cx: face.cx,
-                                cy: face.cy,
+                                faceWidth: face_.faceWidth,
+                                cx: face_.cx,
+                                cy: face_.cy,
                             });
                         }
                         /*
@@ -1081,27 +1104,23 @@ export function LivenessCamera({
                                 '--live-glass-blur': `${CAPTURE_LIVE_GLASS.blur * 0.0625}rem`,
                                 '--live-glass-saturation': CAPTURE_LIVE_GLASS.saturation,
                                 /*
-                                 * ⚠️ /100 — the config is in PERCENT, CSS alpha
-                                 * is 0..1. Handing `rgb(0 0 0 / 75)` to the
-                                 * parser is not "75%", it is an out-of-range
-                                 * number that clamps to fully opaque — so the
-                                 * ellipse fallback would render as a solid
-                                 * sheet with a hole in it, with no error
-                                 * anywhere.
+                                 * ⚠️ /100 — `glass` is a PERCENTAGE and CSS
+                                 * alpha is 0..1. Handing the parser a 40 is not
+                                 * "40%", it is an out-of-range number that
+                                 * clamps to fully opaque, so the oval would
+                                 * render as a solid frosted disc on the face.
                                  */
-                                '--live-glass-max': CAPTURE_LIVE_GLASS.maxGlass / 100,
-                                '--live-glass-min': CAPTURE_LIVE_GLASS.minGlass / 100,
-                                '--live-glass-spread': CAPTURE_LIVE_GLASS.spread,
-                                '--live-glass-clear': CAPTURE_LIVE_GLASS.clear,
+                                '--live-glass-amount': CAPTURE_LIVE_GLASS.glass / 100,
+                                '--live-glass-feather': CAPTURE_LIVE_GLASS.ovalFeather,
                                 /*
-                                 * `none` at zero, and that is the fallback
-                                 * path, not a tidy-up. An invalid or missing
-                                 * `url()` invalidates the WHOLE `filter`
-                                 * declaration — taking the blur and the
-                                 * saturation with it — so a scale of 0 must
-                                 * produce a valid keyword rather than a dead
-                                 * reference. Same trap the checking pane hit.
+                                 * Starting placement only. `FaceMesh` takes
+                                 * these over on its first detection and owns
+                                 * them from then on — see `handleMeshBounds`.
                                  */
+                                '--live-glass-cx': CAPTURE_LIVE_GLASS.faceX,
+                                '--live-glass-cy': CAPTURE_LIVE_GLASS.faceY,
+                                '--live-glass-rx': CAPTURE_LIVE_GLASS.face,
+                                '--live-glass-ry': CAPTURE_LIVE_GLASS.face * 1.3,
                                 '--live-glass-warp': CAPTURE_LIVE_GLASS.warpScale
                                     ? `url(#${LIVE_GLASS_FILTER_ID})`
                                     : 'none',
@@ -1115,7 +1134,7 @@ export function LivenessCamera({
                 on the FACE, which is the one part the glass deliberately leaves
                 clear, so putting it under the pane would hide it exactly where
                 it is meant to be. */}
-            <FaceMesh videoRef={videoElRef} />
+            <FaceMesh videoRef={videoElRef} onBounds={handleMeshBounds} />
 
             <ThemeProvider theme={livenessTheme}>
                 <FaceLivenessDetectorCore

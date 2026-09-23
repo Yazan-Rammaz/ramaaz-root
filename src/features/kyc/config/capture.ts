@@ -847,32 +847,114 @@ export const CAPTURE_LIVE_MESH = {
     smoothing: 0.34,
 
     /**
-     * Draw every Nth edge of the tessellation.
+     * ── The wireframe: TRIANGLES, drawn as triangles ────────────────────────
      *
-     * The full mesh is ~2600 segments. All of them, every frame, is both
-     * expensive and TOO DENSE — it reads as a solid veil over the face rather
-     * than as a mesh, which is most of why the first version looked wrong.
-     * Every second edge keeps the structure legible and halves the path.
+     * Every edge of MediaPipe's tessellation, stroked where it actually is.
+     *
+     * ⚠️ DO NOT CHAIN THESE INTO PATHS. A previous version walked the
+     * adjacency into long continuous runs so a dashed stroke could travel along
+     * them — and a greedy walk through a triangulation WANDERS. Thinning those
+     * runs by dropping vertices then cut across the triangles they came from.
+     * The result was not a mesh at all: it was a few hundred zigzag threads
+     * over somebody's face, which is precisely how it looked. The triangles are
+     * the geometry; keeping them intact is the whole requirement.
+     *
+     * Drawn as ONE path and ONE stroke, so ~2600 segments cost a single call.
      */
-    decimate: 2,
-
-    /** Stroke width in XD px. Hairline — this is a tracery, not a cage. */
-    lineWidth: 0.7,
-
-    /** Resting opacity of the mesh, before the shine passes over it. */
-    baseAlpha: 0.3,
-
-    /** How long the shine takes to sweep across the face once, in ms. */
-    shineMs: 2600,
 
     /**
-     * How many landmarks twinkle.
+     * How big the triangles are — the clustering cell, as a fraction of the
+     * FACE's own width.
      *
-     * Each runs on its own period and phase, like the three stars of the AI
-     * mark — the point is that they never pulse together, because things that
-     * pulse together read as a loading indicator.
+     * ⚠️ THE ONE KNOB FOR "too many short lines". Raise it for fewer, larger
+     * triangles; lower it toward MediaPipe's own density.
+     *
+     * ── Why the mesh is rebuilt rather than filtered ────────────────────────
+     * The tessellation is 478 points over one face, so its triangles are a few
+     * pixels across: dense, overlapping to the eye, and nothing like the
+     * low-poly geometry this wants to be. Dropping edges from it does not help
+     * — it leaves the same tiny triangles with holes punched in them, which is
+     * worse.
+     *
+     * So the landmarks are CLUSTERED: the face is divided into cells this big,
+     * every landmark in a cell collapses to one representative, and each
+     * original edge is redrawn between its endpoints' representatives.
+     * Duplicates fold together and edges inside a cell vanish. The result is a
+     * genuine coarse triangulation of the same face, with the same topology.
+     *
+     * ⚠️ Measured against the FACE, not the frame, and built ONCE from the
+     * first detection. Both matter: against the frame, the triangles would get
+     * finer as somebody leaned toward the camera, and rebuilt per frame the
+     * whole wireframe would reshuffle whenever a landmark crossed a cell
+     * boundary — a mesh that flickers between two topologies several times a
+     * second, which is far more distracting than one that is slightly too fine.
      */
-    sparkles: 9,
+    /*
+     * 0.095 — the middle ground, and the range is worth recording since both
+     * ends have now been seen:
+     *
+     *   0      MediaPipe's own density. A grey haze of overlapping hairlines.
+     *   0.095  here. Clearly triangles, still enough of them to describe a face.
+     *   0.17   too few. Reads as a polygon shell laid over somebody rather than
+     *          as a mesh on them.
+     *
+     * Cell area scales with the square of this, so triangle COUNT scales with
+     * its inverse square: halving it is roughly four times the lines. Move it
+     * in small steps.
+     */
+    cellSize: 0.095,
+
+    /** Stroke width in XD px. Hairline — this is a tracery, not a cage. */
+    lineWidth: 0.6,
+
+    /**
+     * Opacity of the wireframe — STEADY. It never animates.
+     *
+     * ⚠️ The lines do not shine and must not. A version that ran light along
+     * them lit hundreds of segments at once, so the geometry never held still
+     * long enough to be read AS geometry and the dots had nothing to be
+     * distinct from. The mesh is a fixed structure; the dots are the only thing
+     * that moves on it.
+     *
+     * Raised from 0.16 once the glass oval went in behind it. The two are
+     * related and should move together: the pane softens and slightly flattens
+     * what is under the wireframe, so the same alpha that was right over a
+     * sharp, busy face is too faint over a calm one. Part of the pane's job is
+     * to let this be legible without being loud — see `CAPTURE_LIVE_GLASS`.
+     */
+    baseAlpha: 0.22,
+
+    /**
+     * ── The gems ────────────────────────────────────────────────────────────
+     *
+     * A handful of points that sit ON mesh vertices, flare, fade out, and come
+     * back somewhere else.
+     *
+     * ⚠️ NOT a dashed stroke travelling the lines. That was the previous
+     * attempt and it can only ever look like threads moving, because it IS the
+     * line being drawn in pieces — the light has to slide continuously along a
+     * path. A gem does not slide: it appears, shines and is gone, and the next
+     * one is elsewhere. Discrete points with independent lifetimes are the only
+     * way to get that.
+     */
+
+    /** How many are alive at once. Small — this is a sparkle, not a starfield. */
+    dotCount: 9,
+
+    /**
+     * How long one lives, in ms — a range, sampled per gem.
+     *
+     * ⚠️ A RANGE, not a value. With one fixed lifetime the whole set drifts
+     * into step within a few cycles and then blinks together, which reads as a
+     * loading indicator. Independent random lifetimes are what keep the
+     * alternation looking unplanned. Same reasoning as the AI mark's three
+     * durations, taken further because there are nine of these.
+     */
+    dotMinLifeMs: 850,
+    dotMaxLifeMs: 2200,
+
+    /** Radius of the bright core, in XD px. The halo is drawn around it. */
+    dotRadius: 2.2,
 
     /**
      * Cap on the overlay's pixel ratio.
@@ -959,116 +1041,133 @@ export const CAPTURE_LIVE_GLASS = {
     enabled: true,
 
     /**
-     * ── THE TWO DIALS ───────────────────────────────────────────────────────
+     * ── WHAT THIS PANE IS FOR ───────────────────────────────────────────────
      *
-     * How much liquid glass there is, at the two ends of the distance from the
-     * person. Everything between them is the gradient; `falloff` below is its
-     * shape.
+     * Two jobs, and every number below is set against them rather than against
+     * "make it look like glass":
      *
-     *     minGlass   right at the person's edge — the LEAST glass
-     *     maxGlass   at the frame's farthest corner — the MOST glass
+     *   1. SOFTEN A CLOSE-UP. AWS's oval makes the person fill the frame, so
+     *      they are inches from a wide lens — which stretches whatever is
+     *      nearest it. Noses enlarge, cheeks flatten, and people read that as
+     *      the app taking a bad picture of them. A soft-focus pane over the
+     *      face takes the edge off it.
+     *   2. GIVE THE MESH SOMETHING TO SIT ON. A white hairline wireframe over a
+     *      sharp, busy face competes with the detail underneath it. Over a
+     *      softened one it separates cleanly, and the eye goes to the mesh —
+     *      which is the point of drawing it.
      *
-     * ⚠️ BOTH ARE PERCENTAGES, 0..100 — not fractions. The rest of this file is
-     * in 0..1, and these two are the exception on purpose: they are the dials
-     * that get asked for and changed in percent ("10 near me, 75 far"), and a
-     * table you have to convert in your head before using is a table that gets
-     * a 75 typed into it. `LivenessCamera` divides by 100 on the way out; CSS
-     * never sees these numbers directly.
+     * ⚠️ BOTH ARGUE AGAINST A STRONG WARP, and that is not obvious. Refraction
+     * is the signature of the material, but it is also DISTORTION — and this
+     * pane exists to make a distorted picture look less distorted. Bending it
+     * further fights the first job outright and blurs the mesh's backdrop into
+     * motion the second one has to compete with. `warpScale` is deliberately
+     * low here for that reason, and not because of cost.
+     *
+     * ── THE ONE DIAL ────────────────────────────────────────────────────────
+     *
+     * How much liquid glass sits on the face, as a PERCENTAGE.
      *
      *     0    no pane at all. The camera, untouched.
-     *     25   a faint haze. You can still read a sign on the wall.
-     *     50   plainly glassed, but half the sharp picture still shows through.
+     *     25   a faint haze. You can still read fine detail through it.
+     *     40   here. Plainly a pane, and the face still legible behind it.
      *     75   properly frosted — shapes and colour, no detail.
-     *     100  the pane at full strength. Nothing of the sharp camera left.
+     *     100  full strength. Nothing of the sharp camera left.
      *
-     * ⚠️ `maxGlass` IS A CEILING ON THE WHOLE EFFECT, and it is the number to
-     * reach for when the glass "does not show". The pane is one layer over the
-     * camera and this is how much of it is let through, so at 0.5 the frame's
-     * border is always half the sharp picture NO MATTER how large `blur` or
-     * `warpScale` get. Raising those only makes the half that shows heavier,
-     * and past a point that reads as a double exposure rather than as glass.
-     * If it is not strong enough, this is the dial — not those.
+     * ⚠️ 0..100, not 0..1, unlike the rest of this file. Deliberate: this is
+     * the number that gets asked for and changed in percent. `LivenessCamera`
+     * divides by 100 on the way out — CSS alpha is 0..1, and handing the parser
+     * a 40 is not "40%", it is an out-of-range value that clamps to fully
+     * opaque.
      *
-     * ── Why min is near and max is far, and not the reverse ─────────────────
-     * The face has to stay legible: the person is aligning themselves to an
-     * oval they can only judge from what they see, and AWS times out waiting
-     * for a fit that a softened preview makes harder to reach. Away from them
-     * nothing is being judged, so that is where the material can be itself.
+     * ── What this replaced ──────────────────────────────────────────────────
+     * A pane over everything EXCEPT the person, ramping 10→75 outward from
+     * their outline. It is gone, along with `minGlass`, `maxGlass`, `spread`
+     * and the clear cut-out: the glass is now an OVAL ON the face, with the
+     * mesh drawn over it. The two are opposites, and nothing of the gradient
+     * version survives — if any of those names reappear, they are from a
+     * revert.
      */
-    maxGlass: 75,
-    minGlass: 10,
+    glass: 60,
 
     /**
-     * The clear hole's RADIUS, as a fraction of the frame's WIDTH.
+     * How much larger than the MESH the oval is drawn.
      *
-     * Only the starting value — `LivenessCamera` overwrites it a few times a
-     * second from where the face actually is. It is what the pane is drawn with
-     * until the first measurement lands, and whenever no face is found.
+     * ⚠️ The oval is sized from the face mesh's own bounding box, not from a
+     * skin estimate. `FaceMesh` reports its bounds every detection and they
+     * drive this pane directly — so the glass is exactly the wireframe's
+     * footprint, which is what "just the size of the mesh, behind it" means and
+     * is something no separate measurement could stay in step with.
      *
-     * ⚠️ THE FACE MUST NOT BE GLASSED. Not for looks — for the check. The oval
-     * AWS measures against sits in the middle of the frame, the person is
-     * judging their own position from what they see, and a softened face is one
-     * they cannot align or read guidance against. The clear hole is sized to
-     * hold a head at capture distance.
+     * A few percent of margin only, so the feathered rim has somewhere to fade
+     * and the outermost triangles are not sitting on the cut.
      *
-     * ⚠️ A HEAD, and deliberately not a BODY. An earlier version cut the whole
-     * segmented silhouette clear — shoulders and arms included — and the result
-     * was almost no glass at all: AWS's oval makes the face fill the frame, so
-     * "everything except the person" is a narrow border with nowhere for a
-     * gradient to live. Letting the body take glass is what made the effect
-     * visible, and it costs nothing the check cares about: only the FACE has to
-     * stay legible.
-     *
-     * ⚠️ Keep this in step with `@property --live-glass-clear`'s `initial-value`
-     * in liveness.css. That registration is what gives the property a value
-     * before the first measurement; this is only read by the inline style, and
-     * the two disagreeing means the pane's first frames differ from its rest.
+     * `measureSkin` remains the FALLBACK, for the window before the mesh model
+     * has loaded and whenever it finds no face — see `face` below.
      */
-    clear: 0.3,
+    ovalPad: 1.06,
+
+    /**
+     * How much of the oval's radius is spent fading out at its rim, 0..1.
+     *
+     * ⚠️ Not decoration. A hard-edged ellipse of frost on a face reads as a
+     * sticker — the eye finds the cut instantly, and it is the single thing
+     * that makes an overlay look pasted on rather than present. Feathering the
+     * last fifth is what makes it a pane the face is behind.
+     */
+    ovalFeather: 0.22,
 
     /**
      * Blur on the copy, in XD px.
      *
      * ⚠️ This is the strength of the PANE, which is not the same as how much
-     * pane is shown — that is `edge` above, and it is a hard ceiling this
-     * cannot climb over. At `edge: 0.5` the frame's border is always half the
-     * sharp camera and half this, however large this gets, because the mask
-     * only ever lets half of it through.
+     * pane is shown — that is `glass` above, and it is a hard ceiling this
+     * cannot climb over. At `glass: 40` the oval is always 60% the sharp
+     * camera, however large this gets, because the mask only lets 40% of it
+     * through. If the pane is not strong enough, `glass` is the dial, not this.
      *
-     * So raising this makes the glassed half heavier, and past a point the
-     * result stops reading as frosted glass and starts reading as a double
-     * exposure — a sharp picture with a soft one ghosted over it. If the pane
-     * still is not strong enough at 30, the number to raise is `edge`, not this
-     * one.
+     * ⚠️ 16 and not 30, and the reason is the first job above. A sharp picture
+     * with a 40% copy of itself blurred over it is the soft-focus every
+     * portrait lens filter does — but only while the blur stays NEAR the
+     * features it is softening. Taken far, the soft copy stops corresponding to
+     * anything and lands as a second, wider face over the first: a double
+     * exposure, which is more distracting than the distortion it was meant to
+     * hide, not less. 16 is about an eye's width at capture distance, which is
+     * the range over which softening still reads as softening.
      */
-    blur: 30,
+    blur: 16,
 
     /** Saturation on the copy — glass concentrates colour slightly. */
     saturation: 1.3,
 
     /**
-     * How far the preview is BENT at the rim, in px — the LIQUID half.
+     * How far the preview is BENT, in px — the LIQUID half.
      *
-     * Same `GlassFilter` the checking pane uses, on the same displacement map:
-     * nothing moves through the middle, deflection grows toward the border, and
-     * the three colour channels are displaced by different amounts so edges
+     * The same `GlassFilter` the checking pane uses, on the same displacement
+     * map: nothing moves through the middle, deflection grows toward the edge,
+     * and the three colour channels are displaced by different amounts so edges
      * fringe the way they do through a real lens. Without this the pane is a
-     * blur — a filter ON the camera rather than a sheet in front of it — which
-     * is what it has been.
+     * blur — a filter ON the camera rather than a sheet in front of it.
      *
      * ⚠️ MUCH SMALLER THAN THE CHECKING PANE'S 39, and not for looks. That one
-     * bends a still: one frame, one composite, done. This one bends 30 frames a
+     * bends a still: one frame, one composite, done. This bends 30 frames a
      * second, live, on a device that is simultaneously encoding and uploading
      * video to Rekognition — and AWS errors any camera it measures below 15fps
      * (`CAMERA_FRAMERATE_ERROR`, already hit once in this codebase). A lens
      * strong enough to admire is a lens that can cost the sign-in.
      *
+     * ⚠️ 8, NOT 20, and this is a DESIGN limit before it is a cost one. See
+     * the two jobs at the top of this table: the pane exists to make a lens's
+     * distortion less noticeable, and refraction is distortion. A strong warp
+     * adds back exactly the kind of bending it was brought in to soften, and
+     * ripples the backdrop the mesh is supposed to read cleanly against. Enough
+     * to say "glass", not enough to move a face.
+     *
      * ⚠️ SET IT TO 0 FIRST if a check starts failing on framerate. That drops
      * the `url()` from the chain entirely and the pane falls back to the plain
-     * blur, which is the behaviour this had before and cannot cost anything.
-     * The `enabled` switch above is the bigger hammer.
+     * blur, which cannot cost anything. `CAPTURE_LIVE_MESH.enabled` is the
+     * bigger lever now — the mesh's model is the more expensive of the two.
      */
-    warpScale: 20,
+    warpScale: 8,
 
     /**
      * Softening inside the filter, after the channels recombine.
@@ -1081,22 +1180,18 @@ export const CAPTURE_LIVE_GLASS = {
     warpBlur: 1.4,
 
     /**
-     * How far the gradient takes to climb from `minGlass` to `maxGlass`,
-     * measured OUTWARD FROM THE EDGE OF THE CLEAR HOLE, as a fraction of the
-     * frame's width.
+     * Where the oval sits and how big it is, until the first measurement.
      *
-     * ⚠️ FROM THE HOLE'S EDGE — not from the face's centre, and that
-     * distinction is why the gradient was once invisible. Measuring from the
-     * centre spent most of the range inside the area that is cut clear, so
-     * everything actually glassed sat at or near `maxGlass` and read as one
-     * flat wash. `liveness.css` places the stops so the climb starts exactly
-     * where the hole ends.
+     * Only the starting values — `LivenessCamera` overwrites them from
+     * `measureSkin` a few times a second, and they are what the pane is drawn
+     * with before that lands and whenever no face is found.
      *
-     * 0.4 — a little over a head's width at capture distance, so the climb
-     * completes around the shoulders and the frame's border is fully at
-     * `maxGlass`. Smaller concentrates the change close to the face; larger
-     * spreads it out and, past the point where nothing is that far away, never
-     * reaches `maxGlass` anywhere at all.
+     * ⚠️ Keep in step with the `@property` initial values in liveness.css.
+     * Those registrations are what give the custom properties a value before
+     * the first measurement; these are only read by the inline style, and the
+     * two disagreeing means the pane's first frames differ from its rest.
      */
-    spread: 0.4,
+    face: 0.3,
+    faceX: 0.5,
+    faceY: 0.42,
 } as const;
