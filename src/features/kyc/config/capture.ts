@@ -1087,7 +1087,7 @@ export const CAPTURE_LIVE_GLASS = {
      * version survives — if any of those names reappear, they are from a
      * revert.
      */
-    glass: 60,
+    glass: 75,
 
     /**
      * How much larger than the MESH the oval is drawn.
