@@ -6,6 +6,8 @@ import { DashedFrame } from '@/components/ui/DashedFrame';
 import { FlexSpace } from '@/components/ui/FlexSpace';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useKycSession } from '@/features/kyc/context/KycSessionContext';
+import { useFacePhoto } from '@/features/kyc/hooks/useFacePhoto';
+import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -60,16 +62,15 @@ export default function IntroScreen() {
 
     /**
      * The frame from this session if it is still in memory, otherwise the one
-     * the backend kept. A refresh drops the first and the second survives it —
-     * which is the whole reason this screen used to show a grey box to anybody
-     * who reloaded.
+     * the backend kept — and carrying the look either way, so the face here
+     * matches the one the camera showed. A refresh drops the first and the
+     * second survives it, which is the whole reason this screen used to show a
+     * grey box to anybody who reloaded, and later showed them a noticeably
+     * harsher picture than the one they had just posed for.
+     *
+     * ⚠️ Display only. See `useFacePhoto` — never submit this.
      */
-    // `displayImageData` first — the same frame with display-only edits (the
-    // portrait blur). It is absent whenever nothing display-only ran, which is
-    // the default, so this is usually `faceImageData` verbatim. Never reach for
-    // it alone: it does not exist on every capture.
-    const photo =
-        livenessResult?.displayImageData ?? livenessResult?.faceImageData ?? storedFaceSrc;
+    const photo = useFacePhoto(livenessResult, storedFaceSrc);
 
     return (
         <div className="mx-auto flex h-full w-390 flex-col">
@@ -80,26 +81,25 @@ export default function IntroScreen() {
                 // A data: URL held in memory; next/image would need a loader and
                 // would gain nothing over a 130 x 148 thumbnail.
                 //
-                // `-scale-x-100` because the capture is RAW CAMERA PIXELS and the
-                // preview it was taken from is not. `.amplify-liveness-video`
-                // carries `transform: scaleX(-1)` — a mirror, as every selfie
-                // preview is — but a canvas grab reads the native frame and
-                // ignores CSS entirely. So the stored frame is the unmirrored
-                // truth, and showing it as-is hands somebody a photograph that is
-                // backwards from the face they were just looking at. People do
-                // not recognise themselves unmirrored; it reads as a stranger.
+                // Flipped with everything else, from the one switch —
+                // `CAPTURE_MIRROR` / `MIRROR_CLASS`. The capture is RAW SENSOR
+                // PIXELS and is never mirrored; the preview it was taken from
+                // is. Showing it unflipped hands somebody a photograph that is
+                // backwards from the face they were just looking at, and people
+                // do not recognise themselves unmirrored — it reads as a
+                // stranger.
                 //
-                // Display only. `livenessResult.faceImageData` is untouched, and
-                // must stay so — FaceMatchScreen posts that exact string as
-                // `selfie` for the server-side comparison.
+                // Every other display of this frame reads the same constant, so
+                // none of them can disagree.
                 //
-                // LivenessVerdict does the same flip on the same frame. The two
-                // have to agree: change one, change both.
+                // Display only regardless: `livenessResult.faceImageData` is
+                // untouched and must stay so — the comparison posts that exact
+                // string as `selfie`.
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                     src={photo}
                     alt=""
-                    className="h-148 w-130 shrink-0 -scale-x-100 rad-20 object-cover"
+                    className={`h-148 w-130 shrink-0 rad-20 object-cover ${MIRROR_CLASS}`}
                 />
             ) : (
                 <div className="h-148 w-130 shrink-0 rad-20 bg-[#F2F2F2]" />

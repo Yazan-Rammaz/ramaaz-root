@@ -10,6 +10,8 @@ import { useRouter } from 'next/navigation';
 import ExitConfirmDialog from '../ExitConfirmDialog';
 import { FlexSpace } from '@/components/ui/FlexSpace';
 import { fetchStoredFace } from '@/features/kyc/services/storedFace';
+import { useFacePhoto } from '@/features/kyc/hooks/useFacePhoto';
+import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 import { Icon } from '@/components/ui/Icon';
 
 type MatchState = 'matching' | 'success' | 'review' | 'failed';
@@ -454,23 +456,32 @@ export default function FaceMatchScreen({
 
     /**
      * What to DRAW. Falls back to the stored capture so a refresh shows a face
-     * instead of a grey "Face Photo" box.
+     * instead of a grey "Face Photo" box, and carries the look whichever source
+     * it came from — so the picture beside the document is the one the person
+     * posed for, not a harsher twin of it. See `useFacePhoto`.
      *
-     * ⚠️ Not what gets SUBMITTED, and now for two reasons rather than one.
+     * ⚠️ NOT WHAT GETS SUBMITTED, for three reasons now.
      *
      * The enrolment above still requires `livenessResult.faceImageData` — the
-     * real bytes — because this fallback is a URL, and a URL posted as `selfie`
-     * is not an image. So a reloaded page can show you your face and still,
-     * correctly, refuse to submit a capture it does not have.
+     * real bytes — because one of these sources is a URL, and a URL posted as
+     * `selfie` is not an image. So a reloaded page can show you your face and
+     * still, correctly, refuse to submit a capture it does not have.
      *
-     * `displayImageData` is the second reason. It is the same frame carrying
-     * display-only edits (the portrait blur), which softens the room behind the
-     * subject and with it the boundary at the hair and jaw. Perfectly good to
-     * look at; not something to hand CompareFaces. It is absent unless such an
-     * edit actually ran — see `CAPTURE_OUTPUT` in `config/capture.ts`.
+     * The look is the other two: skin smoothing attenuates exactly the
+     * mid-frequency band CompareFaces reads, and the portrait blur softens the
+     * boundary at the hair and jaw. Perfectly good to look at, and not
+     * something to score a face on. `runMatch` above builds its OWN `liveFace`
+     * from `faceImageData` / `fetchStoredFace()` — the untouched bytes — and
+     * that is the one CompareFaces is given.
+     *
+     * ⚠️ Named `facePhoto`, not `liveFace`, deliberately. Both existed as
+     * `liveFace` in this one component: the evidence inside `runMatch` and the
+     * picture out here. Different scopes, so it compiled, but the two now
+     * differ in a way that matters — one is retouched — and a later edit that
+     * reached for the wrong one would quietly hand a smoothed face to a
+     * comparison. Different things, different names.
      */
-    const liveFace =
-        livenessResult?.displayImageData ?? livenessResult?.faceImageData ?? storedFaceSrc;
+    const facePhoto = useFacePhoto(livenessResult, storedFaceSrc);
     const idImage = idDocument?.frontImageData || idDocument?.idFaceImageData;
 
     return (
@@ -561,20 +572,22 @@ export default function FaceMatchScreen({
                 style={{ border: `2px solid ${borderColor}` }}
             >
                 {/* User face — always rendered */}
-                {liveFace ? (
+                {facePhoto ? (
                     <img
-                        src={liveFace}
+                        src={facePhoto}
                         alt="Face"
-                        // Mirrored, for the same reason as IntroScreen and
-                        // LivenessVerdict: this is the raw camera frame, and the
-                        // preview it came from was `scaleX(-1)`. All three show
-                        // the SAME string, so all three flip it or none do —
-                        // one screen disagreeing is what made the face look
-                        // reversed between steps.
+                        // Flipped from the same constant as IntroScreen and
+                        // LivenessVerdict. Underneath the look this is the raw
+                        // camera frame, and the preview it came from is
+                        // mirrored. All three read `MIRROR_CLASS`, so they
+                        // cannot disagree — one disagreeing is what made a face
+                        // look reversed between steps.
                         //
-                        // CSS only. `liveFace` is posted verbatim as `selfie`
-                        // above; the comparison the server runs never sees this.
-                        className="absolute inset-0 w-full h-full -scale-x-100 object-cover"
+                        // The retouching is display-only: what `runMatch` posts
+                        // as `selfie` is built separately from the untouched
+                        // bytes, and the server's comparison never sees this
+                        // image.
+                        className={`absolute inset-0 w-full h-full object-cover ${MIRROR_CLASS}`}
                         style={{ backgroundColor: '#E9EEEE' }}
                     />
                 ) : (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { CAPTURE_MIRROR } from '@/features/kyc/config/capture';
 
 interface UseCameraOptions {
     /** Desired facing mode. On desktop, 'environment' is automatically overridden to 'user'. */
@@ -64,35 +65,35 @@ export function useCamera({
     const isMobile = isMobileDevice();
 
     /*
-      Mirroring follows the INTENT, not the hardware.
+      NOTHING MIRRORS ANY MORE, by request (2026-09-22).
 
-      A mirror is right for a SELF-view: you move left, the image moves left,
-      which is the only way a person can line their own face up. It is wrong for
-      a DOCUMENT: the card comes out flipped and every word on it reads
-      backwards, so the user sees an ID that looks like the wrong side, held the
-      wrong way round, and tries to "fix" it by turning the card over.
+      This read `requestedFacing === 'user'` — mirror the self-view, never the
+      document. The self-view half of that is gone: every face screen now shows
+      the camera's own pixels, the same ones the capture keeps and the same ones
+      every later screen displays. One orientation everywhere, so a face cannot
+      flip between the preview, the still and the comparison.
 
-      This used to read `!isMobile ? true : ...` — mirror EVERYTHING on desktop.
-      That was conflating two different questions. `effectiveFacing` below has
-      to say 'user' on a laptop because a laptop has no back camera and asking
-      for 'environment' gets you nothing; but which camera the hardware opens
-      says nothing about whether the picture should be flipped for the viewer.
-      The result was that the ID capture screen — which asks for 'environment'
-      precisely because it is photographing a document — showed a mirrored,
-      backwards card on every desktop.
+      What that costs, stated plainly because it is the reason it was ever true:
+      a mirror is the natural self-view. You move left, the image moves left,
+      which is how a person lines their own face up. Unmirrored, that is
+      reversed, and centring takes a moment longer. The face gate tolerates it —
+      it measures the stream, not the viewer's intuition — but somebody
+      struggling to centre on a laptop is now an expected complaint rather than
+      a surprising one.
 
-      Keying on `requestedFacing` separates them: the two face screens ask for
-      'user' and still mirror on every device, ID capture asks for
-      'environment' and never mirrors on any. Nothing about this is
-      locale-dependent — `scaleX(-1)` is a physical transform and `dir` cannot
-      reach it.
+      The DOCUMENT half was never in question: a mirrored card reads backwards
+      and people try to "fix" it by turning it over. That is now simply the
+      universal behaviour rather than a special case.
+
+      Kept as a named constant rather than deleted. Callers still read it — the
+      ID scanner overlay and corner brackets follow it so they stay in step with
+      the preview — and one `false` here is a smaller, more reversible change
+      than unpicking it from every call site.
 
       The captured frame was never affected either way: `captureFrame` reads
-      native pixels through `drawImage`, not CSS transforms. The scanner overlay
-      and corner brackets DO follow this flag, so they stay in step with
-      whatever the preview is doing.
+      native pixels through `drawImage`, not CSS transforms.
     */
-    const shouldMirror = requestedFacing === 'user';
+    const shouldMirror = CAPTURE_MIRROR.enabled && requestedFacing === 'user';
 
     const effectiveFacing: 'user' | 'environment' = !isMobile ? 'user' : requestedFacing;
 

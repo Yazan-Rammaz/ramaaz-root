@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { HandoffMessage } from './useCameraHandoff';
+import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 import {
     ICE_SERVERS,
     iceGatheringComplete,
@@ -226,9 +227,10 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
               the desktop is what runs the check. A shutter here would imply the
               phone was deciding, and invite tapping it at the wrong moment.
 
-              Mirrored for `user` only, matching every other selfie preview in
-              this app — a back camera must never be mirrored, or text on a
-              document reads backwards.
+              Never mirrored, for either camera. The front view used to flip to
+              match every other selfie preview in this app; none of them flip any
+              more, so this follows. A back camera never could — text on a
+              document would read backwards.
             */}
             <div className="relative h-400 w-350">
                 <video
@@ -236,17 +238,17 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                     autoPlay
                     playsInline
                     muted
-                    className={`h-400 w-350 rad-30 object-cover ${facing === 'user' ? '-scale-x-100' : ''} ${cameraLive ? '' : 'invisible'}`}
+                    className={`h-400 w-350 rad-30 object-cover ${facing === 'user' ? MIRROR_CLASS : ''} ${cameraLive ? '' : 'invisible'}`}
                 />
 
                 {/*
                   The frozen frame, drawn the instant the computer said it had
-                  what it needed. Same mirroring as the live view, so the picture
-                  does not flip at the moment it stops moving.
+                  what it needed. Mirrored exactly as the live view is, so the
+                  picture does not flip at the moment it stops moving.
                 */}
                 <canvas
                     ref={canvasRef}
-                    className={`absolute inset-0 h-400 w-350 rad-30 object-cover ${facing === 'user' ? '-scale-x-100' : ''} ${cameraLive ? 'hidden' : ''}`}
+                    className={`absolute inset-0 h-400 w-350 rad-30 object-cover ${facing === 'user' ? MIRROR_CLASS : ''} ${cameraLive ? 'hidden' : ''}`}
                 />
 
                 {/*

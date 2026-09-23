@@ -433,8 +433,26 @@ export const CAPTURE_LIGHTING = {
  * so the photograph is unaffected by anything decided here.
  */
 export const CAPTURE_LIVE = {
-    /** The master switch. Off means the plain camera, and a full-quality still. */
-    enabled: true,
+    /**
+     * OFF, by request (2026-09-22). The live camera shows the plain sensor
+     * image while a face is being detected — no skin smoothing, no tone or
+     * lighting correction, no background blur.
+     *
+     * ⚠️ THIS DOES NOT TOUCH THE PHOTOGRAPH. `processFrame` applies the full
+     * look to the capture regardless of this flag, and every screen that shows
+     * that capture afterwards — the intro greeting, the comparison — keeps it
+     * via `useFacePhoto`. Off here means the preview is honest about what the
+     * camera sees; the picture the person is given is still the flattering one.
+     *
+     * What it buys: the single largest CPU cost on a screen that is also
+     * encoding and uploading video for the liveness check. AWS errors any
+     * camera it measures below 15fps (`CAMERA_FRAMERATE_ERROR`, already hit
+     * once here), and this loop was the thing competing with it.
+     *
+     * Everything below still describes the governor, and `/design/capture-lab`
+     * still drives it directly, so turning it back on is this one line.
+     */
+    enabled: false,
 
     /**
      * Processing resolution, as a fraction of the displayed canvas.
@@ -538,25 +556,39 @@ export const CAPTURE_LIVE = {
  */
 export const CAPTURE_PORTRAIT = {
     /**
-     * ON, by request (2026-09-22), for the capture AND the live preview.
+     * ON — for the CAPTURE and everything that displays it, and for nothing
+     * else. By request (2026-09-22).
      *
-     * It shipped off, and that was a position rather than caution: this is the
-     * one operation here that is a LOOK rather than a correction, it is the one
-     * that was reverted in September, and it costs a 250 KB model download. The
-     * owner asked for it twice, which settles it — but the reasons it was
-     * guarded are still the reasons to watch it, so they stay written down:
+     * ⚠️ "CAPTURE ONLY" IS ENFORCED AT THE CALL SITES, not here. This flag is
+     * read in three places:
      *
+     *   processFrame          the photograph. Yes.
+     *   useFacePhoto          every later display of that photograph, so the
+     *                         intro greeting and the comparison screen match
+     *                         the capture. Yes.
+     *   useLivePreview        the live camera. NO — both call sites pass
+     *                         `portrait: false` outright rather than this flag,
+     *                         so the preview stays blur-free even if the live
+     *                         look is switched back on.
+     *
+     * That last line is the whole point of the split. The preview and the
+     * photograph now deliberately DISAGREE about whether the room is soft,
+     * where they used to be kept in step by this one flag — so the coupling
+     * was moved into the call sites, where the difference is visible.
+     *
+     * The reasons it was guarded originally are unchanged and still worth
+     * knowing:
+     *
+     *   - it is the only operation here that is a LOOK rather than a
+     *     CORRECTION. Exposure and skin present a face the sensor recorded;
+     *     defocusing the room invents a photograph that was not taken.
      *   - it is the most expensive thing in the pipeline by an order of
-     *     magnitude, and on the LIVE path it is the first thing to push a
-     *     weaker device into `useLivePreview`'s governor. `/design/capture-lab`
-     *     has a "Live blur" toggle and prints the frame cost, which is how you
-     *     find out whether it is what made a preview stutter.
-     *   - it fails soft everywhere. No model, no WebGL, or a mask claiming less
-     *     than 8% or more than 95% of the frame, and the original frame is
-     *     returned untouched.
-     *
-     * Setting this back to `false` turns it off for both paths at once, and
-     * nothing else has to change.
+     *     magnitude — a neural network per call — and it costs a 250 KB model
+     *     download. Off the live path that is paid once, on a still, with
+     *     nothing else competing for the CPU.
+     *   - it fails soft everywhere. No model, no WebGL, or a mask claiming
+     *     less than 8% or more than 95% of the frame, and the original frame
+     *     comes back untouched.
      */
     enabled: true,
 
@@ -569,7 +601,7 @@ export const CAPTURE_PORTRAIT = {
      * individual objects are still identifiable, and nobody reads it as a
      * mistake.
      */
-    blurRadiusPerFaceWidth: 0.09,
+    blurRadiusPerFaceWidth: 0.02,
 
     /** Hard limits in pixels, so a tiny or enormous capture stays sane. */
     blurRadiusMin: 4,
@@ -593,7 +625,7 @@ export const CAPTURE_PORTRAIT = {
      * of falloff behind the subject is most of what sells it. Small enough
      * that a white wall is still white.
      */
-    backgroundDim: 0.1,
+    backgroundDim: 0,
 
     /**
      * Corner vignette strength, 0..1. Applied to the whole frame.
@@ -677,4 +709,483 @@ export const CAPTURE_OUTPUT = {
      * once.
      */
     jpegQuality: 0.92,
+} as const;
+
+/**
+ * ── 9. The checking glass ───────────────────────────────────────────────────
+ *
+ * The pane laid over the frozen face while the servers decide — the state
+ * `LivenessVerdict` renders between the shutter and the verdict.
+ *
+ * It lives here rather than in the stylesheet for the same reason everything
+ * else in this file does: it is a LOOK, it needs tuning against real faces in
+ * real rooms, and a number buried in `globals.css` is a number nobody finds.
+ * The component writes these onto the element as CSS custom properties and the
+ * stylesheet reads them, so this table is the only place to change any of it.
+ *
+ * ⚠️ Cosmetic, entirely. Nothing here touches the photograph, the comparison,
+ * or what is submitted — the glass is painted OVER an image that is never
+ * modified. Turning every value to zero leaves a sharp, untouched still with a
+ * mark on it, which is a fine thing to see and proves nothing was hidden.
+ *
+ * ── Tuning it ───────────────────────────────────────────────────────────────
+ * `/design/liveness-lab` → "Hold checking" pins the state up indefinitely, so
+ * this can be tuned by editing a number and reloading, without spending an AWS
+ * check per look.
+ */
+export const CAPTURE_CHECKING_GLASS = {
+    /**
+     * THE one to reach for. How far the picture behind the pane is BENT, in
+     * pixels, at the rim.
+     *
+     * This is the effect. A blur averages a picture; glass MOVES it, because
+     * light changes direction crossing a boundary — and the displacement map
+     * shapes that movement into a lens (nothing through the middle, hardest at
+     * the edge). Every earlier attempt here tried to get the look out of blur
+     * and tint alone and could not, because no amount of either is refraction.
+     *
+     * 0 disables it and the pane falls back to a plain frost — which is also
+     * what happens on any engine that will not run the filter, so nothing
+     * breaks, it simply stops looking like glass.
+     *
+     * ⚠️ Scale with the frame. 20 across a 350-wide pane is a soft bevel; past
+     * about 60 the displacement samples from outside the picture and the edges
+     * smear.
+     */
+    scale: 39,
+
+    /**
+     * Softening applied INSIDE the filter, after the three colour channels
+     * recombine. `feGaussianBlur`'s standard deviation, in px.
+     *
+     * ⚠️ Deliberately small, and deliberately not a CSS `blur()` on top. The
+     * three channels are displaced by different amounts to give the edge its
+     * colour fringing; blurring hard afterwards averages that fringing straight
+     * back to grey and throws away the one detail that reads as a lens.
+     */
+    blur: 3.9,
+
+    /**
+     * Saturation, applied alongside the filter.
+     *
+     * Glass concentrates colour slightly. 1 is untouched; much past 1.4 starts
+     * looking like a filter rather than a material.
+     */
+    saturation: 1.32,
+
+    /**
+     * The frost's BLUR, in XD px — the plain CSS one, on the pane itself.
+     *
+     * Separate from `blur` above, which is the softening inside the SVG filter.
+     * This one is the layer that cannot fail: it is an ordinary `blur()` with
+     * no `url()` beside it, so it renders even where the lens does not.
+     */
+    frostBlur: 17,
+
+    /**
+     * The frost — a neutral wash over the pane, 0..1.
+     *
+     * ⚠️ SMALL, and NEUTRAL. This is not what obscures the picture; the
+     * refraction is. It only gives the pane a body so white content is not
+     * floating on bare photograph. It carried a blue-to-black gradient once and
+     * that tint, not the glass, was doing all the work — a scrim wearing glass
+     * as a costume, and it tinted everybody's skin.
+     */
+    frost: 0.117,
+} as const;
+
+/**
+ * ── 10. Mirroring ───────────────────────────────────────────────────────────
+ *
+ * Whether a SELF-view is flipped left-to-right, like a mirror.
+ *
+ * ── Why this is one switch and not seven ────────────────────────────────────
+ * It used to be seven: the SDK's own stylesheet, our override of it, a flag in
+ * `useCamera`, three class names on FaceScanScreen, one on each screen that
+ * displays a still, and a toggle on the bench. Turning mirroring off and on
+ * again meant finding all of them, and the failure mode when one was missed is
+ * the worst kind — the face flips between two steps and reads as a different
+ * person's photograph, which looks like a capture bug rather than a CSS one.
+ *
+ * ⚠️ EVERY SITE MUST AGREE. The preview, the frozen frame, the intro avatar and
+ * the comparison screen all show the same pixels; if any one of them disagrees
+ * about this, the face reverses at that step. That is the entire reason this is
+ * a single exported value.
+ *
+ * ── What it costs when it is false ──────────────────────────────────────────
+ * A mirror is the natural self-view: you move left, the image moves left, which
+ * is how a person lines their own face up. Unmirrored, that is reversed and
+ * centring takes visibly longer — it is the first thing anyone notices and it
+ * reads as the camera being wrong.
+ *
+ * ── What it does NOT touch ──────────────────────────────────────────────────
+ * The captured pixels, ever. `captureFrame` and `grabFrame` read the sensor
+ * through `drawImage`, which ignores CSS transforms entirely, so the stored
+ * photograph is the raw frame whatever this says. This decides only what is
+ * shown on screen — and therefore that every screen shows it the same way up.
+ *
+ * A DOCUMENT camera is never mirrored regardless: text on an ID would read
+ * backwards. That is decided by facing mode in `useCamera`, not here.
+ */
+export const CAPTURE_MIRROR = {
+    /** Mirror every self-view — the live preview and every still of it. */
+    enabled: true,
+} as const;
+
+/**
+ * The class that flips a self-view, or an empty string when mirroring is off.
+ *
+ * Exported as a ready-made class rather than a boolean so that every display
+ * site reads `${MIRROR_CLASS}` and none of them re-derives the decision. It
+ * also keeps the literal in exactly one place for Tailwind to find — a class
+ * assembled from fragments at a call site is a class Tailwind never emits.
+ */
+export const MIRROR_CLASS = CAPTURE_MIRROR.enabled ? '-scale-x-100' : '';
+
+/**
+ * ── 11. The live camera's glass ─────────────────────────────────────────────
+ *
+ * A pane over the PREVIEW, heavy at the edges and clearing toward the middle,
+ * so the frame reads as a lens with the person in the sharp centre of it.
+ *
+ * ── Why this is a second video and not `backdrop-filter` ────────────────────
+ * Because `backdrop-filter` does not render at all on machines that are not
+ * compositing on the GPU — established the hard way on the checking pane, where
+ * it silently produced nothing, not even the blur. The checking pane solved
+ * that by filtering a COPY of the photograph, which works because the thing
+ * behind it is one image we already have.
+ *
+ * The live camera's backdrop is a video, and an `<img>` cannot copy one. So the
+ * copy is a second `<video>` sharing the SAME `srcObject` — one camera, one
+ * decode upstream, two elements displaying it. The copy is blurred and masked
+ * with CSS; no render loop, no canvas, no per-frame JavaScript.
+ *
+ * ⚠️ It cannot affect the check. AWS reads the MediaStream track and its own
+ * video's geometry; a second element displaying the same stream is invisible to
+ * both. Same separation the retouched preview had.
+ */
+export const CAPTURE_LIVE_GLASS = {
+    /** Off puts the plain camera back, with no second element mounted at all. */
+    enabled: true,
+
+    /**
+     * ── THE TWO DIALS ───────────────────────────────────────────────────────
+     *
+     * How much liquid glass there is, at the two ends of the distance from the
+     * person. Everything between them is the gradient; `falloff` below is its
+     * shape.
+     *
+     *     minGlass   right at the person's edge — the LEAST glass
+     *     maxGlass   at the frame's farthest corner — the MOST glass
+     *
+     * ⚠️ BOTH ARE PERCENTAGES, 0..100 — not fractions. The rest of this file is
+     * in 0..1, and these two are the exception on purpose: they are the dials
+     * that get asked for and changed in percent ("10 near me, 75 far"), and a
+     * table you have to convert in your head before using is a table that gets
+     * a 75 typed into it. `LivenessCamera` divides by 100 on the way out; CSS
+     * never sees these numbers directly.
+     *
+     *     0    no pane at all. The camera, untouched.
+     *     25   a faint haze. You can still read a sign on the wall.
+     *     50   plainly glassed, but half the sharp picture still shows through.
+     *     75   properly frosted — shapes and colour, no detail.
+     *     100  the pane at full strength. Nothing of the sharp camera left.
+     *
+     * ⚠️ `maxGlass` IS A CEILING ON THE WHOLE EFFECT, and it is the number to
+     * reach for when the glass "does not show". The pane is one layer over the
+     * camera and this is how much of it is let through, so at 0.5 the frame's
+     * border is always half the sharp picture NO MATTER how large `blur` or
+     * `warpScale` get. Raising those only makes the half that shows heavier,
+     * and past a point that reads as a double exposure rather than as glass.
+     * If it is not strong enough, this is the dial — not those.
+     *
+     * ── Why min is near and max is far, and not the reverse ─────────────────
+     * The face has to stay legible: the person is aligning themselves to an
+     * oval they can only judge from what they see, and AWS times out waiting
+     * for a fit that a softened preview makes harder to reach. Away from them
+     * nothing is being judged, so that is where the material can be itself.
+     */
+    maxGlass: 75,
+    minGlass: 10,
+
+    /**
+     * The clear hole's RADIUS, as a fraction of the frame's WIDTH.
+     *
+     * Only the starting value — `LivenessCamera` overwrites it a few times a
+     * second from where the face actually is. It is what the pane is drawn with
+     * until the first measurement lands, and whenever no face is found.
+     *
+     * ⚠️ THE FACE MUST NOT BE GLASSED. Not for looks — for the check. The oval
+     * AWS measures against sits in the middle of the frame, the person is
+     * judging their own position from what they see, and a softened face is one
+     * they cannot align or read guidance against. The clear hole is sized to
+     * hold a head at capture distance.
+     *
+     * ⚠️ Keep this in step with `@property --live-glass-clear`'s `initial-value`
+     * in liveness.css. That registration is what gives the property a value
+     * before the first measurement; this is only read by the inline style, and
+     * the two disagreeing means the pane's first frames differ from its rest.
+     */
+    clear: 0.46,
+
+    /**
+     * Blur on the copy, in XD px.
+     *
+     * ⚠️ This is the strength of the PANE, which is not the same as how much
+     * pane is shown — that is `edge` above, and it is a hard ceiling this
+     * cannot climb over. At `edge: 0.5` the frame's border is always half the
+     * sharp camera and half this, however large this gets, because the mask
+     * only ever lets half of it through.
+     *
+     * So raising this makes the glassed half heavier, and past a point the
+     * result stops reading as frosted glass and starts reading as a double
+     * exposure — a sharp picture with a soft one ghosted over it. If the pane
+     * still is not strong enough at 30, the number to raise is `edge`, not this
+     * one.
+     */
+    blur: 30,
+
+    /** Saturation on the copy — glass concentrates colour slightly. */
+    saturation: 1.3,
+
+    /**
+     * How far the preview is BENT at the rim, in px — the LIQUID half.
+     *
+     * Same `GlassFilter` the checking pane uses, on the same displacement map:
+     * nothing moves through the middle, deflection grows toward the border, and
+     * the three colour channels are displaced by different amounts so edges
+     * fringe the way they do through a real lens. Without this the pane is a
+     * blur — a filter ON the camera rather than a sheet in front of it — which
+     * is what it has been.
+     *
+     * ⚠️ MUCH SMALLER THAN THE CHECKING PANE'S 39, and not for looks. That one
+     * bends a still: one frame, one composite, done. This one bends 30 frames a
+     * second, live, on a device that is simultaneously encoding and uploading
+     * video to Rekognition — and AWS errors any camera it measures below 15fps
+     * (`CAMERA_FRAMERATE_ERROR`, already hit once in this codebase). A lens
+     * strong enough to admire is a lens that can cost the sign-in.
+     *
+     * ⚠️ SET IT TO 0 FIRST if a check starts failing on framerate. That drops
+     * the `url()` from the chain entirely and the pane falls back to the plain
+     * blur, which is the behaviour this had before and cannot cost anything.
+     * The `enabled` switch above is the bigger hammer.
+     */
+    warpScale: 20,
+
+    /**
+     * Softening inside the filter, after the channels recombine.
+     *
+     * Small, and for the same reason as the checking pane: blurring hard here
+     * averages the colour fringing straight back to grey and throws away the
+     * one detail that reads as a lens. The heavy softening is the CSS `blur`
+     * above, which is a separate and much cheaper operation.
+     */
+    warpBlur: 1.4,
+
+    /**
+     * ── The PERSON is what stays clear, not a circle around their face ──────
+     *
+     * The glass covers the whole picture except the administrator — their head,
+     * their shoulders, their arms — cut out along their actual outline.
+     *
+     * ── Why this is not the ellipse it replaced ─────────────────────────────
+     * The ellipse was sized from a skin-tone estimate and could only ever be a
+     * circle in the middle. That gets it wrong in both directions at once: the
+     * shoulders and arms are glassed even though they are the person, and the
+     * wall beside their head is clear even though it is the room. The falloff
+     * looked right in a screenshot of somebody sitting perfectly centred and
+     * wrong the moment anyone moved.
+     *
+     * The silhouette comes from the Selfie Segmenter — the same model the
+     * capture's portrait blur uses, already vendored at
+     * `/vendor/mediapipe/selfie_segmenter.tflite` and already warmed earlier in
+     * this flow. `segmentToMask` returns a FEATHERED alpha, which matters: a
+     * hard cut-out around hair is the artefact that sank the first portrait
+     * attempt (see §4).
+     *
+     * ⚠️ THE COST IS THE WHOLE RISK, and it is on the one screen that cannot
+     * absorb it. This is a neural network running while the device encodes and
+     * uploads video to Rekognition, and AWS errors any camera it measures below
+     * 15fps (`CAMERA_FRAMERATE_ERROR` — already hit once in this codebase).
+     *
+     * Three things keep it affordable, and none of them is optional:
+     *   - it runs on `refreshMs`, not per frame. The BLUR is CSS on a video
+     *     element and stays GPU-cheap at 60fps; only the outline is recomputed.
+     *   - it runs at `maskWidth`, not at display resolution.
+     *   - it never overlaps itself — a refresh already in flight blocks the
+     *     next one, so a slow device silently drops to a lower rate instead of
+     *     queueing work it cannot finish.
+     *
+     * ⚠️ TURN THIS OFF FIRST if a check starts failing on framerate. The pane
+     * falls back to the ellipse mask in `liveness.css`, which is pure CSS and
+     * costs nothing. `warpScale: 0` is the next lever, then `enabled` above.
+     *
+     * It also fails soft on its own: no model, no WebGL, or a mask claiming
+     * less than 8% or more than 95% of the frame (`CAPTURE_PORTRAIT`'s sanity
+     * bounds, which `segmentToMask` enforces), and the ellipse is what renders.
+     */
+    /**
+     * The SHAPE of the falloff from the person out to the frame's corner.
+     *
+     * `[position, mix]` — position is the fraction of the way from the person
+     * to the farthest corner; mix is how far between `centre` and `edge` the
+     * pane is there. So `[0.22, 0.45]` reads: a fifth of the way out, the glass
+     * is already nearly half way to full strength.
+     *
+     * ── Why this is not a straight line ─────────────────────────────────────
+     * Because a straight line does not look like what it is. Interpolating
+     * evenly from 0.1 at the person to 0.5 at the corner puts the pane at 0.3
+     * halfway out — so most of the frame sits in the middle of the range and
+     * the whole thing reads as ONE FLAT WASH with no sense of direction. The
+     * falloff is there mathematically and invisible to look at.
+     *
+     * This curve rises fast and then flattens: the room is at four-fifths
+     * strength by just past halfway and holds it, while the drop happens close
+     * in, right around the person. That is what "stronger at the edges, easing
+     * off as it approaches you" actually looks like — the change has to be
+     * concentrated where the eye is, and the eye is on the face.
+     *
+     * ⚠️ Both mask paths read this — the silhouette's canvas ramp and the
+     * ellipse fallback in liveness.css. Change the numbers and the stylesheet's
+     * hand-written `calc()` stops must move with them, or the pane's appearance
+     * changes at the moment segmentation takes over.
+     */
+    falloff: [
+        [0, 0],
+        [0.22, 0.45],
+        [0.55, 0.82],
+        [1, 1],
+    ] as ReadonlyArray<readonly [number, number]>,
+
+    /**
+     * How far the gradient takes to climb from `minGlass` to `maxGlass`,
+     * measured OUTWARD FROM THE PERSON'S OUTLINE, as a fraction of the frame's
+     * width.
+     *
+     * ⚠️ FROM THE OUTLINE — not from their centre, and that distinction is the
+     * whole reason the gradient was invisible.
+     *
+     * The first version measured distance from the face's CENTRE out to the
+     * frame's corner. But the person is cut out of the pane, so the glass does
+     * not begin until their silhouette ends — and by then most of the distance
+     * to the corner has already been spent. Everything actually glassed sat in
+     * the flat top of the curve at or near `maxGlass`, which is precisely the
+     * "static, all one strength" it looked like. The gradient was real,
+     * correct, and entirely inside the region that had been erased.
+     *
+     * Measuring from the outline puts the whole range where it can be seen:
+     * `minGlass` hugging the person, climbing to `maxGlass` this far away.
+     *
+     * 0.4 — roughly the distance from a shoulder to the edge of the frame at
+     * capture distance, so the climb completes right about where the picture
+     * ends. Smaller concentrates the change near the person; larger spreads it
+     * out and, past the point where nothing is that far from them, stops
+     * reaching `maxGlass` anywhere at all.
+     */
+    spread: 0.4,
+
+    /**
+     * ── The pane stands down while the person is MOVING ─────────────────────
+     *
+     * The outline is recomputed every `refreshMs`, so between refreshes it
+     * describes where somebody WAS. Hold still and that is invisible. Move —
+     * which is the entire activity on this screen, since AWS is telling them to
+     * come closer — and the cutout lags behind them, so the glass slides across
+     * their face. It is at its worst exactly when they are doing what they were
+     * asked to do.
+     *
+     * Chasing it with a faster refresh does not work: the lag is the model's
+     * runtime, not the clock, and running a neural network more often on this
+     * screen is what threatens the 15fps floor AWS fails a check below.
+     *
+     * So the pane fades out while they move and fades back once they settle.
+     * A glassed room is decoration; a glassed face is an obstacle, and the
+     * honest answer to "the mask is stale" is to not show a stale mask.
+     *
+     * Free to measure: `measureSkin` already reports where the face is for the
+     * ramp, so this is the difference between two numbers it had anyway.
+     */
+    settle: {
+        enabled: true,
+
+        /**
+         * How far the face may travel between measurements and still count as
+         * still — in fractions of the frame, summed across position and size.
+         *
+         * Small enough to catch somebody leaning in, large enough to ignore the
+         * measurement's own noise. ⚠️ This is a skin-tone estimate, so its
+         * centre jitters by a percent or so even against a motionless face; set
+         * this below that and the cutout never shrinks back.
+         */
+        moveThreshold: 0.014,
+
+        /**
+         * How long after the last movement the cutout stays grown, in ms.
+         *
+         * ⚠️ MUST EXCEED `silhouette.refreshMs`, or it tightens back onto the
+         * outline that was already stale when they stopped — the exact artefact
+         * it exists to prevent, half a second later. Longer than the refresh
+         * guarantees a fresh mask lands before it narrows.
+         */
+        holdMs: 620,
+
+        /**
+         * How far the cutout is GROWN while they move, as a fraction of the
+         * frame's width.
+         *
+         * ── What this replaced, and why ─────────────────────────────────────
+         * The first version of this faded the whole pane out while anyone
+         * moved, which was wrong twice over: the glass disappeared on the
+         * smallest shift, and it took the ROOM's glass with it — when the only
+         * thing at risk was the person. The room is not stale; it is not
+         * moving.
+         *
+         * So the pane stays exactly where it is and only the cutout changes.
+         * Moving widens the clear area enough to cover wherever the person has
+         * got to since the outline was computed; holding still lets it settle
+         * back onto them. The glass over everything else never flinches.
+         *
+         * Sized against how far somebody travels in one refresh: at 400ms, a
+         * normal lean toward the camera moves their edge a few percent of the
+         * frame, so 6% covers it with room to spare.
+         */
+        grow: 0.06,
+    },
+
+    silhouette: {
+        enabled: true,
+
+        /**
+         * How often the outline is recomputed, in ms.
+         *
+         * Slower than the face track's 320ms on purpose — this is a whole
+         * neural network against a per-pixel scan that costs single digits.
+         * A head and shoulders do not change OUTLINE appreciably in 400ms;
+         * they change position, and the feathered edge absorbs that.
+         */
+        refreshMs: 400,
+
+        /**
+         * Width the segmenter is fed, in px. Height follows the frame's shape.
+         *
+         * The model resamples its input to 256x256 internally, so feeding it
+         * more than this buys nothing at all — it only costs the `drawImage`
+         * and the per-pixel label scan, both of which are linear in this
+         * number. The resulting mask is upscaled to the frame, which is
+         * harmless because it is a feathered silhouette rather than detail.
+         */
+        maskWidth: 160,
+
+        /**
+         * Consecutive failures before this stops trying for the rest of the
+         * check.
+         *
+         * A missing model or a dead WebGL context fails every time, and
+         * retrying it two and a half times a second for the length of a
+         * liveness check is pure cost against an answer that will not change.
+         * A few attempts covers the case that actually recovers — the model
+         * still downloading — without grinding on the one that cannot.
+         */
+        giveUpAfter: 6,
+    },
 } as const;

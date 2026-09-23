@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
-import { CAPTURE_PORTRAIT } from '@/features/kyc/config/capture';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useFaceGate } from '@/features/kyc/hooks/useFaceGate';
 import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
+import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 import { restartSignInAction } from '@/features/auth/actions';
 
 // XD px -> scaling rem.
@@ -152,7 +152,9 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
         videoRef,
         canvasRef: liveCanvasRef,
         enabled: phase === 'scanning' && isActive,
-        portrait: CAPTURE_PORTRAIT.enabled,
+        // Never on the live path — see the same line in LivenessCamera. The
+        // blur belongs to the capture and to the screens that show it.
+        portrait: false,
     });
 
     // Sampling stops the moment we leave 'scanning': nothing downstream reads
@@ -328,33 +330,38 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                     ref={videoRef}
                     playsInline
                     muted
-                    // Mirrored so moving left moves the image left, which is the
-                    // only way a self-view reads correctly. `captureFrame`
-                    // returns the UNmirrored pixels regardless — see useCamera.
+                    // Mirrored, from `CAPTURE_MIRROR`. A self-view has to move
+                    // left when you do — that is the only way a person lines
+                    // their own face up, and unmirrored it is reversed.
                     //
-                    // Transparent, NOT hidden, while the retouched preview is
-                    // painting: the element must keep decoding, because the
-                    // gate samples it and the capture is drawn from it. See
-                    // the same rule in liveness.css.
-                    className="h-full w-full -scale-x-100 object-cover"
+                    // `captureFrame` returns the UNmirrored pixels regardless:
+                    // it reads the sensor through `drawImage`, which ignores CSS
+                    // transforms. That is why every screen showing the still
+                    // flips it back from the same constant.
+                    //
+                    // Transparent, NOT hidden, when the live canvas is painting:
+                    // the element must keep decoding, because the gate samples
+                    // it and the capture is drawn from it. See the same rule in
+                    // liveness.css. (`CAPTURE_LIVE.enabled` is off, so that
+                    // canvas is dormant — the video is what you see.)
+                    className={`h-full w-full object-cover ${MIRROR_CLASS}`}
                     style={live.active ? { opacity: 0 } : undefined}
                 />
 
-                {/* The live look — the same `applyLook` the capture runs, at a
-                    reduced resolution and under a governor that steps down
-                    rather than compete with the face gate for CPU. Mirrored to
-                    match the video it replaces. */}
+                {/* The live look — dormant while `CAPTURE_LIVE.enabled` is
+                    false, which is the shipped state: the preview shows the
+                    plain camera and the full look is applied to the CAPTURE.
+                    Unmirrored, like the video it would replace. */}
                 <canvas
                     ref={liveCanvasRef}
                     aria-hidden
-                    className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
+                    className={`pointer-events-none absolute inset-0 h-full w-full object-cover ${MIRROR_CLASS}`}
                     style={live.active ? undefined : { display: 'none' }}
                 />
 
-                {/* The locked frame. Mirrored to match the preview it was taken
-                    from: the pixels are unmirrored, so without this the image
-                    would flip at the instant of capture and read as a different
-                    photograph of a different person. */}
+                {/* The locked frame — unmirrored, like the preview it was taken
+                    from. Both are now the raw sensor pixels, so nothing flips
+                    at the instant of capture. */}
                 {shot && (
                     // A data URL held in memory for seconds. next/image would only
                     // put a loader between the capture and pixels already decoded.
@@ -363,7 +370,7 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                         src={shot}
                         alt=""
                         aria-hidden
-                        className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+                        className={`absolute inset-0 h-full w-full object-cover ${MIRROR_CLASS}`}
                     />
                 )}
 

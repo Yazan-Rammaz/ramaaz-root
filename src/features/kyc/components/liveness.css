@@ -409,6 +409,20 @@
  * detector on error and offer "start over" themselves. Leaving is the back
  * button, as on every other step of this flow.
  */
+/*
+ * ⚠️ `display: none`, NOT removed — and something depends on that distinction.
+ *
+ * `LivenessCamera` watches for the recording badge to know when recording
+ * starts and stops, which is what lets the checking state take the frame over
+ * instead of leaving AWS's black verifying screen up for ten seconds. It tests
+ * for the element's PRESENCE, precisely because this rule makes it invisible;
+ * the SDK renders it only while recording, so being in the tree is the signal.
+ *
+ * Hiding it differently is fine. Making it stop existing is not: any change
+ * that prevents the element from being rendered at all — a wrapper that unmounts
+ * it, an SDK upgrade that drops the class — silently disables the detection,
+ * and the symptom is a black frame with no error anywhere.
+ */
 .rz-liveness .amplify-liveness-recording-icon-container,
 .rz-liveness .amplify-liveness-cancel-container {
     display: none;
@@ -467,5 +481,395 @@
  * the face-fit test reads the video STREAM, never the element it is painted in.
  */
 .rz-liveness .amplify-liveness-video {
+    /*
+     * ⚠️ NO `transform` RULE HERE, deliberately.
+     *
+     * The mirror is decided by `CAPTURE_MIRROR.enabled` and written onto the
+     * element as an INLINE style by LivenessCamera's sampling loop. A rule here
+     * cannot participate: `!important` in a stylesheet outranks an inline
+     * style, so any `transform` written in this file would pin the preview to
+     * one orientation and silently ignore the switch.
+     *
+     * Two earlier versions of this file did exactly that, in both directions.
+     */
     object-fit: cover;
+}
+
+/* ── AWS's own "Checking…" screen: gone ─────────────────────────────────────
+ *
+ * The black cover and the spinner the SDK shows between the shutter and its
+ * result. `LivenessVerdict` replaces that whole state with the captured photo
+ * under glass, so the SDK's version is a duplicate — and it was winning the
+ * first fraction of a second, because our takeover runs off a 200ms poll.
+ *
+ * Removed outright rather than raced. Nothing under here is information the
+ * user needs: the state it describes is the one our own screen is describing
+ * better, over their own face.
+ *
+ * ⚠️ WHAT THIS ALSO HIDES, so it is a decision and not a surprise. The same
+ * two elements carry the CONNECTING state, before recording starts — the dim
+ * and the spinner over a live camera while the socket opens. That is now a
+ * plain camera with no indication anything is happening, for the second or so
+ * it takes. Judged the better trade: the connecting moment is short, silent
+ * and expected, and the checking moment is five to ten seconds of black that
+ * reads as a hang.
+ *
+ * ⚠️ NOT the toast. `.amplify-liveness-toast` carries the live guidance —
+ * "move a little closer", "hold still" — which is the only thing telling
+ * somebody why the oval is not accepting them. Hiding that would break the
+ * check itself, not just its appearance.
+ *
+ * ⚠️ `opacity: 0`, NOT `display: none`, AND THE DIFFERENCE IS THE WHOLE POINT.
+ *
+ * `LivenessCamera` watches for the loader to appear to know the camera has
+ * stopped — that is what makes the takeover instant. It tests for a rendered
+ * box (`getClientRects()`), because the SDK keeps a loader mounted and hidden
+ * from the moment it starts, so mere presence would fire during connecting.
+ *
+ * `display: none` removes the box from layout, so the element it is watching
+ * for can never be "rendered" and the signal dies. That was written here once
+ * and cost three seconds of black on every check — the same self-inflicted bug
+ * as the REC badge two rules down, arrived at from the opposite direction.
+ *
+ * `opacity: 0` keeps the geometry, so the detector still sees it arrive. The
+ * overlay is included because a `display: none` ANCESTOR would take the
+ * loader's box away just as effectively.
+ */
+.rz-liveness .amplify-liveness-overlay-opaque,
+.rz-liveness .amplify-loader {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ── AWS's "Getting the camera ready…" screen: gone ─────────────────────────
+ *
+ * The SDK covers the frame with its own waiting screen while it acquires the
+ * camera — a bold sentence, its own type, its own spinner, in the middle of a
+ * frame we have otherwise dressed completely. It is the last piece of their
+ * chrome anybody sees.
+ *
+ * `FaceLivenessScreen` shows the standby mark for exactly this window instead:
+ * the Face ID glyph with rings leaving it, which says the same thing without a
+ * sentence and therefore without three translations.
+ *
+ * ⚠️ `opacity: 0`, NOT `display: none`. Twice now a rule like this has been
+ * written with `display: none` and silently disabled a signal the camera loop
+ * watches for — the REC badge, then the loader — because `display: none`
+ * removes an element's box and `getClientRects()` then finds nothing. This
+ * element is not one of those, but an ANCESTOR can take a descendant's box away
+ * just as effectively, and the loader lives inside this subtree. Keep the
+ * geometry; kill only the pixels.
+ */
+/*
+ * ⚠️ UNSCOPED, like the mirror override. Every other rule in this file is
+ * under `.rz-liveness`, which is right for chrome inside our frame — but this
+ * screen is one of the pieces the detector mounts OUTSIDE the subtree it was
+ * rendered into, so a descendant selector matches nothing, changes nothing,
+ * and looks perfectly correct sitting in this file. That is exactly how the
+ * mirror survived three attempts.
+ *
+ * Safe unscoped: these are the SDK's own class names and nothing else in this
+ * app can match them.
+ *
+ * The `data-testid` is included because it is the most stable handle the SDK
+ * gives us — class names are styling and get renamed; a test id is a contract
+ * with their own tests.
+ */
+.amplify-liveness-start-screen-camera-waiting,
+.amplify-liveness-start-screen-camera-waiting__text,
+[data-testid='waiting-camera-permission'],
+/*
+ * ⚠️ Yes, the LANDSCAPE modal — that is not a mistake in this list.
+ *
+ * The SDK renders "Getting the camera ready…" through
+ * `amplify-liveness-landscape-error-modal__header`, reusing the landscape
+ * modal's own heading component for it. Nothing about the class name says so,
+ * which is why two rounds of hiding the sensibly-named
+ * `start-screen-camera-waiting` elements changed nothing: they were never the
+ * element on screen.
+ *
+ * Hiding the whole modal is correct rather than collateral. `FaceLivenessScreen`
+ * draws its OWN landscape prompt — the rotate button, `faceRotateTitle`,
+ * `faceRotateBody` — guarded by `mustRotate`, so AWS's version is a duplicate
+ * of a screen we already own and translate.
+ */
+/*
+ * The container the two live in — hiding it takes the spinner and the sentence
+ * together, which is what "until the camera opens, show OUR mark" requires.
+ *
+ * ⚠️ `opacity`, never `display: none`. `.amplify-liveness-loader` sits INSIDE
+ * this element, and the camera loop watches for that loader becoming visible to
+ * know the stream has ended. `display: none` on an ancestor takes a
+ * descendant's box away just as effectively as on the element itself, and the
+ * signal would die silently — which has already happened twice in this file
+ * from exactly this mistake.
+ */
+.amplify-liveness-connecting-loader,
+.amplify-liveness-landscape-error-modal,
+.amplify-liveness-landscape-error-modal__header {
+    opacity: 0 !important;
+    pointer-events: none;
+}
+
+/* ── AWS's "Checking…" toast: gone, but ONLY that one ───────────────────────
+ *
+ * The problem this solves is that there is only one toast. The SDK reuses
+ * `.amplify-liveness-toast` for BOTH the live guidance — "move a little
+ * closer", "hold still", which is the only thing telling somebody why the oval
+ * will not accept them — and for "Checking…" after recording stops. Hiding the
+ * class outright would take the guidance with it and break the check itself,
+ * not just its appearance. That is why it was left alone through several
+ * rounds of removing their chrome.
+ *
+ * `:has()` separates them on the one difference that actually distinguishes
+ * them: the checking toast contains a SPINNER, and a hint never does. So this
+ * matches the checking state and nothing else, with no timing, no class we do
+ * not control, and no state to track.
+ *
+ * ⚠️ `opacity`, not `display: none` — `.amplify-loader` is the element inside,
+ * and the camera loop watches for it becoming visible to know the stream ended.
+ * Removing its box would kill that signal, which is the same self-inflicted bug
+ * this file has already carried twice.
+ *
+ * Our own checking state covers this frame anyway (`LivenessVerdict`, above the
+ * widget on `.verdict-layer`). This is belt and braces for the fraction of a
+ * second between the toast appearing and the takeover: without it that gap
+ * shows AWS's spinner over a black frame, which is exactly the thing the
+ * takeover exists to remove.
+ */
+.amplify-liveness-toast:has(.amplify-loader),
+.amplify-liveness-hint:has(.amplify-loader) {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ── The live camera's glass ────────────────────────────────────────────────
+ *
+ * A second <video> sharing the same MediaStream, blurred and masked so the pane
+ * is heavy at the frame's edge and clears toward the middle. Amounts come from
+ * `CAPTURE_LIVE_GLASS` as custom properties; that table is where to tune it.
+ *
+ * ⚠️ THE MASK IS THE POINT. A uniform blur over the preview is a filter on the
+ * camera; one that falls off toward the centre is something the person is
+ * looking THROUGH. And the clear hole is not decoration — the face has to stay
+ * sharp or the person cannot align to an oval they are being measured against.
+ *
+ * ⚠️ It cannot affect the check. AWS reads the MediaStream track and its own
+ * video element's geometry; a second element displaying the same stream is
+ * invisible to both.
+ */
+/* ── The three numbers the pane is drawn from ───────────────────────────────
+ *
+ * Registered rather than left as plain custom properties, for two reasons that
+ * are both load-bearing.
+ *
+ * ⚠️ 1. THEY MUST HAVE A VALUE BEFORE THE FIRST MEASUREMENT LANDS. `LivenessCamera`
+ * writes these a few times a second, but the first write is up to 320ms after
+ * the camera opens — and an unregistered custom property that has never been set
+ * makes every `var()` referencing it invalid, which invalidates the whole
+ * gradient, which drops `mask-image` entirely. The pane would render as a flat
+ * unmasked blur over the camera for that third of a second. `initial-value` is
+ * what makes those first frames draw the default head position instead.
+ *
+ * ⚠️ 2. UNREGISTERED CUSTOM PROPERTIES DO NOT TRANSITION. The `transition` on
+ * this element has always named these three, and it has never done anything:
+ * the browser cannot interpolate a property it only knows as a string, so it
+ * swaps values at the end of the duration. The hole jumped between measurements
+ * — 320ms of nothing, then a step. Declaring the syntax as `<number>` is what
+ * makes that easing real.
+ *
+ * The defaults are where a head sits in a portrait frame, used until the first
+ * measurement lands and whenever no face is found.
+ */
+@property --live-glass-cx {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0.5;
+}
+
+@property --live-glass-cy {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0.42;
+}
+
+@property --live-glass-clear {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0.46;
+}
+
+.rz-live-glass {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+
+    /* ── ABOVE AWS's camera, and it has to be stated ────────────────────────
+     *
+     * This element is EARLIER in the DOM than the detector's tree, and both sit
+     * at `z-index: auto`, so without this line the opaque camera module paints
+     * straight over it and the pane is never seen at all. It rendered, it
+     * decoded a second copy of the stream, and it was invisible — which looks
+     * exactly like the mask or the filter having no effect, and is neither.
+     *
+     * DOM order cannot fix it: the canvas above must stay FIRST (see the
+     * retouched-preview rules), and this cannot be moved after the detector
+     * without inserting into AWS's tree.
+     *
+     * 1 clears the camera module. The two rules below put back the things that
+     * must stay on top of it. */
+    z-index: 1;
+
+    /* ⚠️ THE `url()` COMES FIRST AND CARRIES THE WHOLE DECLARATION WITH IT.
+     *
+     * `--live-glass-warp` is written by `LivenessCamera` and is `none` when the
+     * warp is off — never an empty string and never a missing property. An
+     * invalid or dangling `url()` invalidates the ENTIRE `filter` value, so a
+     * dead reference here would take the blur and the saturation down with it
+     * and leave a perfectly sharp camera. The symptom is "the glass stopped
+     * working", with nothing in the console; the cause is one unresolved id.
+     *
+     * This is a `filter`, NOT a `backdrop-filter`, and that is the point of the
+     * whole second-video design: the element HAS content — the same stream —
+     * so there is a real picture to bend. `backdrop-filter` needs GPU
+     * compositing and silently renders nothing without it, which is how the
+     * checking pane lost three rounds. */
+    filter:
+        var(--live-glass-warp, none)
+        blur(var(--live-glass-blur, 1rem))
+        saturate(var(--live-glass-saturation, 1.2));
+
+    /* ── TWO mask layers, multiplied ────────────────────────────────────────
+     *
+     * ⚠️ One gradient cannot express this, and the single-gradient version that
+     * was here did not do what its own numbers said.
+     *
+     * The two things being asked for are measured against DIFFERENT boxes. The
+     * clear hole is sized to the FACE — it has to be, or it stops protecting the
+     * thing it exists for. The 10%→50% ramp is measured to the FRAME's corners,
+     * because "the rest of the screen" is the frame and nothing else. A single
+     * `radial-gradient` has one size, so writing both into it means the ramp
+     * inherits the face's, and the face's box is roughly a third of the frame.
+     *
+     * What that produced, measured: the pane reached its full `edge` alpha only
+     * at a radius well outside the frame, so the bottom corners came out around
+     * 45% while the LEFT AND RIGHT EDGES SAT AT ABOUT 7%. The strong end of the
+     * gradient was mostly off-screen. That is why it has read as "barely there"
+     * every time it was looked at — not the blur, not the filter, the stop
+     * positions.
+     *
+     * So: one layer for the ramp, one for the hole, composited with `intersect`
+     * — which multiplies their alphas. Outside the hole the cut layer is fully
+     * opaque, so the result IS the ramp; inside it the cut layer is transparent,
+     * so the result is zero whatever the ramp says. Each layer now says one
+     * thing and is sized for the box that thing belongs to.
+     *
+     * ⚠️ `mask-composite` is load-bearing, not decoration. Its default is `add`,
+     * and with two layers that saturates to fully opaque everywhere outside the
+     * hole — a solid pane instead of a 50% one. If this ever renders as a hard
+     * frosted border with a hole punched in it, this property is what did not
+     * apply.
+     */
+
+    /* The ramp: 10% just off the face, 50% at the frame's farthest corner.
+       `farthest-corner` is the whole point — it makes 100% of the gradient land
+       exactly at the corner of the frame, so `edge` is a number about the frame
+       rather than about wherever the face happened to be. The straight edges
+       come out a little under it, which is correct: a corner is farther away. */
+    /* How far between `centre` and `edge` the pane is, at each stop. These are
+       `CAPTURE_LIVE_GLASS.falloff` written out — see that table for why the
+       curve is not a straight line, and keep the two in step. */
+    --live-glass-span: calc(var(--live-glass-max, 0.8) - var(--live-glass-min, 0.12));
+
+    --live-glass-ramp: radial-gradient(
+        farthest-corner at calc(var(--live-glass-cx) * 100%)
+            calc(var(--live-glass-cy) * 100%),
+        rgb(0 0 0 / var(--live-glass-min, 0.12)) 0%,
+        rgb(0 0 0 / calc(var(--live-glass-min, 0.12) + var(--live-glass-span) * 0.45))
+            22%,
+        rgb(0 0 0 / calc(var(--live-glass-min, 0.12) + var(--live-glass-span) * 0.82))
+            55%,
+        rgb(0 0 0 / var(--live-glass-max, 0.8)) 100%
+    );
+
+    /*
+     * The hole: positioned and sized from the FACE, not from the frame.
+     *
+     * `--live-glass-cx/cy` and `--live-glass-clear` are written onto this
+     * element by `LivenessCamera`, which measures where the face actually is
+     * several times a second. A fixed hole is wrong the moment somebody sits
+     * off-centre or leans back — and being wrong here means glassing the one
+     * thing that has to stay sharp.
+     *
+     * Ellipse rather than circle, and centred above the middle, because that is
+     * where a head sits in a portrait frame — a circular hole leaves the chin
+     * glassed and the shoulders clear, which is backwards.
+     *
+     * `clear` now means what it is documented to mean: its value IS the radius
+     * as a fraction of the frame's width. Fully clear through 62% of that, then
+     * feathered to fully glassed at the rim. The old 190%/165% multipliers were
+     * compensating for the stop positions above and made the number unreadable.
+     */
+    --live-glass-cut: radial-gradient(
+        ellipse calc(var(--live-glass-clear) * 100%)
+            calc(var(--live-glass-clear) * 115%) at calc(var(--live-glass-cx) * 100%)
+            calc(var(--live-glass-cy) * 100%),
+        transparent 0%,
+        transparent 62%,
+        #000 100%
+    );
+
+    mask-image: var(--live-glass-ramp), var(--live-glass-cut);
+    mask-composite: intersect;
+    -webkit-mask-image: var(--live-glass-ramp), var(--live-glass-cut);
+    /* WebKit's legacy spelling of the same operation. */
+    -webkit-mask-composite: source-in;
+
+    /* The hole moves with the person; easing it stops a jittery measurement
+       from making the pane twitch. Slow enough to absorb noise, quick enough
+       that it does not lag somebody leaning sideways. */
+    transition:
+        --live-glass-cx 260ms linear,
+        --live-glass-cy 260ms linear,
+        --live-glass-clear 260ms linear;
+}
+
+/* ── What must stay ON TOP of the pane ──────────────────────────────────────
+ *
+ * Both of these are children of the camera module, which the glass now clears
+ * at `z-index: 1`. Neither carries a z-index of its own, so without these two
+ * rules they went UNDER it — and one of those is not a cosmetic problem.
+ *
+ * ── The overlay: the guidance ───────────────────────────────────────────────
+ * The hint toast is the only thing telling somebody why the oval will not
+ * accept them — "move a little closer", "hold still". It sits at the FOOT of
+ * the frame (see the hint rule above), which is exactly where the pane is
+ * heaviest, so under the glass it is blurred text over a blurred picture at the
+ * moment it matters most. The fit bar is beside it and reads no better.
+ *
+ * Its `::before` scrim is `z-index: -1` WITHIN this element's own stacking
+ * context, so it stays behind the hint and in front of the glass — the falloff
+ * lands on the pane, which is where it should be: the scrim exists to give the
+ * hint something to sit against, and the pane is now what is underneath it.
+ *
+ * ── The freshness canvas: the CHECK ─────────────────────────────────────────
+ * ⚠️ THIS ONE IS NOT ABOUT APPEARANCE. That canvas is the coloured light AWS
+ * flashes to illuminate the face — the anti-spoofing measurement is made of the
+ * light reflected back off the person. Dimming it by up to half at the edges is
+ * interfering with the measurement itself, not with a picture of it.
+ *
+ * The centre is nearly clear so the face would still be lit, which is precisely
+ * what makes this the dangerous kind of bug: it would not fail outright, it
+ * would lower a score, intermittently, on some faces and some rooms. Kept
+ * strictly above the pane so no such question arises.
+ */
+.rz-liveness .amplify-liveness-overlay {
+    z-index: 2;
+}
+
+.rz-liveness .amplify-liveness-freshness-canvas {
+    z-index: 3;
 }

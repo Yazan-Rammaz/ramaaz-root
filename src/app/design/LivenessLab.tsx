@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
+import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
+import { CAPTURE_MIRROR } from '@/features/kyc/config/capture';
 import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 
 /**
@@ -49,7 +51,22 @@ type Result = {
     auditImages: number;
 };
 
-type Phase = 'idle' | 'starting' | 'streaming' | 'fetching' | 'done' | 'error';
+/**
+ * `waiting` is the camera-is-gone-but-AWS-has-not-answered window — five to ten
+ * seconds of upload and analysis. It exists as its own phase because the
+ * detector must stay mounted through it (unmounting kills the run) while the
+ * screen has already moved on to the checking state.
+ *
+ * `fetching` is the shorter tail after that: our own result call.
+ */
+type Phase =
+    | 'idle'
+    | 'starting'
+    | 'streaming'
+    | 'waiting'
+    | 'fetching'
+    | 'done'
+    | 'error';
 
 /** XD px -> the scaling rem this project measures in (AGENTS.md §1). */
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -64,22 +81,73 @@ export function LivenessLab() {
 
     /** The still `LivenessCamera` kept, and what size it turned out to be. */
     const [shot, setShot] = useState<string | null>(null);
+    /**
+     * The same frame without the portrait blur.
+     *
+     * Kept only for the checking state, which lays glass over it: the display
+     * frame already has the room defocused, so glass on top softens the
+     * background twice and the face once — a pane that covers everything but
+     * the person. See `plainSnapshot` on LivenessVerdict.
+     *
+     * Not what the bench JUDGES. The panel below still shows `shot`, because
+     * the display frame is the photograph a person is given.
+     */
+    const [shotPlain, setShotPlain] = useState<string | null>(null);
     const [shotSize, setShotSize] = useState<{ w: number; h: number } | null>(null);
 
     /**
-     * The capture is unmirrored — `drawImage` reads raw pixels, so the CSS
-     * mirror the user watched themselves in is not in it. Mirroring it back is
-     * the default because a face one has only ever seen mirrored looks subtly
-     * wrong otherwise, and that would be mistaken for a quality problem.
+     * Follows `CAPTURE_MIRROR`, so the bench shows what ships.
+     *
+     * `drawImage` reads raw pixels, so the capture is never mirrored; this
+     * flips it back to match the preview, exactly as the real screens do. A
+     * face you have only ever seen mirrored looks subtly wrong otherwise — the
+     * kind of wrong that gets blamed on capture quality.
+     *
+     * The toggle stays: comparing the two sides is occasionally what you want
+     * when a face looks off and you are deciding whether it is the capture or
+     * the asymmetry of the face itself.
      */
-    const [mirror, setMirror] = useState(true);
+    // Typed explicitly: `CAPTURE_MIRROR` is `as const`, so the initial value
+    // is the literal `true` and the state would be inferred as `true` — a
+    // setter that can never be given `false`.
+    const [mirror, setMirror] = useState<boolean>(CAPTURE_MIRROR.enabled);
+
+    /**
+     * Hold the checking state up for as long as you want to look at it.
+     *
+     * The real thing lasts as long as one result fetch — a second or two — and
+     * on this page each run costs a real AWS check. Reviewing an animation you
+     * get two seconds of, at a pound a look, is not reviewing it.
+     *
+     * Held, it is the SAME component with the same props the sign-in passes, so
+     * what you approve here is what ships. The only difference is that nothing
+     * ends it.
+     *
+     * It composes with the still from the last run: run once, then hold, and
+     * you are looking at the glass over a real capture of your own face rather
+     * than over black. With no run at all it still renders — which is worth
+     * seeing too, because a failed frame-grab is exactly that case.
+     *
+     * ⚠️ NEVER WHILE STREAMING, and the button is disabled there. Held over a
+     * live camera it looks exactly like the bug it is not: the glass sitting
+     * where the preview should be, AWS's own "move a little closer" hint
+     * legible through it, and no way to tell from the screen that a review
+     * toggle is the cause. A tool for inspecting a state must not be able to
+     * impersonate that state arriving early.
+     */
+    const [holdChecking, setHoldChecking] = useState(false);
 
     const start = useCallback(async () => {
         setPhase('starting');
         setResult(null);
         setError(null);
         setShot(null);
+        setShotPlain(null);
         setShotSize(null);
+        // Released on every run. A review toggle left on from ten minutes ago
+        // must not be part of what the next run shows — and the run that
+        // follows is the one whose timing you are trying to watch.
+        setHoldChecking(false);
         try {
             const res = await fetch('/api/kyc/liveness-lab/session', { method: 'POST' });
             if (!res.ok) throw new Error(`session ${res.status}`);
@@ -128,6 +196,7 @@ export function LivenessLab() {
             // is shown. The look pipeline is dissected on /design/capture-lab,
             // which shows both and says which is which.
             setShot(capture?.display ?? null);
+            setShotPlain(capture?.stored ?? null);
             if (!sessionId) return;
             setPhase('fetching');
             try {
@@ -170,19 +239,41 @@ export function LivenessLab() {
                 check flashes coloured light.
             </p>
 
-            <div className="relative mt-16 h-400 w-350 shrink-0 self-center overflow-hidden rad-20 bg-black">
+            {/* `rad-30`, matching FaceLivenessScreen exactly. It was `rad-20`,
+                which is close enough to look deliberate and wrong enough to
+                mislead: the checking glass meets the corner here, and judging
+                how it reads against a radius the real screen does not have is
+                the kind of review that approves something twice. */}
+            <div className="relative isolate mt-16 h-400 w-350 shrink-0 self-center overflow-hidden rad-30 bg-black">
                 {/* Same brackets as the real screen, so what is judged here is
                     what ships rather than a stripped-down cousin. */}
                 {phase === 'streaming' && (
                     <CornerBrackets color="#FFEB00" inset={22} className="z-2" />
                 )}
 
-                {phase === 'streaming' && session && (
+                {/* ⚠️ Mounted through `waiting` as well as `streaming`. The
+                    detector is still uploading and analysing after the camera
+                    goes; unmounting it there kills the run. See the same note
+                    in FaceLivenessScreen. */}
+                {(phase === 'streaming' || phase === 'waiting') && session && (
                     <LivenessCamera
                         sessionId={session.sessionId}
                         region={session.region}
                         credentialProvider={credentialProvider}
                         onAnalysisComplete={onComplete}
+                        /* The camera has gone but AWS has not answered — the
+                           five-to-ten-second window the bench used to spend
+                           showing the SDK's black verifying screen. */
+                        onStreamEnded={(capture) => {
+                            // The still first, then the phase — same batching
+                            // reason as FaceLivenessScreen: a `waiting` frame
+                            // with no snapshot is glass over black.
+                            if (capture) {
+                                setShot(capture.display ?? capture.stored);
+                                setShotPlain(capture.stored);
+                            }
+                            setPhase('waiting');
+                        }}
                         onError={(err) => {
                             // `state` alone is a category, not a cause:
                             // RUNTIME_ERROR covers everything the detector did
@@ -229,8 +320,42 @@ export function LivenessLab() {
                     </div>
                 )}
 
-                {/* Nothing captured yet — the phase is the only news there is. */}
-                {phase !== 'streaming' && !shot && (
+                {/* ── The real checking state, on the bench ───────────────────
+                    The exact component the sign-in shows while the servers
+                    decide: the still under glass with the AI mark over it.
+                    Reviewing it used to mean walking a whole sign-in, which is
+                    the one thing this page exists to avoid.
+
+                    `waiting` and `fetching` — the whole gap from the camera
+                    stopping to the result landing. Once the result is in the
+                    bench goes back to the sharp still below, because the
+                    numbers are the point here.
+
+                    `holdChecking` keeps it up indefinitely for review; see the
+                    state declaration for why that is worth a control.
+
+                    `onRetry` is a no-op: this only ever renders as `checking`,
+                    which has no retry. The bench's Start button is the way
+                    round again. */}
+                {(phase === 'waiting' ||
+                    phase === 'fetching' ||
+                    (holdChecking && phase !== 'streaming')) && (
+                    <LivenessVerdict
+                        phase="checking"
+                        snapshot={shot}
+                        plainSnapshot={shotPlain}
+                        onRetry={() => {}}
+                    />
+                )}
+
+                {/* Nothing captured yet — the phase is the only news there is.
+                    Not once the verdict is up: it owns those moments, and it
+                    handles a missing still itself. */}
+                {phase !== 'streaming' &&
+                    phase !== 'waiting' &&
+                    phase !== 'fetching' &&
+                    !holdChecking &&
+                    !shot && (
                     <div className="absolute inset-0 flex items-center justify-center px-20 text-center">
                         <span className="fz-13 text-white/70">
                             {phase === 'error' ? (error ?? 'error') : `${phase}…`}
@@ -283,13 +408,37 @@ export function LivenessLab() {
                 </div>
             )}
 
-            <button
-                type="button"
-                onClick={() => void start()}
-                className="fz-14 mt-16 h-48 w-350 shrink-0 self-center rad-12 bg-primary font-semibold text-white"
-            >
-                Run again
-            </button>
+            <div className="mt-16 flex w-350 shrink-0 gap-8 self-center">
+                <button
+                    type="button"
+                    onClick={() => void start()}
+                    className="fz-14 h-48 flex-1 rad-12 bg-primary font-semibold text-white"
+                >
+                    Run again
+                </button>
+
+                {/* Costs nothing and needs no AWS session — the whole reason it
+                    is here. The checking state is two seconds long in the real
+                    thing and a real check every time you want another look at
+                    it.
+
+                    Disabled while the camera is live. The render above refuses
+                    to draw over a stream anyway; this is so the control says
+                    so rather than looking broken when pressing it does
+                    nothing. */}
+                <button
+                    type="button"
+                    disabled={phase === 'streaming'}
+                    onClick={() => setHoldChecking((h) => !h)}
+                    className={`fz-13 h-48 flex-1 rad-12 border font-semibold disabled:opacity-40 ${
+                        holdChecking
+                            ? 'border-primary text-primary'
+                            : 'border-[#d5d5d5] text-[#1D1D1D]'
+                    }`}
+                >
+                    {holdChecking ? 'Release checking' : 'Hold checking'}
+                </button>
+            </div>
 
             {/* ── The verdict, outside the frame ───────────────────────────────
                 It used to be printed inside the camera box, which meant the

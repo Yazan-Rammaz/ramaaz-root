@@ -11,7 +11,11 @@ import {
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/ui/Icon';
 import { CustomQRCode } from '@/components/ui/CustomQR';
-import { useCameraHandoff, type HandoffFacing } from './useCameraHandoff';
+import {
+    useCameraHandoff,
+    type HandoffFacing,
+    type HandoffPhase,
+} from './useCameraHandoff';
 import { detectCameraTrouble, isHandheldDevice, type CameraTrouble } from './cameraShim';
 
 // XD px -> scaling rem.
@@ -59,10 +63,19 @@ function collapseRepeat(text: string): string {
 export function CameraHandoffPanel({
     facing,
     onLive,
+    onPhaseChange,
     frameRef,
     style,
     cameraLive = true,
 }: {
+    /**
+     * The hand-off's own phase, reported upward.
+     *
+     * The frame behind this panel draws its standby mark, and that mark must
+     * not sit on top of a QR code somebody is trying to point a camera at. The
+     * caller cannot know when that is without being told.
+     */
+    onPhaseChange?: (phase: HandoffPhase) => void;
     /** 'user' for the face step, 'environment' for a document. */
     facing: HandoffFacing;
     /**
@@ -220,6 +233,12 @@ export function CameraHandoffPanel({
         }
         if (phase === 'idle') announced.current = false;
     }, [phase, onLive]);
+
+    // Report upward. Its own effect, so a caller re-rendering cannot resend a
+    // phase that did not change.
+    useEffect(() => {
+        onPhaseChange?.(phase);
+    }, [phase, onPhaseChange]);
 
     // ── Not offered on a phone or tablet ────────────────────────────────────
     //

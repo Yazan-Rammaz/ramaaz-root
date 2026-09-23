@@ -7,19 +7,43 @@ import { Icon } from '@/components/ui/Icon';
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
+import { VerdictMark } from '@/features/kyc/components/VerdictMark';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
+import type { HandoffPhase } from '@/features/kyc/handoff/useCameraHandoff';
 import { isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
-import {
-    isChallengeExpired,
-    KycHttpError,
-} from '@/features/kyc/services/httpKycService';
+import { isChallengeExpired, KycHttpError } from '@/features/kyc/services/httpKycService';
 import { restartSignInAction } from '@/features/auth/actions';
+import { waitForSplash } from '@/features/splash/timing';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
+
+/**
+ * How long the green verdict holds before the flow moves on.
+ *
+ * Its counterpart is `FAIL_HOLD_MS` in LivenessVerdict, and the two are
+ * deliberately different: a refusal is held just long enough to be understood
+ * (2s) because the person still has work to do, while a pass is the one moment
+ * in this flow that is purely good news and is worth a beat.
+ */
+const PASS_HOLD_MS = 3000;
+
+/**
+ * The floor on how long the checking state is shown.
+ *
+ * ⚠️ A FLOOR, not a delay. The analysis usually takes five to ten seconds and
+ * this costs nothing; it exists for the run that comes back fast, where the
+ * glass and the AI mark would otherwise flash past and the screen would appear
+ * to jump from the camera straight to a verdict.
+ *
+ * That flash is worse than a wait. The mark is the only thing on screen saying
+ * the photograph is being worked on, and a result that arrives before anybody
+ * saw the work reads as a result that was not computed.
+ */
+const MIN_CHECKING_MS = 5000;
 
 /**
  * The face check, done by Amazon Rekognition Face Liveness.
@@ -174,12 +198,12 @@ async function lockPortrait(): Promise<boolean> {
         const orientation = window.screen?.orientation as
             | (ScreenOrientation & { lock?: (o: string) => Promise<void> })
             | undefined;
-        if (typeof orientation?.lock !== "function") return false;
+        if (typeof orientation?.lock !== 'function') return false;
 
         if (!document.fullscreenElement) {
             await document.documentElement.requestFullscreen?.();
         }
-        await orientation.lock("portrait");
+        await orientation.lock('portrait');
         return true;
     } catch {
         // Denied, unsupported, or the gesture was not trusted. The written
@@ -189,9 +213,8 @@ async function lockPortrait(): Promise<boolean> {
 }
 
 function isMobileDevice(): boolean {
-    if (typeof navigator === "undefined") return false;
-    const newerIpad =
-        /Macintosh/i.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) > 1;
+    if (typeof navigator === 'undefined') return false;
+    const newerIpad = /Macintosh/i.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) > 1;
     return /Android|iPhone|iPad/i.test(navigator.userAgent) || newerIpad;
 }
 
@@ -260,6 +283,42 @@ export function FaceLivenessScreen({
     /** The last camera frame, shown while the servers decide. Never judged. */
     const [snapshot, setSnapshot] = useState<string | null>(() => PASSED.get(challengeId) ?? null);
     /**
+     * The same frame without the portrait blur — what the checking glass is
+     * laid over. See `plainSnapshot` on LivenessVerdict for why the display
+     * frame is the wrong one there.
+     *
+     * Not restored from `PASSED`: that cache exists so a remount after a passed
+     * check still has a face to show, and by then the state is `passed`, which
+     * uses the display frame anyway.
+     */
+    const [plainSnapshot, setPlainSnapshot] = useState<string | null>(null);
+    /**
+     * Has the camera produced a picture yet?
+     *
+     * Drives nothing but the standby mark, and exists because AWS's own
+     * "getting the camera ready" screen is hidden (liveness.css) — so the frame
+     * would otherwise be blank from the moment the detector mounts until the
+     * first video frame arrives, which on a cold permission prompt is several
+     * seconds of nothing.
+     *
+     * Reset per attempt: a retry re-opens the camera, and a stale `true` would
+     * skip the standby mark on every run after the first.
+     */
+    const [streamLive, setStreamLive] = useState(false);
+    /**
+     * Where the phone hand-off has got to.
+     *
+     * Tracked for one reason: while the QR is on screen and unscanned, the
+     * standby mark must come off. It is drawn in the middle of the same frame,
+     * and a glowing glyph sitting on top of a code somebody is trying to point a
+     * camera at is the one place this animation actively gets in the way.
+     *
+     * It comes back for `connecting` and `live` — by then the code has been read
+     * and the frame is waiting on something again, which is exactly what the mark
+     * is for.
+     */
+    const [handoffPhase, setHandoffPhase] = useState<HandoffPhase>('idle');
+    /**
      * Bumped to run the whole check again on the SAME challenge.
      *
      * A failed face check does not burn the challenge — the backend allows
@@ -297,13 +356,13 @@ export function FaceLivenessScreen({
 
     useEffect(() => {
         if (!isMobileDevice()) return;
-        const query = window.matchMedia("(orientation: landscape)");
+        const query = window.matchMedia('(orientation: landscape)');
         const apply = () => setMustRotate(query.matches);
         apply();
         // Turning the device is the fix, so the prompt has to clear itself the
         // moment they do — and then the start effect below runs on its own.
-        query.addEventListener("change", apply);
-        return () => query.removeEventListener("change", apply);
+        query.addEventListener('change', apply);
+        return () => query.removeEventListener('change', apply);
     }, []);
 
     /**
@@ -328,6 +387,35 @@ export function FaceLivenessScreen({
         let cancelled = false;
 
         void (async () => {
+            /*
+             * ── Nothing starts while the splash is up ───────────────────────
+             *
+             * The splash is a `fixed` overlay, so this screen mounts and runs
+             * underneath it. Without this line, landing here on a full document
+             * load put the browser's CAMERA PERMISSION PROMPT on screen over the
+             * splash — asked by a page the person had not seen yet — and opened
+             * a billed AWS Face Liveness session behind a cover they were still
+             * watching.
+             *
+             * Both halves matter. A permission request with no visible context
+             * is one people refuse, and a refusal here is not recoverable in
+             * place: the browser remembers it for the origin. And an AWS session
+             * has a fifteen-minute expiry that would start ticking during a
+             * five-second animation nobody can skip.
+             *
+             * Placed before the `try` deliberately — a wait is not a failure
+             * mode, and catching it would turn one into `faceSetupFailed`.
+             *
+             * Resolves immediately when no splash is playing, which is every
+             * client-side navigation into this screen — i.e. the normal path
+             * through the sign-in. This costs that path nothing.
+             */
+            await waitForSplash();
+            // The screen can have been left during those seconds; `cancelled`
+            // is checked here for the same reason it is checked after the
+            // request below.
+            if (cancelled) return;
+
             try {
                 const started = await createKycService().startReverify(challengeId);
                 if (cancelled) return;
@@ -421,16 +509,34 @@ export function FaceLivenessScreen({
             const shot = capture?.stored ?? null;
             const shown = capture?.display ?? shot;
 
-            // The still goes up first so the checking state has a face to scan
-            // rather than a black box for the second or two this takes.
+            // The still goes up first so the checking state has a face to show
+            // rather than a black box for the seconds this takes.
             setSnapshot(shown);
+            // And the unretouched one beside it, which is what the glass is
+            // laid over — see `plainSnapshot` on LivenessVerdict. `stored`
+            // carries no portrait blur (CAPTURE_OUTPUT.bakePortrait is false),
+            // so the glass is the only softening in that state.
+            setPlainSnapshot(shot);
             onFaceCaptured?.(capture);
             setPhase('checking');
+
+            /*
+             * When the mark went up. Read again at every exit below, so the
+             * floor is measured from the moment the USER saw it rather than
+             * from the start of the request — the two differ by however long
+             * the capture took to process.
+             */
+            const checkingAt = Date.now();
+            const holdChecking = async () => {
+                const left = MIN_CHECKING_MS - (Date.now() - checkingAt);
+                if (left > 0) await new Promise((r) => setTimeout(r, left));
+            };
 
             try {
                 const result = await onSession(sessionId);
                 if (result?.error) {
                     console.error('[liveness] refused:', result.error);
+                    await holdChecking();
                     setPhase('failed');
                     return;
                 }
@@ -442,6 +548,13 @@ export function FaceLivenessScreen({
                     void restartSignInAction();
                     return;
                 }
+                /*
+                 * NOT held. `unavailable` means the check could not RUN — a
+                 * blocked camera, a session that would not open — and nothing
+                 * was being worked on, so there is no work to finish showing.
+                 * Holding here would make a broken camera look like a slow
+                 * verdict.
+                 */
                 setNotice(noticeFor(err, t('faceSetupFailed')));
                 setPhase('unavailable');
                 return;
@@ -454,13 +567,25 @@ export function FaceLivenessScreen({
             // repaint this frame after a remount — see the note at PASSED.
             // Seeding it with `stored` would make the picture change the moment
             // the screen re-mounted, which reads as a second, different capture.
+            await holdChecking();
+
             PASSED.set(challengeId, shown);
             setPhase('passed');
 
-            // Let the success pulse play before committing, because committing
-            // navigates and a redirect never comes back. Matched to
-            // `verdict-burst` in globals.css — change one, change both.
-            await new Promise((resolve) => setTimeout(resolve, 1100));
+            /*
+             * Hold the green verdict before committing.
+             *
+             * ⚠️ Committing NAVIGATES, and a redirect never comes back — so
+             * anything the screen wants to show has to happen here, in front of
+             * it. This is not padding: it was 1100ms, matched to a pulse that no
+             * longer exists, and the result was a green flash most people never
+             * resolved into "it worked".
+             *
+             * Three seconds covers the whole arrival — the glyph lands, catches
+             * its shine, and the green sheen reaches the corners — and then
+             * leaves a beat of stillness to read it. See VerdictMark.
+             */
+            await new Promise((resolve) => setTimeout(resolve, PASS_HOLD_MS));
 
             try {
                 // The frame goes WITH the commit. It is the same still the
@@ -502,7 +627,7 @@ export function FaceLivenessScreen({
         <main className="flex h-full flex-col items-center justify-center">
             {/* Ours, and identical to FaceScanScreen's. */}
             <div className="flex flex-col items-center">
-                <h1 className="fz-24 h-38 leading-none font-bold text-[#1D1D1D]">
+                <h1 className="h-38 fz-24 leading-none font-bold text-[#1D1D1D]">
                     {t('identityTitle')}
                 </h1>
                 <div className="flex items-center gap-6" style={{ marginTop: rem(12) }}>
@@ -514,12 +639,12 @@ export function FaceLivenessScreen({
                 {/* The check flashes coloured light at you. AWS puts this on the
                     start screen we skip, so it belongs here — before it starts,
                     and where it can still be read. */}
-                <p
-                    className="fz-11 text-center leading-none font-medium text-[#707070]"
-                    style={{ marginTop: rem(8) }}
-                >
-                    {t('livenessPhotosensitivity')}
-                </p>
+                {/* <p
+          className="text-center fz-11 leading-none font-medium text-[#707070]"
+          style={{ marginTop: rem(8) }}
+        >
+          {t("livenessPhotosensitivity")}
+        </p> */}
             </div>
 
             {/* Same 350 x 400 footprint as the frame it replaces, so the page
@@ -547,7 +672,7 @@ export function FaceLivenessScreen({
                   this box and still mirrors.
                 */
                 dir="ltr"
-                className="relative h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
+                className="relative isolate h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
                 style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
             >
                 {/*
@@ -579,13 +704,13 @@ export function FaceLivenessScreen({
                             <Icon name="kyc/retry" size={26} mask />
                         </button>
                         <p
-                            className="fz-16 text-center leading-none font-semibold text-white"
+                            className="text-center fz-16 leading-none font-semibold text-white"
                             style={{ marginTop: rem(16) }}
                         >
                             {t('faceRotateTitle')}
                         </p>
                         <p
-                            className="fz-13 max-w-300 text-center leading-normal font-medium text-white/80"
+                            className="max-w-300 text-center fz-13 leading-normal font-medium text-white/80"
                             style={{ marginTop: rem(8) }}
                         >
                             {rotateManually ? t('faceRotateManual') : t('faceRotateBody')}
@@ -593,20 +718,55 @@ export function FaceLivenessScreen({
                     </div>
                 )}
 
-                {phase === 'preparing' && !mustRotate && (
-                    <span
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0 flex items-center justify-center gap-8"
-                    >
-                        {[0, 1, 2].map((i) => (
-                            <span
-                                key={i}
-                                className="face-prep-dot h-8 w-8 rounded-full bg-white/70 motion-reduce:animate-none"
-                                style={{ animationDelay: `${i * 160}ms` }}
-                            />
-                        ))}
-                    </span>
-                )}
+                {/* Standby — the same mark the verdicts use, in white.
+                    It was three bouncing dots, which say "loading" and nothing
+                    about what; the glyph says the camera is coming, which is
+                    what somebody staring at a permission prompt wants to know.
+                    See VerdictMark. */}
+                {/* ⚠️ Stays up over the LIVE camera, not just before it.
+            It was hidden the moment the stream arrived, which threw away the
+            ⚠️ OFF the moment the camera is live, and that is a correctness rule
+            rather than a preference.
+
+            It was left up over the stream as a distance guide. AWS then timed
+            out — "client timed out waiting for face to match oval" — because
+            the oval it measures against is hidden in this design, so a bright
+            glyph in the middle of the frame became the most prominent thing in
+            the exact place the face has to go. Nothing accurate to aim at, and
+            something misleading to aim at instead.
+
+            It belongs to the WAIT for a camera, and ends when the camera
+            arrives. */}
+                {(phase === 'preparing' || (phase === 'ready' && !streamLive)) &&
+                    !mustRotate &&
+                    // ⚠️ Hidden for BOTH of the hand-off's own early phases, and they are
+                    // not the same thing as this screen's `preparing`.
+                    //
+                    //   preparing  the panel is building the offer and gathering ICE,
+                    //              and says so in the middle of the frame
+                    //   waiting    the QR is up and nobody has scanned it yet
+                    //
+                    // In both, the frame belongs to the hand-off: something is being read
+                    // or pointed at, and a glowing glyph over it is the one place this
+                    // animation actively gets in the way.
+                    //
+                    // It comes back for `connecting` and `live` — by then the code has
+                    // been read and the frame is waiting on a camera again, which is
+                    // exactly what the mark is for.
+                    handoffPhase !== 'waiting' &&
+                    handoffPhase !== 'preparing' && (
+                        /*
+                         * ⚠️ `verdict-layer` — the standby mark has to OUTRANK the SDK's
+                         * own chrome, which carries z-indexes inside the widget. Without it
+                         * the mark renders correctly and invisibly underneath AWS's
+                         * connecting screen, which looks exactly like the mark never
+                         * mounting. The verdict learned this the hard way; this is the same
+                         * lesson one state earlier.
+                         */
+                        <span className="verdict-layer pointer-events-none absolute inset-0">
+                            <VerdictMark phase="preparing" />
+                        </span>
+                    )}
 
                 {/* Once the stream ends the camera is gone and the verdict owns
                     the frame — the still, the scan over it, then red or green.
@@ -616,11 +776,13 @@ export function FaceLivenessScreen({
                     <LivenessVerdict
                         phase={phase}
                         snapshot={snapshot}
+                        plainSnapshot={plainSnapshot}
                         onRetry={() => {
                             // Back to the camera on the same challenge. The
                             // still and the reason go first: leaving either up
                             // would show the last failure over the new attempt.
                             setSnapshot(null);
+                            setStreamLive(false);
                             setPhase('preparing');
                             setAttempt((n) => n + 1);
                         }}
@@ -637,7 +799,7 @@ export function FaceLivenessScreen({
                 */}
                 {phase === 'unavailable' && (
                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/85 px-24">
-                        <p className="fz-14 max-w-300 text-center leading-normal font-medium text-white">
+                        <p className="max-w-300 text-center fz-14 leading-normal font-medium text-white">
                             {notice ?? t('faceSetupFailed')}
                         </p>
                         <button
@@ -645,6 +807,7 @@ export function FaceLivenessScreen({
                             onClick={() => {
                                 setNotice(null);
                                 setSnapshot(null);
+                                setStreamLive(false);
                                 setPhase('preparing');
                                 setAttempt((n) => n + 1);
                             }}
@@ -671,12 +834,60 @@ export function FaceLivenessScreen({
                     <CornerBrackets color="#FFEB00" inset={22} className="z-2" />
                 )}
 
-                {phase === 'ready' && session && (
+                {/* ⚠️ STAYS MOUNTED THROUGH `checking`, and that is not tidiness.
+                    `checking` now begins when the CAMERA stops, which is five
+                    to ten seconds before AWS finishes uploading and analysing.
+                    Unmounting the detector at that moment tears down the
+                    upload: `onAnalysisComplete` never fires, and the sign-in
+                    waits on a result that is never coming.
+
+                    The verdict is rendered after this in the tree and covers it
+                    completely, so nothing of the SDK's own verifying screen
+                    shows through. It unmounts at `passed`/`failed`, by which
+                    point the analysis has returned. */}
+                {(phase === 'ready' || phase === 'checking') && session && (
                     <LivenessCamera
                         sessionId={session.sessionId}
                         region={session.region}
                         credentialProvider={credentialProvider}
                         onAnalysisComplete={handleComplete}
+                        onCameraLive={() => setStreamLive(true)}
+                                    /*
+                         * Take the frame the moment the camera goes, not when
+                         * the analysis returns.
+                         *
+                         * Those are five to ten seconds apart — AWS uploads the
+                         * recording and processes it — and the SDK fills that
+                         * gap with its own dark verifying screen. The checking
+                         * state was therefore invisible in practice: black for
+                         * ten seconds, then half a second of glass as the
+                         * result landed.
+                         *
+                         * `handleComplete` still does the real work; this only
+                         * moves the SCREEN forward. `snapshot` may still be
+                         * null for a moment — LivenessVerdict renders the glass
+                         * over black in that case, which is the point.
+                         */
+                        onStreamEnded={(capture) => {
+                            /*
+                             * The still FIRST, then the phase.
+                             *
+                             * Both in one React batch, so there is no frame in
+                             * which `checking` is true and the snapshot is
+                             * null — that gap is precisely how the glass ended
+                             * up rendering over black for the whole five to
+                             * ten seconds of the analysis.
+                             *
+                             * `capture` may still be null if no usable frame
+                             * was ever kept; the verdict handles that, and it
+                             * is the honest picture of a failed grab.
+                             */
+                            if (capture) {
+                                setSnapshot(capture.display ?? capture.stored);
+                                setPlainSnapshot(capture.stored);
+                            }
+                            setPhase('checking');
+                        }}
                         onError={(err) => {
                             // `state` is only a category — RUNTIME_ERROR covers
                             // everything unclassified — so log the whole object
@@ -783,8 +994,10 @@ export function FaceLivenessScreen({
                 // filming somebody waiting for a verdict — and goes live again
                 // if the check re-arms for another attempt.
                 cameraLive={phase === 'preparing' || phase === 'ready'}
+                onPhaseChange={setHandoffPhase}
                 onLive={() => {
                     setSnapshot(null);
+                    setStreamLive(false);
                     setPhase('preparing');
                     setAttempt((n) => n + 1);
                 }}
