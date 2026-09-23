@@ -75,6 +75,27 @@ const BEST_FRAME_WINDOW_MS = 2000;
 const GLASS_PROBE_MS = 900;
 
 /**
+ * How long without a face before the zoom gives up and goes home.
+ *
+ * Measured from the face mesh's last report rather than from AWS's hint,
+ * because the hint is not guaranteed to say anything at all when somebody walks
+ * away — the toast can simply go quiet. A second and a half is longer than any
+ * blink or turn and shorter than anyone would notice.
+ */
+const FACE_LOST_MS = 1500;
+
+/**
+ * How long an `applyConstraints` may be outstanding before it is written off.
+ *
+ * ⚠️ THE GUARD THAT KEEPS THE ZOOM FROM WEDGING. The in-flight flag is what
+ * lets the steps be small, and it is cleared by the promise — so a request that
+ * never settles leaves it raised for ever and the controller stops looking at
+ * anything, including the release. The symptom is a zoom stuck in at capture
+ * with no error anywhere, which is precisely what a hung camera call produces.
+ */
+const ZOOM_STALL_MS = 2500;
+
+/**
  * The amounts both panes are drawn from.
  *
  * One object, shared by the two elements, because they are the same pane drawn
@@ -422,6 +443,18 @@ export function LivenessCamera({
     const glassCopyRef = useRef<HTMLVideoElement>(null);
     const glassModeRef = useRef<'copy' | 'pane' | null>(null);
     const glassProbeAtRef = useRef(0);
+    /** When the face mesh last reported a face — see `FACE_LOST_MS`. */
+    const faceSeenAtRef = useRef(0);
+    /**
+     * AWS's match bar has existed at least once.
+     *
+     * ⚠️ Its DISAPPEARANCE is a signal, not an absence. The SDK unmounts the
+     * instruction overlay when it leaves `ovalMatching` — which is the exact
+     * moment it starts saying "hold still" — so the bar going away means the
+     * match phase is over, and gating the controller on the element being
+     * present skips the one tick the release needed to fire.
+     */
+    const sawBarRef = useRef(false);
     /**
      * Has the face mesh taken over placing the glass oval?
      *
@@ -557,6 +590,7 @@ export function LivenessCamera({
             };
             if (!glass) return;
             meshPlacesGlassRef.current = true;
+            faceSeenAtRef.current = Date.now();
             const pad = CAPTURE_LIVE_GLASS.ovalPad;
             placeGlass(b.cx, b.cy, b.rx * pad, b.ry * pad);
 
@@ -1198,11 +1232,12 @@ export function LivenessCamera({
              * the detector mounts parts of itself outside the subtree it was
              * rendered into.
              */
-            const bar = (frameRef.current ?? document).querySelector(
+            const barEl = (frameRef.current ?? document).querySelector(
                 '.amplify-liveness-match-indicator__bar',
             );
-            if (bar) {
-                const now = Number(bar.getAttribute('aria-valuenow'));
+            if (barEl) {
+                sawBarRef.current = true;
+                const now = Number(barEl.getAttribute('aria-valuenow'));
                 // `aria-valuenow` is 0..100 and absent between states. A bad
                 // read keeps the last value rather than dropping the gauge to
                 // zero, which would flash the mesh back to white.
@@ -1254,7 +1289,18 @@ export function LivenessCamera({
              * distinguishes "no match yet" from "not being measured yet". They
              * are the same number and completely different situations.
              */
-            if (CAPTURE_CAMERA_ZOOM.enabled && video && bar) {
+            /*
+             * ⚠️ `sawBarRef`, NOT `bar`. Before the bar has ever appeared AWS
+             * is not measuring anything and the loop must not run — reading
+             * "bar is 0, zoom in" against a bar that does not exist yet ramps
+             * straight to the camera's maximum the moment the preview opens.
+             *
+             * But once it HAS appeared, its later absence means the opposite:
+             * the match phase is over. Gating on the live element conflated the
+             * two, and the cost was the release never firing at "hold still" —
+             * the bar unmounts at precisely that moment.
+             */
+            if (CAPTURE_CAMERA_ZOOM.enabled && video && sawBarRef.current) {
                 const track =
                     (video.srcObject as MediaStream | null)?.getVideoTracks?.()?.[0] ??
                     null;
@@ -1286,6 +1332,13 @@ export function LivenessCamera({
                     }
 
                     const range = z.range;
+                    /*
+                     * A request that never settles would hold `busy` raised for
+                     * ever and stop the controller dead — including the
+                     * release. See `ZOOM_STALL_MS`.
+                     */
+                    if (z.busy && tick - z.at > ZOOM_STALL_MS) z.busy = false;
+
                     if (range && !z.busy && tick - z.at >= CAPTURE_CAMERA_ZOOM.stepMs) {
                         const bar = matchRef.current;
                         const { closer, away, hold, gone } = hintTextRef.current;
@@ -1312,29 +1365,53 @@ export function LivenessCamera({
                          * from firing on the same string shown much earlier,
                          * when a face is merely detected.
                          */
+                        /*
+                         * Three signals, in descending order of certainty.
+                         *
+                         *   the bar is GONE   the SDK has left `ovalMatching`
+                         *                     entirely. Nothing is being
+                         *                     measured any more, so whatever
+                         *                     happened, the matching is over.
+                         *   the bar is full   the IoU cleared its threshold.
+                         *   "hold still"      `isFaceMatchedClosely` can return
+                         *                     MATCHED without the percentage
+                         *                     ever reaching 100, so the bar
+                         *                     alone misses that route in.
+                         *                     `holdAt` keeps this from firing
+                         *                     on the same string shown much
+                         *                     earlier, when a face is merely
+                         *                     detected.
+                         */
                         const locked =
+                            !barEl ||
                             bar >= CAPTURE_CAMERA_ZOOM.lockAt ||
                             (!!hold &&
                                 hint === hold &&
                                 bar >= CAPTURE_CAMERA_ZOOM.holdAt);
 
-                        if (!!gone && hint === gone) {
-                            /*
-                             * Nobody in front of the camera. Go home.
-                             *
-                             * A zoom left in on an empty frame is worse than
-                             * pointless: whoever arrives next walks into a
-                             * cropped view of wherever the last person's head
-                             * was, and the loop then has to unwind that before
-                             * it can do anything useful. Unwinding it now, while
-                             * there is nothing to look at, costs nothing.
-                             */
-                            z.target = range.min;
-                            z.desired = Math.max(
-                                range.min,
-                                z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep),
-                            );
-                        } else if (locked) {
+                        /*
+                         * ── Is there anybody there? ─────────────────────────
+                         *
+                         * Two signals again, for the same reason as the lock.
+                         * AWS's "no face" hint is the explicit one, but the
+                         * toast can simply go quiet when somebody walks off —
+                         * so the mesh's own silence is the backstop, and it is
+                         * the more reliable of the two.
+                         */
+                        const faceGone =
+                            (!!gone && hint === gone) ||
+                            (faceSeenAtRef.current > 0 &&
+                                tick - faceSeenAtRef.current > FACE_LOST_MS);
+
+                        /*
+                         * ⚠️ LOCKED IS TESTED FIRST. The freshness sequence
+                         * flashes full-screen colour over the face, and the
+                         * mesh loses it while that happens — so a face-lost
+                         * check ahead of this one would fire mid-release and
+                         * drag the zoom to 1x at the exact moment the framing
+                         * was being settled for the capture.
+                         */
+                        if (locked) {
                             /*
                              * Ease back toward `releaseTo` — see `lockAt` for
                              * why this window is safe, and `releaseTo` for why
@@ -1346,13 +1423,51 @@ export function LivenessCamera({
                              * pull-back would converge short of where it aimed.
                              */
                             if (z.target === null) {
-                                z.target =
-                                    range.min +
-                                    (z.desired - range.min) *
-                                        CAPTURE_CAMERA_ZOOM.releaseTo;
+                                /*
+                                 * Half the ZOOM, not half the distance above
+                                 * the minimum: 6x goes to 3x. Fixed at the
+                                 * moment of lock, because taken from a value
+                                 * that is already falling it would chase itself
+                                 * and stop short.
+                                 */
+                                z.target = Math.max(
+                                    range.min,
+                                    z.desired * CAPTURE_CAMERA_ZOOM.releaseTo,
+                                );
+                                console.log(
+                                    `[zoom] match locked at ${(z.desired / range.min).toFixed(2)}x — easing to ${(z.target / range.min).toFixed(2)}x`,
+                                );
                             }
                             z.desired = Math.max(
                                 z.target,
+                                z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep),
+                            );
+                        } else if (faceGone) {
+                            /*
+                             * Nobody in front of the camera. Go home.
+                             *
+                             * A zoom left in on an empty frame is worse than
+                             * pointless: whoever arrives next walks into a
+                             * cropped view of wherever the last person's head
+                             * was, and the loop then has to unwind that before
+                             * it can do anything useful. Unwinding it now, while
+                             * there is nothing to look at, costs nothing.
+                             */
+                            /*
+                             * Back to 1x, and the CONTROLLER goes back to its
+                             * starting state with it. Easing the number home
+                             * while leaving `released` set or a stale `target`
+                             * in place would mean the next person to sit down
+                             * is handled by a loop that still thinks the last
+                             * check was finishing — it would refuse to zoom for
+                             * them at all.
+                             */
+                            z.target = null;
+                            z.released = false;
+                            z.dir = 1;
+                            z.lastBar = -1;
+                            z.desired = Math.max(
+                                range.min,
                                 z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep),
                             );
                         } else {

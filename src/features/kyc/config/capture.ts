@@ -1245,22 +1245,26 @@ export const CAPTURE_CAMERA_ZOOM = {
     stepMs: 200,
 
     /**
-     * How much of the zoom to KEEP once the match locks, 0..1.
+     * What the zoom is MULTIPLIED BY once the match locks, 0..1.
      *
-     * ⚠️ Not zero, and the reason is that the capture has to look like the
-     * person was looking at. Dropping the whole way back to 1x at the moment
-     * AWS says "hold still" pulls the face abruptly small right as it is being
-     * photographed, and the still that gets filed is framed nothing like the
-     * preview they had just settled into.
+     * 0.5 halves it: 6x becomes 3x, 4x becomes 2x.
+     *
+     * ⚠️ A MULTIPLE OF THE ZOOM, not of the distance above the camera's
+     * minimum. The difference is small at 2x and wrong at 6x — interpolating
+     * toward `min` gives `1 + (6 - 1) x 0.5 = 3.5`, which is not half of
+     * anything anybody asked for. The zoom is a ratio, so the thing to halve is
+     * the ratio.
+     *
+     * ── Why it is not 0 ────────────────────────────────────────────────────
+     * The capture has to look like what the person was looking at. Dropping the
+     * whole way back at the moment AWS says "hold still" pulls the face
+     * abruptly small right as it is photographed, and the still that gets filed
+     * is framed nothing like the preview they had just settled into.
      *
      * Half is the compromise: the tightest crop is gone — which is what
      * protected the photograph from the complaint in §2 — while the framing
-     * stays close to what was on screen a second earlier. The pull-back is
-     * eased at `maxStep` like every other move, so it is a glide rather than a
-     * snap.
-     *
-     * 0 restores the old behaviour: all the way back, the widest possible
-     * capture, and a visible lurch.
+     * stays close to what was on screen a second earlier. The pull-back eases
+     * at `maxStep` like every other move, so it glides rather than snapping.
      */
     releaseTo: 0.5,
 } as const;
