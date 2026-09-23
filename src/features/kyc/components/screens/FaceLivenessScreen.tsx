@@ -17,6 +17,8 @@ import { createKycService } from '@/features/kyc/services';
 import { isChallengeExpired, KycHttpError } from '@/features/kyc/services/httpKycService';
 import { restartSignInAction } from '@/features/auth/actions';
 import { waitForSplash } from '@/features/splash/timing';
+import { ensureLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { CAPTURE_LIVE_MESH } from '@/features/kyc/config/capture';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -226,6 +228,17 @@ type Credentials = {
     expiration?: string;
 };
 
+/**
+ * How long the mesh's model may hold up the start of the check, in ms.
+ *
+ * Generous, because on a slow connection this is a real download and abandoning
+ * it means it is never cached — which is the loop that made it fail every time.
+ * Bounded, because a session that never begins is worse than a missing
+ * decoration: past this the check starts without the mesh and the download
+ * carries on in the background, so the NEXT attempt is likely to have it.
+ */
+const MESH_MODEL_TIMEOUT_MS = 120_000;
+
 export function FaceLivenessScreen({
     challengeId,
     onSession,
@@ -415,6 +428,37 @@ export function FaceLivenessScreen({
             // is checked here for the same reason it is checked after the
             // request below.
             if (cancelled) return;
+
+            /*
+             * ── The mesh's model FIRST, alone on the connection ─────────────
+             *
+             * ⚠️ SEQUENCED, NOT WARMED, and the order is the whole fix.
+             *
+             * The face landmarker is ~11.8MB of WebAssembly plus ~3.8MB of
+             * weights. Downloaded ALONGSIDE AWS's own model it saturated the
+             * link and starved it: the detector failed with `RUNTIME_ERROR:
+             * Face detection model loading timed out` while its own model sat
+             * in disk cache two milliseconds away. Deferring it until the check
+             * was under way was worse still — the download then landed in the
+             * middle of a liveness stream AWS fails below 15fps.
+             *
+             * It also never finished. Every failure tore this screen down
+             * mid-download, so nothing was cached and the next attempt started
+             * from zero. Letting it COMPLETE once is what breaks that loop: the
+             * browser caches it and every later check finds it in milliseconds.
+             *
+             * This is the right place to spend the time. The standby mark is
+             * already on screen, the camera has not been asked for, and no AWS
+             * session is open — so nothing is expiring while it downloads.
+             *
+             * Never throws, and gives up rather than hanging: a missing model
+             * is a mesh that does not draw, which is invisible. See
+             * `ensureLandmarker`.
+             */
+            if (CAPTURE_LIVE_MESH.enabled) {
+                await ensureLandmarker(MESH_MODEL_TIMEOUT_MS);
+                if (cancelled) return;
+            }
 
             try {
                 const started = await createKycService().startReverify(challengeId);

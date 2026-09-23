@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
@@ -465,15 +465,21 @@ export function LivenessCamera({
      * present skips the one tick the release needed to fire.
      */
     const sawBarRef = useRef(false);
-    /**
-     * Our own models may start loading.
+    /*
+     * ⚠️ THE MESH'S MODEL IS ALREADY LOADED BY THE TIME THIS MOUNTS.
      *
-     * Raised when AWS's match bar first appears, which proves its detector
-     * loaded and is running. STATE rather than a ref because `FaceMesh` is
-     * mounted from it — mounting is what starts its model downloading, so
-     * gating the render is the only thing that actually delays the fetch.
+     * `FaceLivenessScreen` awaits `ensureLandmarker()` before it opens an AWS
+     * session, so the ~15.5MB download happens ALONE on the connection, during
+     * the standby screen, and is in the browser cache before the detector
+     * exists. Mounting the mesh here therefore costs nothing.
+     *
+     * An earlier version deferred the mesh until AWS's match bar appeared,
+     * which was worse in a way that is not obvious: it moved the download into
+     * the middle of the check, where it competed with the video being streamed
+     * to Rekognition on a screen AWS fails below 15fps. Sequencing beats
+     * deferring — the problem was never WHEN it started but that it ran at the
+     * same time as something that could not afford it.
      */
-    const [assistOn, setAssistOn] = useState(false);
     /**
      * Has the face mesh taken over placing the glass oval?
      *
@@ -1262,7 +1268,6 @@ export function LivenessCamera({
                 if (!sawBarRef.current) {
                     sawBarRef.current = true;
                     // AWS has its model and is measuring. Ours may load now.
-                    if (CAPTURE_LIVE_MESH.enabled) setAssistOn(true);
                     if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
                 }
                 const now = Number(barEl.getAttribute('aria-valuenow'));
@@ -1891,7 +1896,7 @@ export function LivenessCamera({
                 on the FACE, which is the one part the glass deliberately leaves
                 clear, so putting it under the pane would hide it exactly where
                 it is meant to be. */}
-            {assistOn && (
+            {CAPTURE_LIVE_MESH.enabled && (
                 <FaceMesh
                     videoRef={videoElRef}
                     canvasRef={meshCanvasRef}

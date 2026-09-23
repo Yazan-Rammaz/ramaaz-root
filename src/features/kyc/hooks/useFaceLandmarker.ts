@@ -50,6 +50,40 @@ export function kickstartLandmarker(): void {
     if (!loadPromise) loadPromise = loadLandmarker();
 }
 
+/**
+ * Load the model and WAIT for it. Resolves true if it is ready to use.
+ *
+ * ── Why a screen would wait rather than warm ────────────────────────────────
+ * The runtime is ~11.8MB of WebAssembly and the weights ~3.8MB, and on a real
+ * administrator's connection that took over a minute. Started ALONGSIDE AWS's
+ * own model it did not merely arrive late — it saturated the link and starved
+ * the liveness detector, which failed with `RUNTIME_ERROR: Face detection model
+ * loading timed out` while its own model sat in disk cache two milliseconds
+ * away. A decoration took down the sign-in.
+ *
+ * Worse, it never finished: each failure tore the screen down mid-download, so
+ * nothing was ever written to the cache and the next attempt began again from
+ * zero. It could not converge.
+ *
+ * Awaiting it once, BEFORE anything else starts, fixes both. The download has
+ * the connection to itself, it completes, and the browser caches it — every
+ * later check finds it in milliseconds. The cost is paid once, in a place where
+ * waiting is expected.
+ *
+ * ⚠️ NEVER REJECTS, and the timeout is the point. A missing model is a mesh
+ * that does not draw; a promise that hangs is a sign-in that never starts. On
+ * timeout the load carries on in the background — it may well finish and be
+ * cached for next time — and the caller proceeds without it.
+ */
+export function ensureLandmarker(timeoutMs: number): Promise<boolean> {
+    if (cachedLandmarker) return Promise.resolve(true);
+    if (!loadPromise) loadPromise = loadLandmarker();
+    return Promise.race([
+        loadPromise.then((lm) => !!lm).catch(() => false),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+    ]);
+}
+
 async function loadLandmarker(): Promise<import('@mediapipe/tasks-vision').FaceLandmarker> {
     if (cachedLandmarker) return cachedLandmarker;
 
