@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
@@ -17,7 +17,6 @@ import {
     CAPTURE_PORTRAIT,
     CAPTURE_RESOLUTION,
 } from '@/features/kyc/config/capture';
-import { kickstartLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { FaceMesh } from '@/features/kyc/components/FaceMesh';
 import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
 import { scoreFrameQuality } from '@/features/kyc/services/imageQuality';
@@ -203,6 +202,17 @@ interface ZoomState {
      * slow camera simply takes larger intervals; a fast one glides.
      */
     busy: boolean;
+    /**
+     * The last phase written to the console.
+     *
+     * ⚠️ The zoom adjusts up to five times a second, and this code SHIPS. A
+     * line per adjustment is a hundred lines per check in a production console
+     * — not diagnostics, but noise that buries the `[liveness]` lines that are
+     * genuinely once-per-check. Only transitions are worth saying: the moment
+     * it starts pulling in, turns around, releases, or resets.
+     */
+    said: string;
+
     /**
      * Where the release is heading, set once when the match locks.
      *
@@ -456,6 +466,15 @@ export function LivenessCamera({
      */
     const sawBarRef = useRef(false);
     /**
+     * Our own models may start loading.
+     *
+     * Raised when AWS's match bar first appears, which proves its detector
+     * loaded and is running. STATE rather than a ref because `FaceMesh` is
+     * mounted from it — mounting is what starts its model downloading, so
+     * gating the render is the only thing that actually delays the fetch.
+     */
+    const [assistOn, setAssistOn] = useState(false);
+    /**
      * Has the face mesh taken over placing the glass oval?
      *
      * Two things can size that pane — the mesh's own bounding box and
@@ -530,6 +549,7 @@ export function LivenessCamera({
         dir: 1,
         busy: false,
         target: null,
+        said: '',
     });
 
     /**
@@ -837,22 +857,25 @@ export function LivenessCamera({
      * Fails soft: `applyPortrait` returns the original photograph when the
      * model never arrives.
      */
-    useEffect(() => {
-        // Two consumers now, and the live one needs it SOONER: the capture can
-        // afford to wait for a download. The live glass no longer segments —
-        // see the note by the mask refs — so this is the capture's model alone.
-        if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
-        /*
-         * The mesh model, started here rather than left to its own hook.
-         *
-         * `useFaceLandmarker` loads it on mount, which is the same moment — but
-         * this runs whether or not the mesh is enabled to render, and more to
-         * the point it states the cost in one place: TWO models are downloaded
-         * and warmed for this screen, on top of AWS's own BlazeFace. If this
-         * screen is ever slow to become usable, that is where to look.
-         */
-        if (CAPTURE_LIVE_MESH.enabled) kickstartLandmarker();
-    }, []);
+    /*
+     * ⚠️ NOTHING OF OURS IS WARMED AT MOUNT, and that is a fix for a hard
+     * failure rather than a nicety.
+     *
+     * Three models want this screen: AWS's own BlazeFace, MediaPipe's
+     * FaceLandmarker for the mesh, and the Selfie Segmenter for the capture's
+     * portrait blur. Started together they compete for one connection, and on a
+     * slower link AWS's download loses — its detector then fails with
+     * `RUNTIME_ERROR: Face detection model loading timed out`, which is not a
+     * degraded look but a sign-in that cannot proceed. Observed on Windows
+     * Chrome, where the mesh was missing in the same run because its model had
+     * not arrived either.
+     *
+     * So ours wait until AWS's match bar appears, which is proof its model
+     * loaded and it is measuring — see `assistOn` in the sampling loop. The
+     * mesh then joins a second or two late, on a screen that stays interactive
+     * for far longer than that. The capture's segmenter has even less to lose:
+     * it is not needed until the stream ends.
+     */
 
     /**
      * Has the camera ever produced a frame, and have we already said it
@@ -1236,7 +1259,12 @@ export function LivenessCamera({
                 '.amplify-liveness-match-indicator__bar',
             );
             if (barEl) {
-                sawBarRef.current = true;
+                if (!sawBarRef.current) {
+                    sawBarRef.current = true;
+                    // AWS has its model and is measuring. Ours may load now.
+                    if (CAPTURE_LIVE_MESH.enabled) setAssistOn(true);
+                    if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
+                }
                 const now = Number(barEl.getAttribute('aria-valuenow'));
                 // `aria-valuenow` is 0..100 and absent between states. A bad
                 // read keeps the last value rather than dropping the gauge to
@@ -1550,9 +1578,20 @@ export function LivenessCamera({
                                     // without the person doing anything, so
                                     // when it misbehaves this is the only way
                                     // to see what it thought it was doing.
-                                    console.log(
-                                        `[zoom] ${(applied / range.min).toFixed(2)}x  bar ${(bar * 100) | 0}%  ${locked ? 'release' : z.dir > 0 ? 'in' : 'out'}`,
-                                    );
+                                    // Only when the phase CHANGES — see `said`.
+                                    const phase = locked
+                                        ? 'release'
+                                        : faceGone
+                                          ? 'reset'
+                                          : z.dir > 0
+                                            ? 'in'
+                                            : 'out';
+                                    if (phase !== z.said) {
+                                        z.said = phase;
+                                        console.log(
+                                            `[zoom] ${phase} — ${(applied / range.min).toFixed(2)}x, bar ${(bar * 100) | 0}%`,
+                                        );
+                                    }
                                 })
                                 .catch(() => {
                                     z.busy = false;
@@ -1852,12 +1891,14 @@ export function LivenessCamera({
                 on the FACE, which is the one part the glass deliberately leaves
                 clear, so putting it under the pane would hide it exactly where
                 it is meant to be. */}
-            <FaceMesh
-                videoRef={videoElRef}
-                canvasRef={meshCanvasRef}
-                matchRef={matchRef}
-                onBounds={handleMeshBounds}
-            />
+            {assistOn && (
+                <FaceMesh
+                    videoRef={videoElRef}
+                    canvasRef={meshCanvasRef}
+                    matchRef={matchRef}
+                    onBounds={handleMeshBounds}
+                />
+            )}
 
             <ThemeProvider theme={livenessTheme}>
                 <FaceLivenessDetectorCore
