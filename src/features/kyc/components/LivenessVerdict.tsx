@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import { VerdictMark } from '@/features/kyc/components/VerdictMark';
 import { CAPTURE_CHECKING_GLASS } from '@/features/kyc/config/capture';
-import { GlassFilter } from '@/features/kyc/components/GlassFilter';
+import { PhotoGlass } from '@/features/kyc/components/PhotoGlass';
 import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 
 /**
@@ -57,17 +57,6 @@ import { MIRROR_CLASS } from '@/features/kyc/config/capture';
  * button.
  */
 const FAIL_HOLD_MS = 2000;
-
-/**
- * The refraction filter's id, referenced from a CSS custom property.
- *
- * A module constant rather than a literal in two places: `filter: url(#x)`
- * resolves against the document, so the id here and the id in the style must
- * agree or the pane silently loses its bend and looks like a plain blur — a
- * failure with no error attached to it. Only one verdict renders at a time, so
- * a fixed id cannot collide.
- */
-const GLASS_FILTER_ID = 'verdict-glass-warp';
 
 export type VerdictPhase = 'checking' | 'passed' | 'failed';
 
@@ -228,51 +217,66 @@ export function LivenessVerdict({
                 either way the screen is doing something. */}
             {!showRetry && (
                 <>
-                    {/* The refraction. See GlassFilter — a baked lens map and
-                        three colour channels, not turbulence. */}
-                    <GlassFilter
-                        id={GLASS_FILTER_ID}
-                        scale={CAPTURE_CHECKING_GLASS.scale}
-                        blur={CAPTURE_CHECKING_GLASS.blur}
-                    />
+                    {/* The pane. See PhotoGlass — the layers, the copy and the
+                        refraction are shared with every other still in this
+                        flow; what is local to the verdict is the TABLE it is
+                        drawn from and the fact that it is at full strength.
+                        The intro and the comparison stage pass a percentage.
 
-                    {/* `rad-30` matches the frame both callers draw. Without it
+                        `rad-30` matches the frame both callers draw. Without it
                         the pane's rim is a rectangle clipped square by the
                         parent's rounded corners, and the bevel — the one thing
                         carrying the material — dies exactly at the corners
-                        where glass is most obviously glass. */}
-                    <span
-                        aria-hidden
-                        className="verdict-glass rad-30 pointer-events-none absolute inset-0"
-                        style={
-                            {
-                                '--glass-frost': CAPTURE_CHECKING_GLASS.frost,
-                                '--glass-blur': `${CAPTURE_CHECKING_GLASS.frostBlur * 0.0625}rem`,
-                                '--glass-saturation': CAPTURE_CHECKING_GLASS.saturation,
-                                '--glass-warp': CAPTURE_CHECKING_GLASS.scale
-                                    ? `url(#${GLASS_FILTER_ID})`
-                                    : 'none',
-                            } as React.CSSProperties
-                        }
-                    >
-                        {/* No picture, no lens. A refraction layer over
-                            nothing is an empty element carrying an expensive
-                            filter, and the frame's own black is the honest
-                            thing to show when no frame was ever kept. */}
-                        {glassSrc && (
-                        <span className="verdict-glass-lens">
-                            {/* The copy of the picture the pane stands over.
-                                ⚠️ Same src, same object-cover, same mirror as
-                                the original below it — they have to register to
-                                the pixel or the pane looks like a misaligned
-                                cut-out rather than a window. */}
-                            {/* eslint-disable-next-line @next/next/no-img-element -- data URL */}
-                            <img src={glassSrc} alt="" className={`verdict-glass-source ${MIRROR_CLASS}`} />
-                        </span>
-                        )}
-                        <span className="verdict-glass-tint" />
-                        <span className="verdict-glass-edge" />
-                    </span>
+                        where glass is most obviously glass.
+
+                        With no picture it is frost over the frame's own black,
+                        which is the honest thing to show when no frame was ever
+                        kept. */}
+                    <PhotoGlass
+                        src={glassSrc}
+                        amount={100}
+                        className="rad-30"
+                        /*
+                         * ── The pane breathes while the servers decide ──────
+                         *
+                         * The same travel the comparison screen carries, and
+                         * here for the same reason: this wait has no progress
+                         * to report — AWS is uploading and analysing and will
+                         * answer when it answers — so what is drawn has to read
+                         * as activity without implying a position on a bar.
+                         * Glass thickening and thinning does that; a pane at a
+                         * fixed weight over a frozen face is a photograph with
+                         * a filter on it.
+                         *
+                         * ⚠️ CHECKING ONLY, and the mark is the tell: the AI
+                         * star means a model is working. `passed` and `failed`
+                         * hold still, because by then the screen is announcing
+                         * a RESULT and motion under a verdict reads as the
+                         * verdict still being decided.
+                         *
+                         * ⚠️ AND IT NEVER CLEARS — see `waveFloor`. This pane's
+                         * whole job is to stop somebody studying their own
+                         * unflattering frozen frame at the one moment they can
+                         * do nothing about it, and a trough at zero would serve
+                         * them exactly that on every cycle.
+                         *
+                         * 20 to 100: a wide travel, and still a face behind
+                         * glass at the bottom of it. Wider than the comparison
+                         * screen's 10-to-50 because this pane starts at full
+                         * strength — the same proportion of the same material,
+                         * over a picture that is being withheld rather than
+                         * dressed.
+                         */
+                        wave={phase === 'checking'}
+                        waveFloor={20}
+                        tuning={{
+                            warp: CAPTURE_CHECKING_GLASS.scale,
+                            warpBlur: CAPTURE_CHECKING_GLASS.blur,
+                            frostBlur: CAPTURE_CHECKING_GLASS.frostBlur,
+                            saturation: CAPTURE_CHECKING_GLASS.saturation,
+                            frost: CAPTURE_CHECKING_GLASS.frost,
+                        }}
+                    />
 
                     {/* The mark, its light and the frame's edge — see
                         VerdictMark. Keyed by phase so the verdict animations

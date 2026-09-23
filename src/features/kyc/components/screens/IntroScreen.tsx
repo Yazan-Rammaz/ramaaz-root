@@ -7,6 +7,7 @@ import { FlexSpace } from '@/components/ui/FlexSpace';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useKycSession } from '@/features/kyc/context/KycSessionContext';
 import { useFacePhoto } from '@/features/kyc/hooks/useFacePhoto';
+import { PhotoGlass } from '@/features/kyc/components/PhotoGlass';
 import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 
 // XD px -> scaling rem.
@@ -76,31 +77,51 @@ export default function IntroScreen() {
         <div className="mx-auto flex h-full w-390 flex-col">
             <FlexSpace size={288} share={0.5} />
 
-            {/* The frame captured moments ago, in the face step. */}
+            {/* The frame captured moments ago, in the face step.
+                ── Under glass, at 40% ─────────────────────────────────────────
+                The frame is one grab from a webcam and looks it, and this is
+                the screen that shows it back at full attention with nothing
+                else happening — so it is where "that photo of me is bad" lands.
+                A 40% pane softens it without hiding it: see CAPTURE_PHOTO_GLASS
+                (§9b) for the dial and PhotoGlass for the material.
+
+                ⚠️ The wrapper is not a tidy-up. The pane renders absolutely and
+                draws a COPY of the picture — so the box has to be positioned,
+                has to clip, and the pane has to be handed the same `rad-20` or
+                its bevel dies square inside the rounded corner. The photo's own
+                box classes move here with it and it fills the wrapper, which is
+                what keeps the copy registered to the original. */}
             {photo ? (
-                // A data: URL held in memory; next/image would need a loader and
-                // would gain nothing over a 130 x 148 thumbnail.
-                //
-                // Flipped with everything else, from the one switch —
-                // `CAPTURE_MIRROR` / `MIRROR_CLASS`. The capture is RAW SENSOR
-                // PIXELS and is never mirrored; the preview it was taken from
-                // is. Showing it unflipped hands somebody a photograph that is
-                // backwards from the face they were just looking at, and people
-                // do not recognise themselves unmirrored — it reads as a
-                // stranger.
-                //
-                // Every other display of this frame reads the same constant, so
-                // none of them can disagree.
-                //
-                // Display only regardless: `livenessResult.faceImageData` is
-                // untouched and must stay so — the comparison posts that exact
-                // string as `selfie`.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                    src={photo}
-                    alt=""
-                    className={`h-148 w-130 shrink-0 rad-20 object-cover ${MIRROR_CLASS}`}
-                />
+                <div className="relative h-148 w-130 shrink-0 overflow-hidden rad-20">
+                    {/* A data: URL held in memory; next/image would need a
+                        loader and would gain nothing over a 130 x 148
+                        thumbnail.
+
+                        Flipped with everything else, from the one switch —
+                        `CAPTURE_MIRROR` / `MIRROR_CLASS`. The capture is RAW
+                        SENSOR PIXELS and is never mirrored; the preview it was
+                        taken from is. Showing it unflipped hands somebody a
+                        photograph that is backwards from the face they were
+                        just looking at, and people do not recognise themselves
+                        unmirrored — it reads as a stranger.
+
+                        Every other display of this frame reads the same
+                        constant, so none of them can disagree — including the
+                        pane's own copy below, which would otherwise stand over
+                        a face pointing the other way.
+
+                        Display only regardless: `livenessResult.faceImageData`
+                        is untouched and must stay so — the comparison posts
+                        that exact string as `selfie`, and nothing the glass
+                        does reaches it. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element -- data URL */}
+                    <img
+                        src={photo}
+                        alt=""
+                        className={`absolute inset-0 h-full w-full object-cover ${MIRROR_CLASS}`}
+                    />
+                    <PhotoGlass src={photo} width={130} className="rad-20" />
+                </div>
             ) : (
                 <div className="h-148 w-130 shrink-0 rad-20 bg-[#F2F2F2]" />
             )}

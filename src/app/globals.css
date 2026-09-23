@@ -644,6 +644,209 @@ body {
         inset 0 0.375rem 3.5rem rgb(17 17 26 / 0.05);
 }
 
+/* The wave — glass washing over the face while the comparison runs.
+   -----------------------------------------------------------------------------
+   A pane at a fixed thickness says "this picture is under glass". A pane that
+   thickens and clears says "something is passing over it", which is the only
+   thing the comparison screen can honestly show: the work is happening on a
+   server and there is no progress to report, so what is drawn has to read as
+   ACTIVITY without pretending to be measurement. It breathes 0 → full → 0, and
+   at the trough the photograph is briefly its sharp self.
+
+   ⚠️ ONLY the frost and its blur travel. The refraction, the fringing and the
+   bevel stay put — the material does not come and go, only its thickness. A
+   pane that faded out entirely would flash the whole frame on every cycle.
+
+   The two custom properties have to be REGISTERED or none of this animates:
+   an unregistered custom property has no type, so a browser cannot interpolate
+   it and flips it at the halfway mark instead — which is a strobe, not a wave.
+   `@property` gives them a type and makes them animatable.
+
+   ⚠️ `initial-value` must be computationally independent, so it is `0px` and
+   NOT the `0.625rem` that the `var()` fallbacks in `.verdict-glass-source` use
+   (`rem` depends on the root font size and is rejected outright). That costs
+   nothing: registration means the fallback is never reached, and every pane in
+   this app sets both properties inline from `CAPTURE_PHOTO_GLASS`. */
+@property --glass-blur {
+    syntax: '<length>';
+    inherits: true;
+    initial-value: 0px;
+}
+
+@property --glass-frost {
+    syntax: '<number>';
+    inherits: true;
+    initial-value: 0;
+}
+
+/* The peak is each pane's OWN full-strength value, handed in as
+   `--glass-blur-max` / `--glass-frost-max`, so one keyframe serves a 130px
+   thumbnail and a 300px stage without either having to know the other exists. */
+/* ⚠️ THE TROUGH IS NOT ZERO. `--glass-wave-floor` is the fraction of full the
+   pane falls back to — `PhotoGlass` works it out from a `waveFloor` given on
+   the same scale as the peak, so the call sites read "10 to 50" and "20 to
+   100" rather than carrying ratios.
+
+   It defaults to 0, and no pane uses that default. A trough at zero does not
+   thin the glass, it REMOVES it: what returns is a bare photograph, so the
+   material appears and disappears instead of one object changing thickness.
+   The checking pane has a second reason on top of that — it exists to keep
+   somebody from studying their own frozen face at the one moment they can do
+   nothing about it, and clearing would hand them exactly that once per cycle.
+   See `LivenessVerdict`. */
+@keyframes verdict-glass-wave {
+    0%,
+    100% {
+        --glass-blur: calc(var(--glass-blur-max) * var(--glass-wave-floor, 0));
+        --glass-frost: calc(var(--glass-frost-max) * var(--glass-wave-floor, 0));
+    }
+    50% {
+        --glass-blur: var(--glass-blur-max);
+        --glass-frost: var(--glass-frost-max);
+    }
+}
+
+/* ⚠️ SLOW, and it is the difference between a wave and a flicker.
+   -----------------------------------------------------------------------------
+   This was 2.6s. Over a face, that is fast enough that the eye tracks the
+   CHANGE rather than the state — the picture appears to pulse, which is the
+   same complaint the refraction earned: motion read as a fault in the
+   photograph. Five seconds puts each direction of the travel at two and a half,
+   which is slower than the eye follows, so what registers is glass thickening
+   and clearing rather than something flashing.
+
+   `ease-in-out` on top of that: the ends are where the pane sits at 0 and at
+   full, and easing holds it there a moment instead of turning around on a
+   point. */
+.verdict-glass--wave {
+    animation: verdict-glass-wave var(--glass-wave-dur, 5s) ease-in-out infinite;
+}
+
+/* ── The star field ─────────────────────────────────────────────────────────
+   Twenty of the small mark's stars scattered over the frame while the
+   comparison runs, five to seven of them alight at any moment.
+
+   ── Why a field and not the one mark ────────────────────────────────────────
+   The single AI mark in the middle of the frame is the CHECKING state's mark —
+   it sits on a picture nobody is being asked to look at. Here the picture is
+   the proposition: two images being compared. A mark in the centre of it covers
+   the face it is talking about, so the same idea is spread thin instead — the
+   model is going over the whole photograph, and the stars are where it is
+   looking.
+
+   ── The three things each star does, on three unrelated clocks ──────────────
+     lit     fades in, holds, fades out. Its group's slot in the cycle.
+     turn    rotates and CHANGES SIZE AS IT TURNS — growing one way, shrinking
+             back the other. The same coupling the mark's own small stars have
+             (`verdict-spark-top`), and the reason both read as one motion
+             rather than a spin with a pulse bolted on.
+     gleam   `verdict-gleam`, unchanged, shared with the mark. Whatever the
+             brilliance is tuned to there, it is the same here by construction.
+
+   Each star carries its own durations and a negative turn delay, so no two are
+   at the same point of their revolution and the field never beats in step.
+
+   ⚠️ Three animations, three different properties — `opacity`, `rotate` +
+   `scale`, `filter`. `rotate` and `scale` are their own properties in modern
+   CSS rather than parts of `transform`, which is what lets the turn animate
+   without fighting the `translate` that positions the star. */
+/* ⚠️ THESE FOUR NUMBERS ARE THE "FIVE TO SEVEN", and they are not adjustable
+   by eye — they were solved for against the group offsets and the 100ms
+   stagger in SparkField.
+
+   A star is lit for 36.5% of the cycle: 1.75s of 4.8s. The obvious value is a
+   third, one slot per group, and a third is WRONG — a group's seven members
+   start 100ms apart, so the first is already going dark while the last is
+   still arriving, and the field empties to two or three stars at every
+   handover. The extra 3.5% is the overlap that makes one group hand over to
+   the next instead of dropping the frame between them.
+
+   Solved: 5 minimum, 7 maximum, 6 or 7 most of the time. Lengthen this and the
+   groups stack (8, then 9, then 11 at once); shorten it and the handover gap
+   comes back. Either edge is visible immediately, which is the useful thing
+   about a number with a proof behind it. */
+@keyframes spark-field-lit {
+    0%,
+    100% {
+        opacity: 0;
+    }
+    4.6% {
+        opacity: 1;
+    }
+    31.9% {
+        opacity: 1;
+    }
+    36.5% {
+        opacity: 0;
+    }
+}
+
+@keyframes spark-field-turn {
+    0%,
+    100% {
+        rotate: -38deg;
+        scale: 0.55;
+    }
+    50% {
+        rotate: 38deg;
+        scale: 1;
+    }
+}
+
+.spark-field-star {
+    position: absolute;
+
+    /* ⚠️ ANCHORED BY THE STAR, NOT BY ITS BOX.
+       Every `regions/ai-star-*` file keeps the COMBINED mark's viewBox and
+       holds one path, so the element's box is the whole mark and the star sits
+       in one corner of it — the field uses `ai-star-top`, whose centre is at
+       82.3% 15.8% of that box. Pulling the box back by exactly that puts the
+       star itself on the coordinates the table gives, and puts the turn's
+       origin on the star rather than on empty space beside it. */
+    translate: -82.3% -15.8%;
+    transform-origin: 82.3% 15.8%;
+
+    /* ⚠️ BRIGHTER THAN THE MARK'S 0.72, and the difference is what these sit
+       on. `.verdict-spark` is one large glyph on a pane blurred past
+       recognition; these are small, scattered, and land on a sharp face — on
+       forehead, on a light shirt, on a window behind somebody's head. At 0.72
+       they were legible over hair and invisible over anything pale, so the
+       field looked like it had holes in it.
+
+       0.95 rather than 1 still leaves the gleam somewhere to travel up to,
+       which is the reason the mark's is below full in the first place. */
+    color: rgb(255 255 255 / 0.95);
+
+    /* The edge that makes them read on a bright background at all: a tight dark
+       shadow for contrast, a close white one for lift. Same pair as
+       `.verdict-spark`, and deliberately tight — a wide halo at this size turns
+       a four-pointed star into a smudge. `verdict-gleam` replaces this while it
+       runs, and returns to its own version of it. */
+    filter:
+        drop-shadow(0 0 0.125rem rgb(0 0 0 / 0.5))
+        drop-shadow(0 0 0.3rem rgb(255 255 255 / 0.6));
+    opacity: 0;
+    animation:
+        spark-field-lit var(--lit-dur) linear var(--lit-delay) infinite,
+        spark-field-turn var(--turn-dur) ease-in-out var(--turn-delay) infinite,
+        verdict-gleam var(--gleam-dur) ease-in-out var(--gleam-delay) infinite;
+}
+
+/* Nothing moves, and nothing is lost: the wave settles at full thickness and
+   the stars hold at their drawn size. Both states are legible still images. */
+@media (prefers-reduced-motion: reduce) {
+    .verdict-glass--wave {
+        animation: none;
+        --glass-blur: var(--glass-blur-max);
+        --glass-frost: var(--glass-frost-max);
+    }
+
+    .spark-field-star {
+        animation: none;
+        opacity: 1;
+    }
+}
+
 /* The AI mark — three stars, three clocks.
    -----------------------------------------------------------------------------
    The durations share no common factor (2.3 / 3.1 / 4.7), so the pattern the
@@ -1043,6 +1246,150 @@ body {
         transparent 72%
     );
     animation: verdict-unlock 1.15s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+/* ── The match celebration ──────────────────────────────────────────────────
+   Three seconds between "the document and the face were accepted" and the
+   dashboard, and the only three seconds in this flow that are spent on nothing
+   but saying so.
+
+   Two things happen in it, in this order and not together:
+
+     wash    green out of the centre to the edges, twice — the second slower
+             and weaker than the first, the way a real pulse of light has a
+             wake. This is `verdict-unlock`'s idea at the scale of a whole
+             screen rather than of a mark.
+     burst   seven stars, all at once, sudden and large. Not a twinkle and not
+             the field: the field says "a model is working", this says "it is
+             done". Different shape of event, different animation.
+
+   ⚠️ THE BURST IS DELIBERATELY LATE AND DELIBERATELY ABRUPT. It fires at 40%
+   of the wash, on a near-linear curve with no ease-in, so it arrives as a flash
+   rather than as something that grew. An eased burst reads as a second wash and
+   the two blur into one long green event — which was the first attempt, and it
+   made three seconds feel like a loading screen. */
+@keyframes match-wash {
+    0% {
+        transform: scale(0.1);
+        opacity: 0;
+    }
+    6% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.72;
+    }
+    100% {
+        transform: scale(3.4);
+        opacity: 0;
+    }
+}
+
+.match-wash {
+    background: radial-gradient(
+        circle,
+        color-mix(in srgb, var(--verdict-color) 70%, transparent) 0%,
+        color-mix(in srgb, var(--verdict-color) 34%, transparent) 42%,
+        transparent 70%
+    );
+    animation: match-wash 1.5s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+/* The wake. Same shape, half the strength, starting as the first one clears —
+   so the frame is lit for the whole three seconds instead of going dark at 1.5s
+   and waiting. */
+.match-wash--wake {
+    animation: match-wash 1.7s cubic-bezier(0.22, 0.61, 0.36, 1) 1.1s forwards;
+    opacity: 0;
+}
+
+/* One star of the burst.
+   -----------------------------------------------------------------------------
+   ⚠️ `scale` and `opacity` only — NO rotation. The field's stars turn because
+   they are alive and working; these are a flash, and a flash that spins reads
+   as the same idea again rather than as a conclusion.
+
+   The overshoot past 1 is the "strong and large": it arrives bigger than it
+   ends, which is what a spark does. `verdict-gleam` is not used here either —
+   its bloom is a slow event tuned for a star that is turning, and at this speed
+   it would still be blooming after the star had gone. The white blow-out below
+   is the whole brilliance, delivered in a tenth of a second. */
+/* ⚠️ GREEN THROUGHOUT — the star, the bloom and the wake. NO WHITE CORE AND NO
+   BLACK EDGE.
+   -----------------------------------------------------------------------------
+   The first version was the field's star with a brighter flash: white glyph,
+   white core, and the dark contrast shadow every other star in this app carries
+   so it holds against a photograph. Wrong on both counts here.
+
+   The dark edge is wrong because this burst does not need to survive a
+   photograph — it lands on top of the green wash, which is already a flat lit
+   field. A black shadow on it has nothing to separate the star FROM and simply
+   reads as dirt on the light.
+
+   The white is wrong because this is the moment the whole screen is saying one
+   thing. The frame's border turns green, the wash is green, and a white spark
+   over it is a second colour arriving at the instant everything else agreed —
+   which reads as two events, not one. Green sparks on green light read as the
+   light itself throwing off sparks.
+
+   Brightness comes from the ALPHA and the bloom radius rather than from white:
+   a near-opaque green at 0.4rem, carried out to 2.4rem at a quarter of that,
+   is as bright as the white version was and stays the colour of the event. */
+@keyframes match-burst {
+    0% {
+        opacity: 0;
+        scale: 0.2;
+        filter: drop-shadow(0 0 0 rgb(52 211 23 / 0));
+    }
+    7% {
+        opacity: 1;
+        scale: 1.35;
+        filter:
+            drop-shadow(0 0 0.4rem rgb(104 255 96 / 1))
+            drop-shadow(0 0 1.2rem rgb(52 211 23 / 0.9))
+            drop-shadow(0 0 2.4rem rgb(52 211 23 / 0.55));
+    }
+    22% {
+        opacity: 1;
+        scale: 1;
+    }
+    100% {
+        opacity: 0;
+        scale: 0.85;
+        filter: drop-shadow(0 0 0.2rem rgb(52 211 23 / 0));
+    }
+}
+
+.match-burst-star {
+    position: absolute;
+    /* Anchored by the star inside the glyph's box, exactly as the field is —
+       see `.spark-field-star`, which explains why the box is not the star. */
+    translate: -82.3% -15.8%;
+    transform-origin: 82.3% 15.8%;
+
+    /* The glyph itself, a shade brighter than the wash so the points stay
+       legible against it. Still green: see the note above. */
+    color: rgb(126 255 118 / 0.98);
+    opacity: 0;
+    animation: match-burst 1.4s cubic-bezier(0.16, 1, 0.3, 1) var(--burst-delay) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .match-wash,
+    .match-wash--wake,
+    .match-burst-star {
+        animation: none;
+    }
+
+    /* The result still has to be legible without motion: a steady green wash
+       and the stars simply present. The three seconds pass either way. */
+    .match-wash {
+        opacity: 0.5;
+    }
+
+    .match-burst-star {
+        opacity: 1;
+    }
 }
 
 /* The Face ID glyph landing. Overshoots to 1.1 and settles — the small

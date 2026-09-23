@@ -5,6 +5,7 @@ import { CAPTURE_OUTPUT } from '@/features/kyc/config/capture';
 import { frameHasContent } from '@/features/kyc/services/faceCapture';
 import { applyLook } from '@/features/kyc/services/look';
 import { applyPortrait } from '@/features/kyc/services/portrait';
+import { fetchStoredFace } from '@/features/kyc/services/storedFace';
 import type { LivenessResult } from '@/features/kyc/types/verification';
 
 /**
@@ -57,8 +58,79 @@ export function useFacePhoto(
 ): string | null {
     /** The in-memory capture already carries the look; nothing to redo. */
     const looked = liveness?.displayImageData ?? null;
-    /** A truthful frame, and therefore a plain one. */
-    const raw = liveness?.faceImageData ?? storedFaceSrc ?? null;
+
+    /**
+     * A truthful frame, and therefore a plain one — but after a reload it is a
+     * URL rather than bytes, and the difference matters everywhere below.
+     */
+    const source = liveness?.faceImageData ?? storedFaceSrc ?? null;
+    const remote = !!source && !source.startsWith('data:');
+
+    /**
+     * The stored face, PULLED DOWN AS BYTES before anything else happens.
+     *
+     * ── Why the route is never handed to an <img> ───────────────────────────
+     * It used to be, and three things went wrong with it at once:
+     *
+     *   1. It is the FALLBACK, and the fallback became the final answer. The
+     *      look pass below decodes that URL, retouches it and swaps in a data:
+     *      URL — and if any stage of it failed, the swap never happened and the
+     *      screen kept the route forever. Silently: the catch had nothing to
+     *      say and a face that never got retouched looks like a face, just a
+     *      harsher one. That is the exact drift this hook exists to prevent,
+     *      arriving through the hook itself.
+     *   2. `/api/face-capture` is `Cache-Control: no-store` — correctly; it is
+     *      somebody's face tied to one sign-in. So every element pointed at it
+     *      is a separate round trip THROUGH OUR WORKER TO THE BACKEND. With a
+     *      pane of glass over the picture that is two, because the pane draws
+     *      its own copy of the same src (see PhotoGlass), and the two can land
+     *      at different moments — a pane standing over a picture that is not
+     *      there yet.
+     *   3. A 404 — no challenge cookie, upstream gone — rendered as a BROKEN
+     *      image rather than as no photo. The screens have a grey placeholder
+     *      for exactly that case and could not reach it.
+     *
+     * One fetch, one data: URL, shared by the picture, the pane and the look
+     * pass. `fetchStoredFace` is the sanctioned module for it (AGENTS.md §2 —
+     * components never call `fetch`, and neither does this).
+     *
+     * ⚠️ This does NOT put a backend URL in the page, and cannot be changed to.
+     * The browser never addresses a backend (§2), and `img-src 'self' data:
+     * blob:` in the CSP would refuse the request before it was made. The bytes
+     * come through our own origin or they do not come at all.
+     */
+    const [fetched, setFetched] = useState<{ src: string; out: string } | null>(null);
+
+    useEffect(() => {
+        if (!remote || !source) return;
+        if (fetched?.src === source) return;
+
+        let cancelled = false;
+        void (async () => {
+            try {
+                const data = await fetchStoredFace();
+                if (!cancelled) setFetched({ src: source, out: data });
+            } catch (err) {
+                // Loud, and specific. The screens fall back to their own grey
+                // placeholder, which is the honest picture of "there is no
+                // photo" — but WHY there is none is not inferable from a grey
+                // box, and this is the only place that knows.
+                console.warn('[face] the stored face could not be fetched', err);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [remote, source, fetched]);
+
+    /**
+     * The bytes, or nothing. Never the route.
+     *
+     * The tag check is the staleness guard, the same one `processed` uses: a
+     * fetch belonging to a previous source is not used for this one.
+     */
+    const raw = remote ? (fetched?.src === source ? fetched.out : null) : source;
 
     /**
      * The retouched frame, TAGGED with the source it came from.
@@ -83,9 +155,11 @@ export function useFacePhoto(
         void (async () => {
             try {
                 const image = new Image();
-                // Same origin in both cases — a `data:` URL, or `/api/face-capture`
-                // on our own host — so the canvas is never tainted and
-                // `toDataURL` cannot throw a security error.
+                // Always a `data:` URL by this point — the stored face was
+                // pulled down as bytes above — so the canvas is never tainted,
+                // `toDataURL` cannot throw a security error, and the decode
+                // cannot fail on a 404 the way it could when this was handed a
+                // route.
                 image.src = raw;
                 await image.decode();
                 if (cancelled) return;
@@ -133,9 +207,21 @@ export function useFacePhoto(
                         out: canvas.toDataURL('image/jpeg', CAPTURE_OUTPUT.jpegQuality),
                     });
                 }
-            } catch {
-                // Decode failure, no 2d context, a stored face that 404s. All of
-                // them end the same way: show what we were given.
+            } catch (err) {
+                /*
+                 * ⚠️ SAY SO. This was a bare `catch {}` with a comment, and the
+                 * silence is what let a real failure sit on screen unnoticed:
+                 * every stage here ends the same way — show the frame
+                 * unretouched — and an unretouched face still looks like a
+                 * face. Nobody can tell from the picture that the look never
+                 * ran; the only symptom is that this person looks harsher after
+                 * a refresh than they did before it, which reads as the camera's
+                 * fault.
+                 *
+                 * The fallback is still the right behaviour. It just should not
+                 * be a secret.
+                 */
+                console.warn('[face] the look could not be applied — showing the plain frame', err);
             }
         })();
 
@@ -144,10 +230,19 @@ export function useFacePhoto(
         };
     }, [looked, raw, processed]);
 
-    // `raw` while the pass runs, so the face appears immediately and sharpens
-    // into the retouched version — rather than a grey box that fills in late.
-    //
-    // The tag check is the staleness guard: a result belonging to a previous
-    // frame is simply not used.
+    /*
+     * `raw` while the look pass runs, so the face appears as soon as the bytes
+     * are here and sharpens into the retouched version — rather than a grey box
+     * that fills in late.
+     *
+     * ⚠️ EVERY BRANCH IS A `data:` URL OR NULL. Null is a real answer and the
+     * screens draw their placeholder for it: after a reload there is a moment
+     * before the stored face has been fetched, and a 404 never resolves at all.
+     * The route that used to stand in for this window is gone from the return
+     * on purpose — it was a fallback that could become permanent, and did.
+     *
+     * The tag checks are the staleness guard: a result belonging to a previous
+     * frame is simply not used.
+     */
     return looked ?? (processed?.src === raw ? processed.out : null) ?? raw;
 }

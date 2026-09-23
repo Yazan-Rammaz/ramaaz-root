@@ -795,6 +795,132 @@ export const CAPTURE_CHECKING_GLASS = {
 } as const;
 
 /**
+ * ── 9b. The still glass ─────────────────────────────────────────────────────
+ *
+ * The same pane as §9, laid over a photograph that is simply BEING SHOWN: the
+ * face on the intro screen, and the face on the comparison stage.
+ *
+ * ── Why a face that is not being judged needs a pane ────────────────────────
+ * Because of what the frame IS. It is one grabbed video frame — a webcam's
+ * worth of noise, a wide lens inches from a nose, whatever the room's light was
+ * doing at that instant. The look pipeline (§4-§7) already does what it can to
+ * it, and it is still a video frame, and people know it: the complaint is
+ * always some version of "that photo of me is bad". On the verdict that is
+ * answered by hiding it. Here it cannot be — the picture is the content on both
+ * screens, and on the comparison stage it is half the proposition — so the
+ * answer is the same pane at a fraction of its strength, which softens the
+ * frame without taking the face away.
+ *
+ * ⚠️ Cosmetic, entirely, and doubly so here. §9 at least sits over the frame a
+ * check is happening to; this sits over a picture nothing is happening to.
+ * Nothing below touches the photograph, the comparison, or what is submitted —
+ * `runMatch` builds its own evidence from the untouched bytes. Setting `glass`
+ * to 0 leaves the sharp frame exactly as it was.
+ *
+ * ── THE ONE DIAL ────────────────────────────────────────────────────────────
+ *
+ * How much pane sits on the picture, as a PERCENTAGE — the same scale as §11,
+ * and the same reading:
+ *
+ *     0    no pane at all. The photograph, untouched.
+ *     25   a faint haze over a still legible face.
+ *     40   here. Plainly a pane, and the face still legible behind it.
+ *     75   properly frosted — shapes and colour, no detail.
+ *     100  full strength: §9, the checking pane.
+ *
+ * ⚠️ 0..100, not 0..1, exactly as in §11 and for the same reason: this is the
+ * number that gets asked for and changed in percent. `PhotoGlass` divides by
+ * 100 on the way out.
+ *
+ * ── Why the rest are RATIOS and not pixels ──────────────────────────────────
+ * Because the two call sites are different sizes — 130 wide on the intro, 300
+ * on the comparison stage — and a pane's numbers are not portable between them.
+ * A 17px frost across 350px of camera is a sheet; across a 130px thumbnail it
+ * is a smear with a face somewhere inside it, and a displacement of 39 on that
+ * thumbnail samples from outside the picture entirely (see `scale` in §9). So
+ * every number here is a fraction of the PANE'S OWN WIDTH and `PhotoGlass`
+ * multiplies it out.
+ *
+ * The fractions are not invented: they are §9's values over the 350-wide frame
+ * it was tuned on, so `width: 350, glass: 100` reproduces the checking pane to
+ * the pixel. That is the calibration, and it is the reason to change §9 rather
+ * than these if the MATERIAL ever looks wrong — the bend, the fringing, the
+ * colour are all §9's, proven on real faces.
+ */
+export const CAPTURE_PHOTO_GLASS = {
+    /**
+     * THE dial. 0..100. See above.
+     *
+     * ⚠️ IT IS THE THICKNESS OF THE SHEET, NOT ITS OPACITY — `PhotoGlass`
+     * scales the frost and the frost's blur by it and leaves the refraction,
+     * the fringing and the bevel alone. Less glass therefore means a pane you
+     * see MORE through, not a fainter pane.
+     *
+     * That distinction is the whole history of this number. Fading the pane as
+     * a whole is the obvious implementation and it does not survive these frame
+     * sizes: at 40% over a 130px thumbnail every layer rendered correctly and
+     * the screen showed a sharp photograph. Twice. Whatever this is set to, the
+     * glass stays visible; only how much of the face it takes changes.
+     *
+     *     100  §9, the checking pane — a face you cannot read
+     *      50  here. Plainly glass, and plainly a face behind it
+     *      25  a light haze
+     *
+     * This is the DEFAULT, and the intro screen takes it. FaceMatchScreen
+     * passes its own 25: the values here are fractions of each pane's width, so
+     * the same number is the same sheet in proportion — but the comparison
+     * stage shows this face at 300px as evidence rather than at 130px as an
+     * illustration, and it wants less. The reasoning is at that call site.
+     */
+    glass: 50,
+
+    /**
+     * Displacement at the rim, as a fraction of the pane's width.
+     *
+     * ⚠️ 0 — NO REFRACTION ON A STILL, and the reason is what refraction does
+     * to a FACE. §9's 0.1114 (39 across 350) is the right number for a pane
+     * over a frame nobody is studying; over a photograph somebody is looking at
+     * themselves in, the same bend reads as the picture being wavy. The face is
+     * the one subject where a viewer knows the true shape exactly, so the
+     * distortion that sells the material everywhere else is read as a fault in
+     * the photograph — which it is, in the only sense that matters here.
+     *
+     * The pane does not stop being glass: the frost, the saturation and the
+     * bevel all remain, which is the documented `scale: 0` behaviour (§9) and
+     * not a failure mode. It stops being a LENS, and a still photograph under a
+     * flat sheet is the right object anyway.
+     *
+     * The CHECKING pane keeps its bend (§9) — it is over a face nobody is being
+     * asked to study, and hiding it is the point there.
+     */
+    warp: 0,
+
+    /**
+     * Softening inside the filter, as a fraction of the width.
+     *
+     * Dead while `warp` is 0 — the filter is not mounted at all — and kept at
+     * its §9 ratio so turning the bend back on restores the whole material in
+     * one edit rather than two.
+     */
+    warpBlur: 0.0111,
+
+    /**
+     * The frost's own CSS blur, as a fraction of the width. 17/350.
+     *
+     * 6px on the intro's 130 and 15px on the comparison stage's 300 — the same
+     * pane §9 draws, at each frame's own size, so the material reads
+     * identically on all three.
+     */
+    frostBlur: 0.0486,
+
+    /** Saturation on the copy. Not a ratio — it does not scale with size. */
+    saturation: 1.32,
+
+    /** The frost, 0..1. Not a ratio, for the same reason. */
+    frost: 0.117,
+} as const;
+
+/**
  * ── 11b. The face mesh on the live camera ───────────────────────────────────
  *
  * The 478-point Face Mesh drawn over the preview, shining and sparkling the way

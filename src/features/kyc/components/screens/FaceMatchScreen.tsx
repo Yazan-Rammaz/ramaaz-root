@@ -11,6 +11,9 @@ import ExitConfirmDialog from '../ExitConfirmDialog';
 import { FlexSpace } from '@/components/ui/FlexSpace';
 import { fetchStoredFace } from '@/features/kyc/services/storedFace';
 import { useFacePhoto } from '@/features/kyc/hooks/useFacePhoto';
+import { PhotoGlass } from '@/features/kyc/components/PhotoGlass';
+import { SparkField } from '@/features/kyc/components/SparkField';
+import { MatchCelebration } from '@/features/kyc/components/MatchCelebration';
 import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 import { Icon } from '@/components/ui/Icon';
 
@@ -35,6 +38,19 @@ const FRAME_FLASHES_PER_CYCLE = 3; // flashes 3 times during each ID-visible cyc
 const FRAME_FLASH_MS = 300; // each flash lasts 300 ms
 
 /**
+ * How long the screen is held after the enrolment is accepted, before the
+ * sign-in moves on to the dashboard.
+ *
+ * ⚠️ IT DELAYS A REDIRECT, so it is a real cost paid by somebody who has just
+ * finished and wants to be in. Three seconds is the length of the celebration
+ * itself — the wash, its wake and the burst all land inside it (see
+ * `match-wash` / `match-burst` in globals.css) — and nothing waits on this but
+ * the animation. Shorten it and the wake is cut off mid-way; lengthen it and
+ * the screen is holding a finished person on a finished screen.
+ */
+const CELEBRATION_MS = 3_000;
+
+/**
  * What this screen hands to whoever owns the enrolment exchange.
  *
  * Deliberately this feature's OWN vocabulary — an `IDDocument`, a selfie, two
@@ -52,6 +68,30 @@ export type EnrolmentInput = {
     /** What Rekognition scored that selfie against the document photo. */
     selfieVsIdScore: number;
     livenessConfidence?: number;
+    /**
+     * Called the moment the enrolment is ACCEPTED and before the sign-in moves
+     * on. Awaited — whatever it returns is held for.
+     *
+     * ── Why the screen cannot simply do this itself ─────────────────────────
+     * Because it never gets the chance. Acceptance and navigation are the same
+     * event from here: the final Server Action calls `redirect()`, so the
+     * router leaves this route as part of the response and the success branch
+     * below is, by its own comment, "usually unreachable". There is no moment
+     * on this side of `onEnroll` in which the answer is known and the screen
+     * still exists.
+     *
+     * So the pause is opened from the inside. The implementation calls this
+     * after the Worker has passed the document and signed for it, and waits on
+     * it before the exchange that redirects — which is the one place where the
+     * result is certain and the screen is still mounted.
+     *
+     * ⚠️ AFTER ACCEPTANCE, NEVER AFTER THE COMPARISON. The comparison runs at a
+     * threshold of zero and passes on any two faces; the real one is applied
+     * afterwards. A celebration hung on the compare would announce a result the
+     * next call can still refuse, which is the exact failure the ordering in
+     * `finaliseAfterAnimation` was written to avoid.
+     */
+    onAccepted?: () => Promise<void> | void;
 };
 
 export default function FaceMatchScreen({
@@ -76,6 +116,13 @@ export default function FaceMatchScreen({
 
     const t = useTranslations('auth');
     const [matchState, setMatchState] = useState<MatchState>('matching');
+    /**
+     * The three-second send-off. Set from inside the enrolment — see
+     * `onAccepted` — and never cleared: the next thing that happens is the
+     * redirect, and unmounting the celebration before then would leave a blank
+     * green-bordered frame for the last moment of the sign-in.
+     */
+    const [celebrating, setCelebrating] = useState(false);
     /**
      * A message the SERVER sent, shown instead of our own line when there is
      * one.
@@ -222,6 +269,29 @@ export default function FaceMatchScreen({
                     idDocument,
                     selfie,
                     selfieVsIdScore: score,
+                    /*
+                     * Accepted — hold the screen for three seconds and say so.
+                     *
+                     * This is the only point in the flow where the answer is
+                     * certain AND this screen still exists; a moment later the
+                     * Server Action redirects and the route is gone. See
+                     * `onAccepted` on EnrolmentInput for why the pause has to
+                     * be opened from inside the enrolment rather than around
+                     * it.
+                     *
+                     * The state goes to `success` at the same time, so the
+                     * frame's border turns green under the celebration and the
+                     * status line stops saying the comparison is running.
+                     */
+                    onAccepted: () => {
+                        setMatchState('success');
+                        setServerMessage(null);
+                        setSubtitleKey('matchDone');
+                        setCelebrating(true);
+                        return new Promise<void>((resolve) =>
+                            setTimeout(resolve, CELEBRATION_MS),
+                        );
+                    },
                     // Optional-chained: after a reload the selfie comes from
                     // the backend and `livenessResult` is null, so the
                     // confidence from that run is simply not available here.
@@ -595,6 +665,90 @@ export default function FaceMatchScreen({
                         <span className="fz-12 text-[#707070]">{t('matchFacePhoto')}</span>
                     </div>
                 )}
+
+                {/* The face goes under the same pane as the intro screen — see
+                    CAPTURE_PHOTO_GLASS (§9b) — but it does not hold still while
+                    the comparison runs.
+
+                    ── Why it waves ────────────────────────────────────────────
+                    A fixed pane says "this picture is under glass". This screen
+                    has to say "something is happening TO it", and it has
+                    nothing true to say about how far along that is: the match
+                    runs on a server and returns when it returns. So the glass
+                    washes over the face instead — 0 to 50 and back, every 2.6s
+                    — and at each trough the photograph is briefly sharp. It is
+                    activity without a promise about duration, which is the one
+                    honest thing a wait like this can draw.
+
+                    50 is the PEAK here, not the setting. Once the verdict is in
+                    there is no work left to show, so the wave stops and the
+                    pane settles at a flat 25 — enough to keep the picture
+                    consistent with the intro screen, out of the way of a result
+                    the user is now reading.
+
+                    ⚠️ THE OVERRIDE IS THE POINT, not an inconsistency with §9b.
+                    The table's values are fractions of each pane's width, so 50
+                    here and 50 there are the same sheet in proportion — and
+                    proportion is not what the eye is judging. The intro shows
+                    this face at 130px, an illustration beside a paragraph; this
+                    screen shows it at 300px as one of the two things being
+                    COMPARED, and the same sheet over a face that large hides
+                    more of what the screen exists to show.
+
+                    ⚠️ NOT over the document, and not over the scan line. The
+                    pane is unlayered, so it paints in DOM order: above the face
+                    and below the ID overlay (z-10) and the travelling line
+                    (z-20), both of which are movement the glass would mute. The
+                    ID is also a card of small print — the one thing on this
+                    screen that has to stay sharp.
+
+                    ⚠️ Cosmetic only, like every other display of this frame.
+                    `runMatch` builds its evidence from the untouched bytes and
+                    the server never sees anything this does. */}
+                {facePhoto && (
+                    <PhotoGlass
+                        src={facePhoto}
+                        width={300}
+                        amount={matchState === 'matching' ? 50 : 25}
+                        wave={matchState === 'matching'}
+                        /*
+                         * Ten at the bottom of the travel, not zero.
+                         *
+                         * A trough at zero takes the pane away entirely on
+                         * every cycle, and what returns is not "less glass" but
+                         * a bare photograph — the material appears and
+                         * disappears rather than thickening and thinning. Ten
+                         * is little enough to read as clear and enough to keep
+                         * a sheet on the picture throughout, so the whole cycle
+                         * is one object changing.
+                         */
+                        waveFloor={10}
+                        className="rad-30"
+                    />
+                )}
+
+                {/* The stars, while the model is working — twenty of them, five
+                    to seven alight at a time. See SparkField: same glyph, same
+                    gleam and same coupling of size to rotation as the AI mark,
+                    spread over the frame rather than stacked in the middle of
+                    it.
+
+                    Above the glass and below the ID card, for the same reason
+                    the pane is: what the card says has to stay readable, and a
+                    star drifting over a birth date is noise on the one thing
+                    the user might actually want to check.
+
+                    Only while `matching`. They mean "a model is going over this
+                    photograph" — true for exactly as long as that is running,
+                    and a decoration the moment it is not. */}
+                {matchState === 'matching' && <SparkField />}
+
+                {/* The send-off. Above everything in the frame — the ID card,
+                    the scan line, the glass — because for these three seconds
+                    it IS the screen: the comparison is over and the things it
+                    was made of have nothing left to say. See MatchCelebration
+                    for why it only ever appears after acceptance. */}
+                {celebrating && <MatchCelebration />}
 
                 {/* AI scanning line over the face — moves while matching */}
                 {matchState === 'matching' && (

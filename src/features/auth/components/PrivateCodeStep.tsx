@@ -56,13 +56,24 @@ export function PrivateCodeStep({
     const [spent, setSpent] = useState(false);
 
     /**
-     * The standing instruction. On screen from the moment the page opens, not
-     * after a failure and not on a timer.
+     * The standing line about the code's lifetime. On screen from the moment
+     * the page opens, not after a failure and not on a timer.
      *
-     * There is no resend endpoint and there never will be, so "message the
-     * number" is not error recovery — it is the only way a code is ever
-     * obtained, and somebody who arrives here without one needs to read it
-     * before they need anything else.
+     * ⚠️ IT DOES NOT SAY HOW TO GET A CODE, and that omission is deliberate.
+     * It used to: "message the system on WhatsApp", on the reasoning that there
+     * is no resend endpoint, so naming the channel was the only route to a code
+     * and the first thing anybody arriving without one needed. That reasoning
+     * is sound about the FLOW and wrong about the AUDIENCE — this screen is
+     * reachable by whoever holds the access link, and that is not necessarily
+     * the administrator. Printing the out-of-band channel there hands a
+     * stranger the next step of the attack: the one thing they are missing is
+     * where the code comes from, and the screen was telling them.
+     *
+     * A real administrator already knows how their codes arrive; they were
+     * enrolled through it. So the line now carries only what is true of the
+     * code itself and useful to somebody who has one — that it is single-use
+     * and short-lived — which is also the part that stops people typing a code
+     * they were sent ten minutes ago and reading the refusal as a rejection.
      *
      * Minutes past ninety seconds, plain seconds below it. Rounding 500s to
      * "8 minutes" is honest; rounding 50s to "1 minute" is not, and the
@@ -173,6 +184,13 @@ export function PrivateCodeStep({
                   the first is the server's wording and the second is ours, and
                   because the field stays usable — the new code goes into the
                   same one, into the same live challenge.
+
+                  ⚠️ "A new one" WITHOUT SAYING WHERE FROM, for the reason on
+                  `hint` above: whoever is reading this is not necessarily the
+                  administrator, and the channel a code arrives on is the one
+                  thing a stranger holding the link does not already have. What
+                  is still worth saying is that this field remains the place to
+                  type it — the challenge is alive and retyping here works.
 
                   Out of flow like everything else in this strip, so appearing
                   displaces nothing.

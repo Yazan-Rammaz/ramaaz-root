@@ -241,7 +241,7 @@ export function IdentityStep({
                 }
                 return result?.error ? { error: result.error } : undefined;
             }}
-            onEnroll={async ({ idDocument, selfie }) => {
+            onEnroll={async ({ idDocument, selfie, onAccepted }) => {
                 if (!challengeId) {
                     return { error: 'This sign-in is missing its challenge id.' };
                 }
@@ -309,6 +309,29 @@ export function IdentityStep({
                             'That document could not be enrolled. Try again.',
                     };
                 }
+
+                /*
+                 * ── The one moment the screen can be held ───────────────────
+                 *
+                 * The document and the face have been read, compared and
+                 * SIGNED FOR by the Worker — `verdict.status === 'passed'` with
+                 * a step token is the real judgement, applied at the real
+                 * threshold. What follows is an exchange of that token, and it
+                 * ends in `redirect()`: the router leaves this route as part of
+                 * the response, so there is no instant after it in which the
+                 * outcome is known and the screen still exists.
+                 *
+                 * So the pause goes here, between the verdict and the exchange.
+                 * The screen shows its send-off and this waits for it.
+                 *
+                 * ⚠️ A refusal is still possible at the exchange — an expired
+                 * challenge, most likely, since enrolment sits at the end of a
+                 * ten-minute clock. That is a clock failing, not a face being
+                 * rejected, and it restarts the sign-in rather than accusing
+                 * anybody. Worth knowing that this is what a celebration
+                 * followed by a restart means.
+                 */
+                await onAccepted?.();
 
                 const result = await submitIdentityDocumentAction({
                     step_token: verdict.stepToken,

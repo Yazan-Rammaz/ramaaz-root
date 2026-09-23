@@ -953,15 +953,7 @@ export default function IDCaptureScreen() {
             setStatusText('Hold still…');
         }
         // CRITICAL: handleCaptureClick is NOT in this array — the ref handles it
-    }, [
-        isLockedOn,
-        isCardDetected,
-        isCardCentered,
-        isActive,
-        isVerifying,
-        pollState,
-        isStable,
-    ]);
+    }, [isLockedOn, isCardDetected, isCardCentered, isActive, isVerifying, pollState, isStable]);
 
     return (
         <div className="flex flex-col items-center justify-start h-full bg-white">

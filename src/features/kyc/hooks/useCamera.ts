@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { CAPTURE_MIRROR } from '@/features/kyc/config/capture';
+import { isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 
 interface UseCameraOptions {
     /** Desired facing mode. On desktop, 'environment' is automatically overridden to 'user'. */
@@ -65,35 +66,67 @@ export function useCamera({
     const isMobile = isMobileDevice();
 
     /*
-      NOTHING MIRRORS ANY MORE, by request (2026-09-22).
+      A SELF-VIEW MIRRORS. THE QUESTION IS WHAT COUNTS AS ONE.
 
-      This read `requestedFacing === 'user'` — mirror the self-view, never the
-      document. The self-view half of that is gone: every face screen now shows
-      the camera's own pixels, the same ones the capture keeps and the same ones
-      every later screen displays. One orientation everywhere, so a face cannot
-      flip between the preview, the still and the comparison.
+      The rule everybody reaches for is "mirror the face, never the document",
+      and it is written in terms of the wrong thing — the REQUEST. A document
+      asks for `environment`; a laptop does not have one; `effectiveFacing`
+      opens the front camera instead and says nothing about it. The request
+      still reads "document", so the preview stayed raw on a lens pointed
+      squarely at the user: move the card to your right and it travels left,
+      which is the one thing nobody can align against.
 
-      What that costs, stated plainly because it is the reason it was ever true:
-      a mirror is the natural self-view. You move left, the image moves left,
-      which is how a person lines their own face up. Unmirrored, that is
-      reversed, and centring takes a moment longer. The face gate tolerates it —
-      it measures the stream, not the viewer's intuition — but somebody
-      struggling to centre on a laptop is now an expected complaint rather than
-      a surprising one.
+      So the decision moved to `openFacing` below, which asks the TRACK what
+      opened rather than asking the caller what it wanted. A camera pointed at
+      you is a self-view no matter which step is using it.
 
-      The DOCUMENT half was never in question: a mirrored card reads backwards
-      and people try to "fix" it by turning it over. That is now simply the
-      universal behaviour rather than a special case.
+      ⚠️ WHAT THAT COSTS, and it is a real cost: a mirrored card reads
+      backwards. People try to "fix" that by turning the card over, which is
+      why the document half of the old rule existed at all. It is the trade the
+      reversed movement is worth — and only the PREVIEW is affected. What the
+      scanner reads, what OCR is given and what is stored are all the raw
+      frame: `captureFrame` goes through `drawImage`, which ignores CSS
+      transforms entirely.
 
-      Kept as a named constant rather than deleted. Callers still read it — the
-      ID scanner overlay and corner brackets follow it so they stay in step with
-      the preview — and one `false` here is a smaller, more reversible change
-      than unpicking it from every call site.
-
-      The captured frame was never affected either way: `captureFrame` reads
-      native pixels through `drawImage`, not CSS transforms.
+      Callers follow this flag rather than re-deriving it — the ID scanner
+      overlay and the corner brackets are drawn from raw-frame coordinates and
+      flip with the preview, so they stay on the card either way.
     */
-    const shouldMirror = CAPTURE_MIRROR.enabled && requestedFacing === 'user';
+
+    /**
+     * What the OPEN CAMERA turns out to be, decided once the stream exists.
+     *
+     * ── Why the requested facing is the wrong thing to ask ──────────────────
+     * A document asks for `environment`, and on a laptop there is no such
+     * camera — `effectiveFacing` quietly opens the front one instead. So the
+     * ID screen ran unmirrored on a webcam that is physically pointed at the
+     * user, and the user's own right came out on the left: move the card right,
+     * it travels left. Nobody can align a card against that, and it is not a
+     * document-camera problem at all — it is a self-view wearing a document
+     * camera's request.
+     *
+     * The honest question is which way the lens is pointing, and the only thing
+     * that knows is the track.
+     *
+     * ⚠️ THE PHONE PATHS MUST NOT MOVE, and both are covered by their own
+     * clause rather than by luck:
+     *
+     *   hand-off      the picture is a phone's REAR camera relayed in over
+     *                 WebRTC. The desktop running it is not mobile and the
+     *                 track reports no facing mode, so it looks exactly like a
+     *                 laptop webcam from here — `isShimInstalled()` is the only
+     *                 thing that tells them apart.
+     *   phone direct  /login/identity opened on the handset. `environment` is
+     *                 requested AND granted, so the track says so.
+     *
+     * Null until a stream is open, and the fallback below is the old rule, so
+     * nothing changes in the window before the camera answers.
+     */
+    const [openFacing, setOpenFacing] = useState<'user' | 'environment' | null>(null);
+
+    const shouldMirror =
+        CAPTURE_MIRROR.enabled &&
+        (openFacing === null ? requestedFacing === 'user' : openFacing === 'user');
 
     const effectiveFacing: 'user' | 'environment' = !isMobile ? 'user' : requestedFacing;
 
@@ -150,6 +183,40 @@ export function useCamera({
                 audio: false,
             });
             streamRef.current = stream;
+
+            /*
+             * Which way is this lens actually pointing? See `openFacing`.
+             *
+             * Order matters, and each line is the only thing that can answer
+             * its case:
+             *
+             *   1. A relayed hand-off track reports nothing about itself, so
+             *      the REQUEST is the best evidence there is — and it is good
+             *      evidence: the phone was handed that facing in its own URL
+             *      (`useCameraHandoff` puts `?c=` on it) and opened the camera
+             *      it was asked for. A face step relays the phone's FRONT
+             *      camera and must still mirror; an ID step relays the rear one
+             *      and must not. Deciding by the shim alone would have
+             *      un-mirrored the face hand-off, which is not a case this
+             *      change is allowed to touch.
+             *   2. A real rear camera says `environment` — a phone that granted
+             *      what a document asked for.
+             *   3. Anything else is pointed at whoever is sitting in front of
+             *      it. That covers a laptop webcam serving a document request,
+             *      which is the case this exists for, and it is why the test is
+             *      "not environment" rather than "is user": desktop webcams
+             *      routinely report no facing mode at all, and treating silence
+             *      as a rear camera is what produced the reversed preview.
+             */
+            const settings = stream.getVideoTracks()[0]?.getSettings();
+            setOpenFacing(
+                isShimInstalled()
+                    ? requestedFacing
+                    : settings?.facingMode === 'environment'
+                      ? 'environment'
+                      : 'user',
+            );
+
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 await videoRef.current.play();
@@ -163,7 +230,7 @@ export function useCamera({
             setError(message);
             setIsActive(false);
         }
-    }, [effectiveFacing, width, height, aspectRatio]);
+    }, [effectiveFacing, requestedFacing, width, height, aspectRatio]);
 
     /**
      * Captures the current video frame to a JPEG data URL.

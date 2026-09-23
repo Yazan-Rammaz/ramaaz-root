@@ -1,138 +1,138 @@
 {
-    "auth": {
-        "title": "Login Root !",
-        "subtitle": "Enter Your Private  Code",
-        "privateCodePlaceholder": "Enter Your Private  Code",
-        "codeHint": "Message the system on WhatsApp to get your code.",
-        "codeHintMinutes": "Message the system on WhatsApp to get your code. It lasts about {minutes, plural, one {a minute} other {# minutes}}.",
-        "codeHintSeconds": "Message the system on WhatsApp to get your code. It lasts about {seconds} seconds.",
-        "codeSpent": "Message the system on WhatsApp for a new code, then enter it here.",
-        "expired": "This sign-in has expired.",
-        "startOver": "Open your access link again",
-        "noAccessTitle": "You don’t have access",
-        "noAccessBody": "This link can’t be opened. It may have expired, been used already, or never been valid. Ask a root administrator to issue you a new one — there is no other way in.",
-        "noSessionTitle": "Your sign-in didn’t carry over",
-        "noSessionBody": "This browser has no sign-in in progress. If you opened your link inside WhatsApp and then switched browsers, it was left behind — open the access link again, and stay in the browser it opens.",
-        "reenterPrompt": "Refreshing this page won’t help — there is nothing here to reload.",
-        "reenterCta": "Open your access link again",
-        "identityTitle": "Identity Verification !",
-        "liveFaceDetection": "Live Face Detection",
-        "faceLoading": "Getting the camera ready…",
-        "faceNoFace": "Position your face inside the frame",
-        "faceMultiple": "Only one person in the frame, please",
-        "faceTooFar": "Move a little closer",
-        "faceTooClose": "Move back slightly",
-        "faceOffCentre": "Centre your face in the frame",
-        "faceNotFacing": "Look straight at the camera",
-        "faceTooDark": "Find brighter light",
-        "faceTooBright": "Too bright — move out of direct light",
-        "faceTooBlurry": "Hold steady so the camera can focus",
-        "faceMoving": "Hold still",
-        "faceHold": "Hold it there…",
-        "faceChecking": "Checking…",
-        "faceCaptureFailed": "Could not capture that. Try again.",
-        "faceCameraBlocked": "Camera access is blocked. Allow it in your browser, then open your access link again.",
-        "faceVerifyFailed": "Verification failed — try again",
-        "faceVerified": "Face verified",
-        "deviceTitle": "Verify This Device",
-        "deviceBody": "Your account is protected by a passkey on this device. Confirm with your fingerprint, face or device PIN when your browser asks.",
-        "devicePrompting": "Waiting for your device…",
-        "deviceRetry": "Try Again",
-        "deviceCancelled": "That was cancelled, or this device has no passkey for this link.",
-        "deviceUnsupported": "This browser cannot use passkeys. Open the link in a current version of Chrome, Edge, Safari or Firefox.",
-        "deviceFailed": "Could not verify this device",
-        "introGreeting": "<person>{name}</person>, <hi>Welcome !</hi>",
-        "introWelcome": "Welcome !",
-        "introTitle": "Your First Login Root !",
-        "introBody": "You Are Required To Identity Verification & Read And Agree To The Agreement And Terms Of Use.",
-        "introConsent": "Consent Constitutes A Full And Binding Commitment, And Shall Be Considered A Formal Legal Contract In Accordance With The Applicable Laws And Provisions. If You Do Not Agree, Please Refrain From Proceeding And Click <strong>“Disagree”</strong>.",
-        "introTerms": "Terms Of Services",
-        "introStart": "Start Identity Verification",
-        "introDisagree": "Disagree",
-        "faceSetupFailed": "Could not start the face check.",
-        "faceCameraFramerate": "This camera is too slow for the face check — it needs at least 15 frames per second. Use the phone hand-off instead, or try a device with a better camera.",
-        "faceSetupFailedCode": "Could not start the face check ({code}).",
-        "faceRotateTitle": "Turn your device upright",
-        "faceRotateBody": "The face check only runs in portrait. Rotate your tablet and it will start on its own.",
-        "faceRotateManual": "This browser will not turn the screen for you — please rotate the device by hand.",
-        "livenessRecording": "Rec",
-        "livenessCancel": "Cancel the check",
-        "livenessPhotosensitivity": "This check flashes coloured light.",
-        "matchComparing": "AI is comparing your face with your ID…",
-        "matchDone": "ID Matching With Your Photo Done",
-        "matchWrong": "ID Matching With Your Photo Not Correct",
-        "matchFacePhoto": "Face Photo",
-        "matchNoMatch": "Face did not match",
-        "matchReview": "Match accepted with low confidence — your verification will be reviewed by our team. Continuing to the next step…",
-        "matchFailed": "We noticed a discrepancy in the image and there is an issue with your verification.",
-        "matchTryAgain": "Try Again With The Correction",
-        "matchRetry": "Rematch"
+  "auth": {
+    "title": "Login Root !",
+    "subtitle": "Enter Your Private  Code",
+    "privateCodePlaceholder": "Enter Your Private  Code",
+    "codeHint": "Your code is single-use and expires shortly after it is issued.",
+    "codeHintMinutes": "Your code is single-use and lasts about {minutes, plural, one {a minute} other {# minutes}}.",
+    "codeHintSeconds": "Your code is single-use and lasts about {seconds} seconds.",
+    "codeSpent": "That code can no longer be used. Enter a new one here once you have it.",
+    "expired": "This sign-in has expired.",
+    "startOver": "Open your access link again",
+    "noAccessTitle": "You don’t have access",
+    "noAccessBody": "This link can’t be opened. It may have expired, been used already, or never been valid. Ask a root administrator to issue you a new one — there is no other way in.",
+    "noSessionTitle": "Your sign-in didn’t carry over",
+    "noSessionBody": "This browser has no sign-in in progress. If you opened your link in one app and then switched browsers, it was left behind — open the access link again, and stay in the browser it opens.",
+    "reenterPrompt": "Refreshing this page won’t help — there is nothing here to reload.",
+    "reenterCta": "Open your access link again",
+    "identityTitle": "Identity Verification !",
+    "liveFaceDetection": "Live Face Detection",
+    "faceLoading": "Getting the camera ready…",
+    "faceNoFace": "Position your face inside the frame",
+    "faceMultiple": "Only one person in the frame, please",
+    "faceTooFar": "Move a little closer",
+    "faceTooClose": "Move back slightly",
+    "faceOffCentre": "Centre your face in the frame",
+    "faceNotFacing": "Look straight at the camera",
+    "faceTooDark": "Find brighter light",
+    "faceTooBright": "Too bright — move out of direct light",
+    "faceTooBlurry": "Hold steady so the camera can focus",
+    "faceMoving": "Hold still",
+    "faceHold": "Hold it there…",
+    "faceChecking": "Checking…",
+    "faceCaptureFailed": "Could not capture that. Try again.",
+    "faceCameraBlocked": "Camera access is blocked. Allow it in your browser, then open your access link again.",
+    "faceVerifyFailed": "Verification failed — try again",
+    "faceVerified": "Face verified",
+    "deviceTitle": "Verify This Device",
+    "deviceBody": "Your account is protected by a passkey on this device. Confirm with your fingerprint, face or device PIN when your browser asks.",
+    "devicePrompting": "Waiting for your device…",
+    "deviceRetry": "Try Again",
+    "deviceCancelled": "That was cancelled, or this device has no passkey for this link.",
+    "deviceUnsupported": "This browser cannot use passkeys. Open the link in a current version of Chrome, Edge, Safari or Firefox.",
+    "deviceFailed": "Could not verify this device",
+    "introGreeting": "<person>{name}</person>, <hi>Welcome !</hi>",
+    "introWelcome": "Welcome !",
+    "introTitle": "Your First Login Root !",
+    "introBody": "You Are Required To Identity Verification & Read And Agree To The Agreement And Terms Of Use.",
+    "introConsent": "Consent Constitutes A Full And Binding Commitment, And Shall Be Considered A Formal Legal Contract In Accordance With The Applicable Laws And Provisions. If You Do Not Agree, Please Refrain From Proceeding And Click <strong>“Disagree”</strong>.",
+    "introTerms": "Terms Of Services",
+    "introStart": "Start Identity Verification",
+    "introDisagree": "Disagree",
+    "faceSetupFailed": "Could not start the face check.",
+    "faceCameraFramerate": "This camera is too slow for the face check — it needs at least 15 frames per second. Use the phone hand-off instead, or try a device with a better camera.",
+    "faceSetupFailedCode": "Could not start the face check ({code}).",
+    "faceRotateTitle": "Turn your device upright",
+    "faceRotateBody": "The face check only runs in portrait. Rotate your tablet and it will start on its own.",
+    "faceRotateManual": "This browser will not turn the screen for you — please rotate the device by hand.",
+    "livenessRecording": "Rec",
+    "livenessCancel": "Cancel the check",
+    "livenessPhotosensitivity": "This check flashes coloured light.",
+    "matchComparing": "AI is comparing your face with your ID…",
+    "matchDone": "ID Matching With Your Photo Done",
+    "matchWrong": "ID Matching With Your Photo Not Correct",
+    "matchFacePhoto": "Face Photo",
+    "matchNoMatch": "Face did not match",
+    "matchReview": "Match accepted with low confidence — your verification will be reviewed by our team. Continuing to the next step…",
+    "matchFailed": "We noticed a discrepancy in the image and there is an issue with your verification.",
+    "matchTryAgain": "Try Again With The Correction",
+    "matchRetry": "Rematch"
+  },
+  "common": {
+    "appName": "Ramaaz Root",
+    "language": "Language",
+    "logout": "Logout"
+  },
+  "forbidden": {
+    "title": "403 — Not allowed",
+    "message": "Your role doesn’t have access to this page.",
+    "backToDashboard": "Back to dashboard"
+  },
+  "roles": {
+    "super_admin": "Super Admin",
+    "country_manager": "Country Manager",
+    "agent": "Agent"
+  },
+  "shell": {
+    "nav": {
+      "systems": "Systems",
+      "rocket": "System Projects",
+      "translate": "System Languages",
+      "currencies": "Currencies",
+      "countries": "Countries",
+      "database": "Database",
+      "hierarchy": "Hierarchy",
+      "search": "Search",
+      "close": "Close",
+      "add": "Add",
+      "lock": "Lock"
     },
-    "common": {
-        "appName": "Ramaaz Root",
-        "language": "Language",
-        "logout": "Logout"
-    },
-    "forbidden": {
-        "title": "403 — Not allowed",
-        "message": "Your role doesn’t have access to this page.",
-        "backToDashboard": "Back to dashboard"
-    },
-    "roles": {
-        "super_admin": "Super Admin",
-        "country_manager": "Country Manager",
-        "agent": "Agent"
-    },
-    "shell": {
-        "nav": {
-            "systems": "Systems",
-            "rocket": "System Projects",
-            "translate": "System Languages",
-            "currencies": "Currencies",
-            "countries": "Countries",
-            "database": "Database",
-            "hierarchy": "Hierarchy",
-            "search": "Search",
-            "close": "Close",
-            "add": "Add",
-            "lock": "Lock"
-        },
-        "side": {
-            "avatar": "Profile",
-            "dashboard": "Dashboard",
-            "chat": "Chat",
-            "settings": "Settings",
-            "systems": "Systems",
-            "logout": "Sign out"
-        }
-    },
-    "system": {
-        "title": "System Projects",
-        "empty": "No system projects yet."
-    },
-    "language": {
-        "title": "System Languages",
-        "empty": "No system languages yet."
-    },
-    "region": {
-        "title": "System Geographic Regions",
-        "empty": "No Have Added Any Countries",
-        "emptyAdmin": "No Have Added Any Administrative Divisions",
-        "tabs": {
-            "countries": "Countries",
-            "admin": "Administrative Divisions"
-        },
-        "addTitle": "Add Countries",
-        "level": "Level {n}"
-    },
-    "currency": {
-        "title": "System Currencies",
-        "empty": "No system currencies yet.",
-        "filter": {
-            "cash": "Cash",
-            "crypto": "Crypto",
-            "gold": "Gold",
-            "silver": "Silver"
-        }
+    "side": {
+      "avatar": "Profile",
+      "dashboard": "Dashboard",
+      "chat": "Chat",
+      "settings": "Settings",
+      "systems": "Systems",
+      "logout": "Sign out"
     }
+  },
+  "system": {
+    "title": "System Projects",
+    "empty": "No system projects yet."
+  },
+  "language": {
+    "title": "System Languages",
+    "empty": "No system languages yet."
+  },
+  "region": {
+    "title": "System Geographic Regions",
+    "empty": "No Have Added Any Countries",
+    "emptyAdmin": "No Have Added Any Administrative Divisions",
+    "tabs": {
+      "countries": "Countries",
+      "admin": "Administrative Divisions"
+    },
+    "addTitle": "Add Countries",
+    "level": "Level {n}"
+  },
+  "currency": {
+    "title": "System Currencies",
+    "empty": "No system currencies yet.",
+    "filter": {
+      "cash": "Cash",
+      "crypto": "Crypto",
+      "gold": "Gold",
+      "silver": "Silver"
+    }
+  }
 }
