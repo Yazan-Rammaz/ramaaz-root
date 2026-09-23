@@ -712,7 +712,6 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
     pointer-events: none;
 
     /* ── ABOVE AWS's camera, and it has to be stated ────────────────────────
@@ -731,24 +730,45 @@
      * must stay on top of it. */
     z-index: 1;
 
-    /* ⚠️ THE `url()` COMES FIRST AND CARRIES THE WHOLE DECLARATION WITH IT.
+    /* ── TWO WAYS TO MAKE ONE PANE, chosen at runtime ───────────────────────
      *
-     * `--live-glass-warp` is written by `LivenessCamera` and is `none` when the
-     * warp is off — never an empty string and never a missing property. An
-     * invalid or dangling `url()` invalidates the ENTIRE `filter` value, so a
-     * dead reference here would take the blur and the saturation down with it
-     * and leave a perfectly sharp camera. The symptom is "the glass stopped
-     * working", with nothing in the console; the cause is one unresolved id.
+     * Neither technique works everywhere, and the failures are silent in both
+     * directions. Both are rendered; `LivenessCamera` PROBES which one this
+     * browser can actually do and sets `data-glass` on the wrapper.
      *
-     * This is a `filter`, NOT a `backdrop-filter`, and that is the point of the
-     * whole second-video design: the element HAS content — the same stream —
-     * so there is a real picture to bend. `backdrop-filter` needs GPU
-     * compositing and silently renders nothing without it, which is how the
-     * checking pane lost three rounds. */
-    filter:
-        var(--live-glass-warp, none)
-        blur(var(--live-glass-blur, 1rem))
-        saturate(var(--live-glass-saturation, 1.2));
+     *   copy   a second <video> on the same MediaStream, blurred as an
+     *          element with `filter`. Works in Chromium. WebKit refuses to
+     *          play one camera stream into two video elements, so on an iPhone
+     *          the copy stays blank and the pane never appears.
+     *
+     *   pane   an empty element softening what is painted behind it with
+     *          `backdrop-filter`. Works on iOS, where it is a first-class
+     *          feature. Reported as rendering nothing in Chromium here — the
+     *          same silent no-op that cost the CHECKING pane three rounds.
+     *
+     * ⚠️ THE CHOICE IS PROBED, NOT SNIFFED. The question is whether this engine
+     * will decode one camera into two elements, and a user-agent string is a
+     * guess at that; assigning the stream and looking at `videoWidth` is the
+     * answer itself. It also cannot rot when a browser gains or loses the
+     * capability.
+     *
+     * ⚠️ NO `url()` IN EITHER. An SVG reference filter inside a
+     * `backdrop-filter` passes `@supports`, fails at paint, and an invalid
+     * `url()` invalidates the WHOLE declaration — blur and saturation with it.
+     * The refraction is not missed: this pane exists to SOFTEN a close-up lens,
+     * and refraction is distortion. See `CAPTURE_LIVE_GLASS`. */
+
+    /* Hidden until the probe has decided, so a browser that can do BOTH never
+       shows two panes stacked — which is twice the blur and reads as a fault. */
+    display: none;
+
+    /* ⚠️ THE MASK LIVES ON THE SHARED RULE, and it has to.
+     *
+     * It was briefly inside the `--pane` variant, which left the `--copy`
+     * variant with no mask at all: instead of an oval on the face, the whole
+     * camera came back blurred. Both techniques produce the SAME pane and
+     * differ only in how the blur is obtained, so everything about its shape
+     * belongs here where neither can be missing it. */
 
     /* ── AN OVAL ON THE FACE ────────────────────────────────────────────────
      *
@@ -792,6 +812,33 @@
         --live-glass-cy 260ms linear,
         --live-glass-rx 260ms linear,
         --live-glass-ry 260ms linear;
+}
+
+.rz-liveness[data-glass='copy'] .rz-live-glass--copy,
+.rz-liveness[data-glass='pane'] .rz-live-glass--pane {
+    display: block;
+}
+
+.rz-live-glass--copy {
+    object-fit: cover;
+    filter:
+        blur(var(--live-glass-blur, 1rem))
+        saturate(var(--live-glass-saturation, 1.2));
+}
+
+.rz-live-glass--pane {
+    backdrop-filter:
+        blur(var(--live-glass-blur, 1rem))
+        saturate(var(--live-glass-saturation, 1.2));
+    -webkit-backdrop-filter:
+        blur(var(--live-glass-blur, 1rem))
+        saturate(var(--live-glass-saturation, 1.2));
+    /* Chromium will not composite a backdrop-filter element unless something
+       asks it to. Harmless where it is already composited.
+       ⚠️ NOT `transform: translateZ(0)` — a transform makes the element its own
+       backdrop root, so it would sample an EMPTY backdrop and render nothing:
+       the same symptom, caused by the fix for it. */
+    will-change: backdrop-filter;
 }
 
 /* ── What must stay ON TOP of the pane ──────────────────────────────────────

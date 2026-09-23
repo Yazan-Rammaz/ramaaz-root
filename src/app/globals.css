@@ -600,6 +600,27 @@ body {
     filter:
         blur(var(--glass-blur, 0.625rem))
         saturate(var(--glass-saturation, 1.2));
+
+    /* ⚠️ OVERSIZED ON PURPOSE — a blur fades its own element's alpha.
+       -----------------------------------------------------------------------
+       A Gaussian blur spreads each pixel outward, so around the element's
+       boundary there is nothing to spread INTO and the alpha falls off over
+       roughly the blur radius. At 17px that is a semi-transparent band all the
+       way round the pane, and what shows through it is the SHARP photograph
+       underneath — a crisp border framing a frosted middle, which reads as the
+       glass not reaching the edges of the frame.
+
+       Scaling the copy past the pane pushes that fade outside the clip
+       (`.verdict-glass` is `overflow: hidden`), so only the solid middle of the
+       blur is ever seen. The same clamp-to-edge argument the portrait pipeline
+       makes for its own blurred copy.
+
+       It costs a slight magnification of the copy relative to the picture it
+       stands over. Invisible here: the copy is blurred past the point where a
+       few percent of scale can be perceived, and the two are never sharp at the
+       same time. */
+    transform: scale(1.08);
+    transform-origin: center;
 }
 
 /* The frost. Small and NEUTRAL — it gives the pane a body, it is not what

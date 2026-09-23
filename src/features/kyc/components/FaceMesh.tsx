@@ -2,7 +2,11 @@
 
 import { useEffect, useRef } from 'react';
 
-import { CAPTURE_LIVE_MESH, CAPTURE_MIRROR } from '@/features/kyc/config/capture';
+import {
+    CAPTURE_LIVE_MESH,
+    CAPTURE_MESH_FILL,
+    CAPTURE_MIRROR,
+} from '@/features/kyc/config/capture';
 import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 
 /**
@@ -53,9 +57,23 @@ import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 /** The edge list's type, derived from a value — `Connection` is not exported. */
 type Edges = typeof import('@mediapipe/tasks-vision').FaceLandmarker.FACE_LANDMARKS_TESSELATION;
 
+/**
+ * A `#rrggbb` token plus an alpha, as an `rgba()` string.
+ *
+ * The fill colour is shared with the passed verdict so the two cannot drift,
+ * and canvas wants a colour string per draw — a hex token has no alpha channel
+ * to vary.
+ */
+function withAlpha(hex: string, alpha: number): string {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha.toFixed(3)})`;
+}
+
 /** One gem: which vertex it sits on, when it appeared, and how long it lives. */
 interface Gem {
     at: number;
+    /** Green once the match bar has filled this far — decided at birth. */
+    green: boolean;
     born: number;
     life: number;
 }
@@ -139,8 +157,24 @@ function coarsen(points: Float32Array, edges: Edges, cell: number): Coarse {
         out.push(a, b);
     }
 
+    /*
+     * Ordered CHIN-FIRST, so colouring the first N edges fills the mesh from
+     * the bottom upward like a gauge.
+     *
+     * Sorted once, on the build frame, and never again: the order has to be
+     * STABLE or the green would reshuffle across the face every time somebody
+     * tilted their head, which reads as noise rather than as progress. Faces do
+     * not turn upside down, so one ordering holds for the session.
+     */
+    const order: number[] = [];
+    for (let e = 0; e < out.length; e += 2) order.push(e);
+    const midY = (e: number) => points[out[e] * 2 + 1] + points[out[e + 1] * 2 + 1];
+    order.sort((a, b) => midY(b) - midY(a));
+    const sorted: number[] = [];
+    for (const e of order) sorted.push(out[e], out[e + 1]);
+
     return {
-        edges: Int32Array.from(out),
+        edges: Int32Array.from(sorted),
         // The gems sit on these, so they land on the intersections of the mesh
         // that is actually drawn rather than on discarded landmarks between
         // them — which read as specks floating in the middle of a triangle.
@@ -150,6 +184,8 @@ function coarsen(points: Float32Array, edges: Edges, cell: number): Coarse {
 
 export function FaceMesh({
     videoRef,
+    canvasRef,
+    matchRef,
     onBounds,
 }: {
     /**
@@ -167,9 +203,26 @@ export function FaceMesh({
      * two estimates drift — the pane would sit slightly off the wireframe it is
      * supposed to be behind, which is the one error that cannot be hidden.
      */
+    /**
+     * The canvas, owned by the caller.
+     *
+     * The viewfinder's zoom transforms the video, the glass and this together —
+     * they share one coordinate space, so scaling any of them alone tears the
+     * overlay off the face it describes. That makes the element the caller's to
+     * move.
+     */
+    canvasRef: React.RefObject<HTMLCanvasElement | null>;
+    /**
+     * How full AWS's match bar is, 0..1 — read from their own DOM by the
+     * caller.
+     *
+     * A share of the wireframe equal to this turns green, from the chin upward.
+     * Their number rather than ours: a gauge that disagreed with the hint
+     * beside it would be worse than no gauge.
+     */
+    matchRef: React.RefObject<number>;
     onBounds?: (b: { cx: number; cy: number; rx: number; ry: number }) => void;
 }) {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
     const { detect, isReady } = useFaceLandmarker();
 
     /**
@@ -220,6 +273,8 @@ export function FaceMesh({
     /** The clustered mesh actually drawn. Built once; see `coarsen`. */
     const coarseRef = useRef<Coarse | null>(null);
     const gemsRef = useRef<Gem[]>([]);
+    /** The fill, eased toward `matchRef` — see `CAPTURE_MESH_FILL.smoothing`. */
+    const fillRef = useRef(0);
 
     useEffect(() => {
         let cancelled = false;
@@ -385,20 +440,55 @@ export function FaceMesh({
              * soft tubing instead of geometry, because it takes the corner off
              * every triangle — and the corners are what it is made of.
              */
-            ctx.beginPath();
             const { edges: pairs, vertices: nodes } = coarse;
-            for (let e = 0; e < pairs.length; e += 2) {
-                const a = pairs[e] * 2;
-                const b = pairs[e + 1] * 2;
-                ctx.moveTo(cur[a] * w, cur[a + 1] * h);
-                ctx.lineTo(cur[b] * w, cur[b + 1] * h);
-            }
+
+            /*
+             * ── How much of the mesh is green ───────────────────────────────
+             *
+             * Eased toward AWS's bar, and applied as a SHARE OF THE LINES
+             * rather than as a tint over all of them. The eye counts how much
+             * has changed, which is a quantity; blending every line toward
+             * green says the same thing in a way nobody can read a value off.
+             *
+             * `pairs` is ordered chin-first (see `coarsen`), so it fills
+             * upward.
+             */
+            const want = CAPTURE_MESH_FILL.enabled ? (matchRef.current ?? 0) : 0;
+            fillRef.current += (want - fillRef.current) * CAPTURE_MESH_FILL.smoothing;
+            // Rounded to a whole EDGE — an odd index would pair one vertex with
+            // the next edge's and draw a line across the face.
+            const lit = Math.floor((fillRef.current * pairs.length) / 2) * 2;
+
+            const strokeRange = (from: number, to: number, colour: string) => {
+                if (to <= from) return;
+                ctx.beginPath();
+                for (let e = from; e < to; e += 2) {
+                    const a = pairs[e] * 2;
+                    const b = pairs[e + 1] * 2;
+                    ctx.moveTo(cur[a] * w, cur[a + 1] * h);
+                    ctx.lineTo(cur[b] * w, cur[b + 1] * h);
+                }
+                ctx.strokeStyle = colour;
+                ctx.stroke();
+            };
+
+            /*
+             * `miter` joins and `butt` caps: `round` is what made this read as
+             * soft tubing instead of geometry, because it takes the corner off
+             * every triangle — and the corners are what it is made of.
+             */
             ctx.lineJoin = 'miter';
             ctx.miterLimit = 6;
             ctx.lineCap = 'butt';
             ctx.lineWidth = Math.max(1, lineWidth * dpr);
-            ctx.strokeStyle = `rgba(255, 255, 255, ${baseAlpha})`;
-            ctx.stroke();
+
+            /*
+             * The filled part is BRIGHTER as well as greener. At this alpha on
+             * a moving camera a hue change alone is close to invisible — the
+             * mesh would appear to do nothing while the bar filled.
+             */
+            strokeRange(0, lit, withAlpha(CAPTURE_MESH_FILL.colour, baseAlpha * 2.1));
+            strokeRange(lit, pairs.length, `rgba(255, 255, 255, ${baseAlpha})`);
 
             /*
              * ── The gems ────────────────────────────────────────────────────
@@ -418,6 +508,11 @@ export function FaceMesh({
             while (gems.length < dotCount) {
                 gems.push({
                     at: pick(),
+                    // Decided at BIRTH and never changed. One that turned green
+                    // mid-flare would draw the eye to the change rather than to
+                    // the sparkle, and it is the PROPORTION that carries the
+                    // meaning anyway.
+                    green: Math.random() < fillRef.current,
                     // Staggered into the PAST, so the first set is already
                     // mid-life at different points rather than all nine
                     // flaring together on the frame the camera opens.
@@ -431,6 +526,7 @@ export function FaceMesh({
                 const t = (now - gem.born) / gem.life;
                 if (t >= 1) {
                     gem.at = pick();
+                    gem.green = Math.random() < fillRef.current;
                     gem.born = now;
                     gem.life =
                         dotMinLifeMs + Math.random() * (dotMaxLifeMs - dotMinLifeMs);
@@ -453,7 +549,12 @@ export function FaceMesh({
                 // per-draw blur pass and the most expensive thing that could be
                 // asked for on this screen.
                 const halo = ctx.createRadialGradient(px, py, 0, px, py, core * 4);
-                halo.addColorStop(0, `rgba(210, 235, 255, ${0.5 * flare})`);
+                halo.addColorStop(
+                    0,
+                    gem.green
+                        ? withAlpha(CAPTURE_MESH_FILL.colour, 0.5 * flare)
+                        : `rgba(210, 235, 255, ${0.5 * flare})`,
+                );
                 halo.addColorStop(1, 'rgba(160, 200, 255, 0)');
                 ctx.fillStyle = halo;
                 ctx.beginPath();
@@ -477,14 +578,21 @@ export function FaceMesh({
                 ctx.lineTo(px - arm, py);
                 ctx.lineTo(px - core * 0.36, py - core * 0.36);
                 ctx.closePath();
-                ctx.fillStyle = `rgba(255, 255, 255, ${0.25 + 0.75 * flare})`;
+                ctx.fillStyle = gem.green
+                    ? withAlpha(CAPTURE_MESH_FILL.colour, 0.3 + 0.7 * flare)
+                    : `rgba(255, 255, 255, ${0.25 + 0.75 * flare})`;
                 ctx.fill();
             }
         };
 
         frame = requestAnimationFrame(draw);
         return () => cancelAnimationFrame(frame);
-    }, [videoRef]);
+        // All three are REFS, whose identity is stable for the component's
+        // life — listing them changes nothing at runtime and keeps the rule
+        // satisfied honestly rather than by suppressing it. The effect must not
+        // re-run: it owns an animation frame and the gems' lifetimes, and
+        // restarting it would reset every twinkle mid-flare.
+    }, [videoRef, canvasRef, matchRef]);
 
     if (!CAPTURE_LIVE_MESH.enabled) return null;
 

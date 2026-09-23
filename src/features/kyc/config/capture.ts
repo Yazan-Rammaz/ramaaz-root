@@ -967,6 +967,340 @@ export const CAPTURE_LIVE_MESH = {
 } as const;
 
 /**
+ * ── 11c. The viewfinder's zoom, and the mesh's fill ─────────────────────────
+ *
+ * Two things that both hang off AWS's match bar.
+ *
+ * ── ⚠️ THE ZOOM IS DISPLAY-ONLY. IT CANNOT HELP ANYONE PASS ─────────────────
+ * It has to be said here because the opposite is the obvious reason to want it.
+ *
+ * AWS issues its oval in the session at about 97% of the STREAM's height and
+ * measures face fit against the stream. The required face-to-frame ratio is
+ * therefore proportional: magnify the picture and the oval magnifies with it.
+ * A lens zoom is worse still — it crops the field of view, so the head-room
+ * goes and the person has to come CLOSER. That was tried and reverted
+ * (`git log` 5d7f21c); see §2.
+ *
+ * The only way to make AWS see a larger face is to feed the detector a cropped,
+ * upscaled copy of the camera instead of the camera. That is out of the
+ * question: it is modified video entering the anti-spoofing path, it degrades
+ * the frames the freshness measurement reads, and it makes a liveness check
+ * easier to pass. A security regression wearing a UI change.
+ *
+ * So this scales what is ON SCREEN and nothing else. AWS's stream, its bar, its
+ * hints and the captured photograph are all untouched — the capture is drawn
+ * from the video's decoded frames, which ignore CSS transforms entirely (the
+ * same mechanism that keeps `CAPTURE_MIRROR` out of the stored image).
+ *
+ * What it is FOR: the mesh and the glass are the feedback, and at arm's length
+ * they are small. Magnifying the viewfinder makes them readable while the
+ * person is deciding how to move.
+ *
+ * ⚠️ AND IT RELEASES BEFORE THE SHUTTER. Held at the moment the frame is kept,
+ * every screen afterwards — the verdict, the comparison, the avatar — would
+ * show a picture framed differently from the one the person was just looking
+ * at. See `releaseAt`.
+ */
+export const CAPTURE_LIVE_ZOOM = {
+    /**
+     * ⚠️ OFF — it was built, tried, and it LIES TO THE USER.
+     *
+     * Observed 2026-09-23: with the zoom on, the face filled about 90% of the
+     * frame while AWS's bar sat at 20% and its hint still read "Move a little
+     * closer". Both are correct — the bar measures the STREAM and the zoom only
+     * magnified the screen — but the person cannot see that. The picture says
+     * "you have arrived" and the text says "keep going", and the picture wins.
+     * They stop moving, the bar never fills, and the check times out.
+     *
+     * That is worse than no zoom: it does not merely fail to help, it actively
+     * works against the instruction beside it.
+     *
+     * ── What would make it honest ───────────────────────────────────────────
+     * A visible TARGET that scales with it. If AWS's oval guide is on screen
+     * and is magnified by the same transform, then the face and the thing it
+     * has to fill grow together — the relationship the person is judging is
+     * preserved, and the zoom becomes what it was meant to be: a magnifying
+     * glass over the whole feedback loop rather than over half of it.
+     *
+     * That is one change away. The oval canvas is currently `opacity: 0` (see
+     * liveness.css, which carries the exact recipe for bringing the ring back),
+     * and it is a SIBLING of the video inside `.amplify-liveness-video-anchor`
+     * — so transforming the anchor instead of the video would scale the guide
+     * and the face as one, for free.
+     *
+     * Until the guide is back, this stays off. The code below is correct and
+     * costs nothing while disabled: `handleMeshBounds` returns before writing
+     * any transform, and the sampling loop keeps ownership of the mirror.
+     */
+    enabled: false,
+
+    /**
+     * How large the face is allowed to become, as a fraction of the frame's
+     * width — the zoom is whatever multiple gets the mesh to this size.
+     *
+     * Driven from the mesh's own bounding box, so it is a real measurement of
+     * the face rather than of the person.
+     */
+    targetWidth: 0.62,
+
+    /**
+     * The most the viewfinder may be magnified.
+     *
+     * ⚠️ Low, and not for taste. This is a DIGITAL zoom on a preview: every
+     * multiple throws away resolution, and the mesh's hairlines are the first
+     * thing to go soft. Past about 1.6 the thing being magnified for legibility
+     * stops being legible.
+     */
+    max: 1.55,
+
+    /**
+     * How far the bar must fill before the zoom lets go, 0..1.
+     *
+     * Slightly under 1: AWS asks the person to hold still at the top of the
+     * bar, and the release has to have COMPLETED by the time the shutter fires
+     * or the frame is kept mid-animation. Starting it a little early costs
+     * nothing — by then they are in position and no longer reading the mesh.
+     */
+    releaseAt: 0.9,
+
+    /**
+     * How long the zoom takes to move, in ms.
+     *
+     * Slow. The viewfinder is tracking a face that is itself moving, and a
+     * quick follow turns every lean into a lurch of the whole picture — which
+     * is both unpleasant and makes the person over-correct. This is a camera
+     * operator, not a spring.
+     */
+    ms: 620,
+} as const;
+
+/**
+ * ── 11e. The CAMERA's zoom ──────────────────────────────────────────────────
+ *
+ * `track.applyConstraints({ advanced: [{ zoom }] })` — the camera's own zoom,
+ * so the person can sit further back and still fill AWS's oval.
+ *
+ * ── ⚠️ THIS ONE REALLY DOES MOVE THE BAR, unlike §11c ───────────────────────
+ * The distinction is the whole reason both exist, and it is worth stating in
+ * full because the two look identical on screen.
+ *
+ * A DISPLAY zoom (§11c) is a CSS transform. It happens in the compositor,
+ * after decode, and changes only painting. Confirmed in the SDK's own source:
+ * the bar is an IoU between a face box from `detectFaces(videoEl)` — the
+ * element's DECODED frames — and an oval from
+ * `getOvalDetailsFromSessionInformation({ videoWidth })`. Neither reads a
+ * transform, so the bar does not move. That version is off for exactly this
+ * reason: it showed a face filling the frame beside a bar reading 20%.
+ *
+ * A CAMERA zoom changes the STREAM. The field of view narrows, so the face
+ * occupies more of the 1280x960 — while the oval, derived from `videoWidth`,
+ * stays exactly the same size. The IoU rises. The bar fills. It is the same
+ * thing as fitting a longer lens, and the frames AWS analyses are still
+ * genuine, full-pipeline camera output.
+ *
+ * ⚠️ WHAT IS NOT ACCEPTABLE, for the avoidance of doubt: cropping and
+ * re-encoding the stream through a canvas to hand the detector a bigger face.
+ * That is modified video entering the anti-spoofing path, it degrades the
+ * frames the freshness measurement reads, and it makes a liveness check easier
+ * to pass. A camera control is a camera. A re-encode is a forgery.
+ *
+ * ── The cost, so it is a decision ───────────────────────────────────────────
+ * Zoom crops the sensor, so the PHOTOGRAPH comes out tighter — which is
+ * precisely the complaint that got an earlier zoom experiment reverted (§2,
+ * "it is a face and nothing else"). `releaseAt` is the answer: the zoom goes
+ * back to 1 before the shutter, and the frames kept after that are the ones
+ * filed. It also costs resolution, on a capture that §1 spent real effort
+ * making sharper.
+ */
+export const CAPTURE_CAMERA_ZOOM = {
+    enabled: true,
+
+    /**
+     * How far past the camera's OWN minimum it may zoom.
+     *
+     * ⚠️ Relative, not absolute. The `zoom` capability has no standard unit —
+     * some devices report 1..8, others 100..800 — so the only portable reading
+     * is "a multiple of `capabilities.zoom.min`". An absolute 1.5 would be no
+     * zoom at all on the second kind of camera and would be silently ignored.
+     *
+     * ── Why 3 and not 1.5 ───────────────────────────────────────────────────
+     * 1.5 was set when the loop could only ramp UP, where a low ceiling was the
+     * only protection against zooming past the oval and stranding somebody at
+     * "move a little away". It stopped an iPhone dead at half a bar: the
+     * ceiling bound long before the bar filled, the clamp reversed the
+     * direction, and it sat there oscillating.
+     *
+     * Overshoot is now the controller's problem, not this number's — AWS says
+     * "move away", the direction flips, and it settles. So this is no longer a
+     * safety limit. It is an IMAGE QUALITY limit: zoom crops the sensor, and
+     * past about 3x the stream AWS is analysing has lost enough detail to start
+     * costing the anti-spoofing measurement, on a capture §1 spent real effort
+     * sharpening.
+     */
+    max: 3,
+
+    /**
+     * ── IT KEEPS GOING UNTIL AWS'S BAR IS FULL ──────────────────────────────
+     *
+     * The controller is closed-loop on the BAR, not on a face size.
+     *
+     * ⚠️ An earlier version aimed at a face width — "make the face 55% of the
+     * frame" — and it stopped there with the bar at a third. That number was a
+     * guess at what AWS wants, and AWS does not want a width: it wants an
+     * intersection-over-union against an oval whose size comes from the session.
+     * Any face-size target is a second opinion about the only question that
+     * matters, and it was wrong. So the loop now watches the answer instead of
+     * predicting it, and stops when the answer says so.
+     */
+
+    /** Keep zooming until the bar reaches this, 0..1. */
+    fillTo: 1,
+
+    /**
+     * How full the bar must be to count as LOCKED — the point at which the zoom
+     * is given back.
+     *
+     * ⚠️ THE TIMING HERE IS LOAD-BEARING IN BOTH DIRECTIONS, and the state
+     * machine is what makes it safe.
+     *
+     * Release too EARLY and the zoom that filled the bar is taken away before
+     * the match locks, the face shrinks, and the check goes straight back to
+     * "move a little closer". The zoom would be undoing its own work.
+     *
+     * Release too LATE and the photograph is one taken through a cropped
+     * sensor, which is the complaint that got an earlier zoom experiment
+     * reverted (§2).
+     *
+     * The gap between them exists because of how the SDK is built. In
+     * `machine.mjs`, `checkMatch` moves to `handleChallenge` the moment
+     * `hasFaceMatchedInOval` is true and NEVER RETURNS to `ovalMatching` — the
+     * oval is not re-tested after the lock. What follows is a one-second
+     * "hold still" pause and then the freshness flash, neither of which looks
+     * at face position. So the whole of that window is ours: the camera can go
+     * back to normal, and the frames sampled through it are unzoomed and are
+     * the ones filed.
+     *
+     * 0.99 rather than 1 only to avoid depending on a float landing exactly on
+     * its cap.
+     */
+    lockAt: 0.99,
+
+    /**
+     * How full the bar must ALSO be for AWS's "hold still" to count as the
+     * lock, 0..1.
+     *
+     * ⚠️ The bar alone is not a reliable lock signal, which is why there are
+     * two. `getFaceMatchStateInLivenessOval` returns MATCHED from either of two
+     * conditions — the IoU clearing its threshold, or `isFaceMatchedClosely` —
+     * and only the first drives the percentage to 100. So a person who arrives
+     * by the second route locks the match with the bar still short of
+     * `lockAt`, the release never fires, and the zoom stays in for the whole
+     * capture. That is the "it does not zoom out at hold still" report.
+     *
+     * The hint catches that case: when the SDK asks somebody to hold, it has
+     * decided. This guard only exists because the same string is also shown
+     * much earlier, when a face is first detected and nothing has been matched
+     * at all — half a bar separates the two situations comfortably.
+     */
+    holdAt: 0.5,
+
+    /**
+     * How far the bar must fall after a step before the loop reverses.
+     *
+     * ⚠️ IT REVERSES — it does not stop. An earlier version latched a `peaked`
+     * flag the first time the bar dipped and never zoomed again for the rest of
+     * the check. The bar is noisy (a blink, a small turn of the head), so one
+     * transient dip disabled the whole thing, and it was reported as the zoom
+     * stopping halfway. A controller on a noisy signal may not have a state it
+     * cannot leave.
+     *
+     * The margin is what keeps it from chasing that noise: a fall smaller than
+     * this is not treated as evidence of anything.
+     */
+    backOff: 0.05,
+
+    /**
+     * The most the zoom may change in one adjustment, as a multiple.
+     *
+     * ⚠️ SMALL, and paired with `stepMs`. Together they set how the motion
+     * READS, not how fast it gets there: 12% every 600ms and 4% every 200ms
+     * arrive at the same place in the same time, but the first is three visible
+     * jumps a second and the second is a glide. It was reported as "like
+     * steps", and that is exactly what it was.
+     *
+     * There is no cost to the finer grain. `applyConstraints` is only issued
+     * when the previous one has settled (see the in-flight guard in
+     * `LivenessCamera`), so a camera that cannot keep up simply moves in larger
+     * intervals of its own accord rather than accumulating a queue of requests
+     * behind it.
+     */
+    maxStep: 0.04,
+
+    /**
+     * Shortest gap between adjustments, in ms.
+     *
+     * A floor, not a schedule — the real pacing comes from the device, because
+     * the next request does not go out until the last one has completed.
+     */
+    stepMs: 200,
+
+    /**
+     * How much of the zoom to KEEP once the match locks, 0..1.
+     *
+     * ⚠️ Not zero, and the reason is that the capture has to look like the
+     * person was looking at. Dropping the whole way back to 1x at the moment
+     * AWS says "hold still" pulls the face abruptly small right as it is being
+     * photographed, and the still that gets filed is framed nothing like the
+     * preview they had just settled into.
+     *
+     * Half is the compromise: the tightest crop is gone — which is what
+     * protected the photograph from the complaint in §2 — while the framing
+     * stays close to what was on screen a second earlier. The pull-back is
+     * eased at `maxStep` like every other move, so it is a glide rather than a
+     * snap.
+     *
+     * 0 restores the old behaviour: all the way back, the widest possible
+     * capture, and a visible lurch.
+     */
+    releaseTo: 0.5,
+} as const;
+
+/**
+ * ── 11d. The mesh's fill ────────────────────────────────────────────────────
+ *
+ * As AWS's match bar fills, the wireframe turns green from the chin upward.
+ *
+ * ⚠️ NOT a colour gradient over the whole mesh. A share of the LINES equal to
+ * the bar's fraction is green and the rest stays white, so the mesh reads as a
+ * gauge — the eye counts how much of it has changed, which is a quantity, where
+ * a blend of two colours is just a tint and says nothing about how far along
+ * anybody is.
+ *
+ * The gems follow the same proportion: each decides at birth whether it is
+ * green, with probability equal to the fill. So they shift from white to green
+ * gradually and without any of them changing colour mid-flare.
+ *
+ * The bar itself is read from AWS's own DOM — `aria-valuenow` on
+ * `.amplify-liveness-match-indicator__bar`. It is their number, reported by
+ * them, so this cannot disagree with what the check actually thinks.
+ */
+export const CAPTURE_MESH_FILL = {
+    enabled: true,
+
+    /** The filled colour. The same green the passed verdict uses. */
+    colour: '#34C759',
+
+    /**
+     * How fast the fill eases toward the bar, 0..1 per frame.
+     *
+     * The bar is read a few times a second and jumps in steps; easing turns
+     * that into a rise. Slower than the mesh's own smoothing because a gauge
+     * that snaps backward on a momentary bad reading looks like a fault.
+     */
+    smoothing: 0.08,
+} as const;
+
+/**
  * ── 10. Mirroring ───────────────────────────────────────────────────────────
  *
  * Whether a SELF-view is flipped left-to-right, like a mirror.
@@ -1139,45 +1473,22 @@ export const CAPTURE_LIVE_GLASS = {
     /** Saturation on the copy — glass concentrates colour slightly. */
     saturation: 1.3,
 
-    /**
-     * How far the preview is BENT, in px — the LIQUID half.
+    /*
+     * ⚠️ NO `warpScale` / `warpBlur` HERE ANY MORE. They were the SVG
+     * refraction, and both reasons they went are worth keeping:
      *
-     * The same `GlassFilter` the checking pane uses, on the same displacement
-     * map: nothing moves through the middle, deflection grows toward the edge,
-     * and the three colour channels are displaced by different amounts so edges
-     * fringe the way they do through a real lens. Without this the pane is a
-     * blur — a filter ON the camera rather than a sheet in front of it.
+     *   - the pane is a `backdrop-filter` now, because a second <video> on the
+     *     same MediaStream does not play on iOS and the glass simply never
+     *     appeared there. An SVG `url()` inside a `backdrop-filter` is the trap
+     *     that cost three earlier rounds — it passes `@supports`, fails at
+     *     paint, and takes the whole declaration down with it;
+     *   - refraction is DISTORTION, and the first job at the top of this table
+     *     is to make a close-up lens look LESS distorted. The warp was already
+     *     cut from 20 to 8 for that reason before it went entirely.
      *
-     * ⚠️ MUCH SMALLER THAN THE CHECKING PANE'S 39, and not for looks. That one
-     * bends a still: one frame, one composite, done. This bends 30 frames a
-     * second, live, on a device that is simultaneously encoding and uploading
-     * video to Rekognition — and AWS errors any camera it measures below 15fps
-     * (`CAMERA_FRAMERATE_ERROR`, already hit once in this codebase). A lens
-     * strong enough to admire is a lens that can cost the sign-in.
-     *
-     * ⚠️ 8, NOT 20, and this is a DESIGN limit before it is a cost one. See
-     * the two jobs at the top of this table: the pane exists to make a lens's
-     * distortion less noticeable, and refraction is distortion. A strong warp
-     * adds back exactly the kind of bending it was brought in to soften, and
-     * ripples the backdrop the mesh is supposed to read cleanly against. Enough
-     * to say "glass", not enough to move a face.
-     *
-     * ⚠️ SET IT TO 0 FIRST if a check starts failing on framerate. That drops
-     * the `url()` from the chain entirely and the pane falls back to the plain
-     * blur, which cannot cost anything. `CAPTURE_LIVE_MESH.enabled` is the
-     * bigger lever now — the mesh's model is the more expensive of the two.
+     * The CHECKING pane still refracts — it stands over a still <img>, where
+     * `filter` on a copy works everywhere. See `CAPTURE_CHECKING_GLASS`.
      */
-    warpScale: 8,
-
-    /**
-     * Softening inside the filter, after the channels recombine.
-     *
-     * Small, and for the same reason as the checking pane: blurring hard here
-     * averages the colour fringing straight back to grey and throws away the
-     * one detail that reads as a lens. The heavy softening is the CSS `blur`
-     * above, which is a separate and much cheaper operation.
-     */
-    warpBlur: 1.4,
 
     /**
      * Where the oval sits and how big it is, until the first measurement.

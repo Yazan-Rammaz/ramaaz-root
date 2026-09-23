@@ -69,15 +69,47 @@ export function GlassFilter({
                     width="100%"
                     height="100%"
                 >
+                    {/*
+                      ⚠️ THE FLOOD UNDERNEATH IS NOT DECORATION — it is what
+                      makes a missing map harmless.
+
+                      `feImage` with a data URI is not reliable in WebKit, and
+                      when it produces nothing the failure is DESTRUCTIVE rather
+                      than absent. `feDisplacementMap` reads the empty result as
+                      R=G=0, and `(0/255 - 0.5) * -scale` is a constant POSITIVE
+                      offset in both axes — so every pixel samples up and to the
+                      left, and the bottom and right edges sample outside the
+                      source and come back transparent. On iOS Safari that
+                      showed as the pane simply not covering the bottom and
+                      bottom-right of the frame, with the sharp picture visible
+                      through it. Nothing in the console; the filter "worked".
+
+                      128 is the neutral value in both channels, so flooding it
+                      first and drawing the map OVER it means:
+
+                        map loads      the flood is covered, full refraction
+                        map fails      128 everywhere, displacement of zero
+
+                      and a zero displacement is exactly the documented fallback
+                      — the pane degrades to its plain blur, which is what
+                      `scale: 0` produces deliberately.
+
+                      Blue is 0 rather than 128: only R and G are read (see the
+                      channel selectors below), so the third channel is free and
+                      leaving it dark keeps the flood distinguishable from a real
+                      map while debugging.
+                    */}
+                    <feFlood floodColor="rgb(128,128,0)" floodOpacity="1" result="flat" />
                     <feImage
                         x="0"
                         y="0"
                         width="100%"
                         height="100%"
                         preserveAspectRatio="none"
-                        result="map"
+                        result="mapImage"
                         href={GLASS_DISPLACEMENT_MAP}
                     />
+                    <feComposite in="mapImage" in2="flat" operator="over" result="map" />
 
                     {/* Red, green and blue displaced by 1 : 1.2 : 1.4. The
                         ratio is the aberration; the magnitude is `scale`. */}

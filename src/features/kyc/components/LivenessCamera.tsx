@@ -10,13 +10,15 @@ import { TFJS_WASM_PATH, blazefaceModelUrl } from '@/features/kyc/config/livenes
 import {
     CAPTURE_LIVE_GLASS,
     CAPTURE_LIVE_MESH,
+    CAPTURE_CAMERA_ZOOM,
+    CAPTURE_LIVE_ZOOM,
     CAPTURE_MIRROR,
+    MIRROR_CLASS,
     CAPTURE_PORTRAIT,
     CAPTURE_RESOLUTION,
 } from '@/features/kyc/config/capture';
 import { kickstartLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { FaceMesh } from '@/features/kyc/components/FaceMesh';
-import { GlassFilter } from '@/features/kyc/components/GlassFilter';
 import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
 import { scoreFrameQuality } from '@/features/kyc/services/imageQuality';
 import {
@@ -62,17 +64,133 @@ const BEST_FRAME_WINDOW_MS = 2000;
  * a head does not travel far in a third of a second. The CSS eases between
  * measurements, so a slow clock reads as smooth rather than steppy.
  */
-const FACE_TRACK_MS = 320;
+/**
+ * How long the glass copy is given to decode a frame before the pane is
+ * assumed to be the only option.
+ *
+ * A grace period rather than a timeout worth tuning: an element that has not
+ * produced a single frame of an already-playing stream in this long is not
+ * slow, it is never going to.
+ */
+const GLASS_PROBE_MS = 900;
 
 /**
- * The live pane's refraction filter id — its own, never the checking pane's.
+ * The amounts both panes are drawn from.
  *
- * Module scope rather than a prop: only one liveness widget is ever mounted, and
- * an id generated per render would change on every re-render, leaving the CSS
- * `url()` pointing at a filter that no longer exists — which silently drops the
- * whole `filter` declaration, blur included.
+ * One object, shared by the two elements, because they are the same pane drawn
+ * two ways — and the moment their numbers can differ is the moment a browser
+ * that switches between them shows two different looks for the same state.
+ *
+ * Only the STARTING placement is here. `FaceMesh` takes the position over on
+ * its first detection and owns it from then on; see `placeGlass`, which also
+ * explains why the two elements need different centres for the same face.
  */
-const LIVE_GLASS_FILTER_ID = 'rz-live-glass-warp';
+const GLASS_VARS = {
+    '--live-glass-blur': `${CAPTURE_LIVE_GLASS.blur * 0.0625}rem`,
+    '--live-glass-saturation': CAPTURE_LIVE_GLASS.saturation,
+    /*
+     * ⚠️ /100 — `glass` is a PERCENTAGE and CSS alpha is 0..1. Handing the
+     * parser a 40 is not "40%", it is an out-of-range number that clamps to
+     * fully opaque, so the oval would render as a solid frosted disc on the
+     * face.
+     */
+    '--live-glass-amount': CAPTURE_LIVE_GLASS.glass / 100,
+    '--live-glass-feather': CAPTURE_LIVE_GLASS.ovalFeather,
+    '--live-glass-cx': CAPTURE_LIVE_GLASS.faceX,
+    '--live-glass-cy': CAPTURE_LIVE_GLASS.faceY,
+    '--live-glass-rx': CAPTURE_LIVE_GLASS.face,
+    '--live-glass-ry': CAPTURE_LIVE_GLASS.face * 1.3,
+} as React.CSSProperties;
+
+const FACE_TRACK_MS = 320;
+
+/*
+ * ⚠️ NO REFRACTION FILTER FOR THE LIVE PANE, and its absence is deliberate.
+ *
+ * It used to render its own `GlassFilter` and reference it from
+ * `filter: url(#...)`. Two reasons it went, and either alone would be enough:
+ *
+ *   - the pane is a `backdrop-filter` now (see `.rz-live-glass`), and an SVG
+ *     reference filter inside one is what cost three earlier rounds: it passes
+ *     `@supports`, fails at paint, and an invalid `url()` invalidates the WHOLE
+ *     declaration — blur and saturation included;
+ *   - refraction is DISTORTION, and this pane exists to make a close-up lens
+ *     look less distorted. See `CAPTURE_LIVE_GLASS`.
+ *
+ * `GlassFilter` is still used, and still needed, by the CHECKING pane.
+ */
+
+/**
+ * The camera's zoom range.
+ *
+ * ⚠️ Declared here because `zoom` IS NOT IN THE DOM TYPES. It is a
+ * well-supported MediaStreamTrack capability (the Image Capture spec) that
+ * TypeScript's lib does not carry, so both the capability and the constraint
+ * need widening. Casting at the call site instead would hide the fact that
+ * these are real, spec'd fields rather than something invented here.
+ */
+interface ZoomRange {
+    min: number;
+    max: number;
+    step: number;
+}
+
+/** What the zoom controller remembers between adjustments. */
+interface ZoomState {
+    /** Null once we know the camera cannot zoom — checked exactly once. */
+    range: ZoomRange | null;
+    checked: boolean;
+    /** The last value the DEVICE accepted, in the camera's own units. */
+    value: number;
+    /**
+     * The zoom we intend, as a float, before the device's granularity.
+     *
+     * ⚠️ THE REASON THE MOTION IS SMOOTH. Cameras quantise `zoom` to a `step`,
+     * and some report a coarse one. An earlier version compared the next 4%
+     * nudge against that step and, finding it smaller, SNAPPED IT OUT to a full
+     * step so that something would happen — turning a glide into a staircase on
+     * exactly the hardware that could least afford it.
+     *
+     * Tracking the intent separately fixes it at the root: this moves by 4%
+     * whatever the device does, and it is only rounded to the grid at the
+     * moment of applying. On a fine-grained camera every step lands; on a
+     * coarse one several intents accumulate before the rounded value changes,
+     * which is as smooth as that camera can be and never a forced jump.
+     */
+    desired: number;
+    /** When it was applied, so `stepMs` can throttle. */
+    at: number;
+    /** Has the release already run? It must happen once, not every tick. */
+    released: boolean;
+    /** The bar at the previous adjustment, for spotting it going backwards. */
+    lastBar: number;
+    /**
+     * Which way the last step went: +1 zooming in, -1 zooming out.
+     *
+     * ⚠️ A DIRECTION, not a "stop" flag. What replaced it: the previous version
+     * latched on the first dip in the bar and never moved again, so one blink
+     * halfway through froze the zoom for the whole check.
+     */
+    dir: 1 | -1;
+    /**
+     * An `applyConstraints` is in flight.
+     *
+     * ⚠️ The guard that lets the steps be small. A camera reconfiguration takes
+     * real time — tens of milliseconds on a good phone, much more on a slow one
+     * — and firing another before the last has settled builds a queue the
+     * device works through long after the situation has changed. With this, a
+     * slow camera simply takes larger intervals; a fast one glides.
+     */
+    busy: boolean;
+    /**
+     * Where the release is heading, set once when the match locks.
+     *
+     * Held rather than recomputed because it is derived from the zoom AT THE
+     * MOMENT OF LOCK — recomputing it each tick from a value that is itself
+     * falling would chase its own tail and stop short.
+     */
+    target: number | null;
+}
 
 /**
  * Draw the video into `target`, cropped exactly as the frame displays it.
@@ -292,7 +410,18 @@ export function LivenessCamera({
      * `backdrop-filter` does not render without GPU compositing, and an <img>
      * cannot copy a video).
      */
-    const glassVideoRef = useRef<HTMLVideoElement>(null);
+    const glassVideoRef = useRef<HTMLSpanElement>(null);
+    /**
+     * The other way of drawing the same pane — a second <video> on AWS's
+     * stream, blurred as an element.
+     *
+     * Both are rendered and one is chosen at runtime; see `.rz-live-glass`.
+     * `glassMode` is null until the probe has an answer, which is what keeps a
+     * browser capable of both from showing two panes at once.
+     */
+    const glassCopyRef = useRef<HTMLVideoElement>(null);
+    const glassModeRef = useRef<'copy' | 'pane' | null>(null);
+    const glassProbeAtRef = useRef(0);
     /**
      * Has the face mesh taken over placing the glass oval?
      *
@@ -304,6 +433,81 @@ export function LivenessCamera({
      * covers only the window before the model has loaded.
      */
     const meshPlacesGlassRef = useRef(false);
+    /**
+     * The mesh's canvas, held here rather than inside `FaceMesh`.
+     *
+     * The zoom has to move the video, the glass and the mesh as ONE — their
+     * coordinates are all in the video's frame, so scaling any of them alone
+     * tears the overlay off the face it describes. That makes the transform a
+     * property of the viewfinder rather than of any one layer, and this is
+     * where the viewfinder lives.
+     */
+    const meshCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+    /**
+     * How full AWS's match bar is, 0..1 — THEIR number, not ours.
+     *
+     * `aria-valuenow` on `.amplify-liveness-match-indicator__bar`, which the
+     * SDK updates as the face approaches its oval. Read rather than estimated
+     * on purpose: any measurement of our own would be a second opinion about
+     * whether somebody is close enough, and a gauge that disagrees with the
+     * instruction beside it is worse than no gauge.
+     *
+     * Drives two things — how much of the mesh is green, and when the
+     * viewfinder's zoom lets go.
+     */
+    const matchRef = useRef(0);
+
+    /**
+     * What AWS is currently ASKING the person to do: come closer, or move away.
+     *
+     * Read from the hint toast's visible text and compared against the very
+     * strings we handed the SDK for those two states (`displayText` below), so
+     * this cannot drift from what is on screen and works in all three
+     * languages without a second mapping to keep in step.
+     *
+     * The zoom follows it directly: "too far" is the camera's cue to zoom in,
+     * "too close" to back off. Every other hint — hold still, centre your face,
+     * too bright — says nothing about distance and leaves the zoom alone.
+     */
+    const hintTextRef = useRef({ closer: '', away: '', hold: '', gone: '' });
+    useEffect(() => {
+        hintTextRef.current = {
+            closer: t('faceTooFar'),
+            away: t('faceTooClose'),
+            hold: t('faceHold'),
+            gone: t('faceNoFace'),
+        };
+    }, [t]);
+
+    /**
+     * The camera zoom controller's state. See `CAPTURE_CAMERA_ZOOM`.
+     *
+     * A ref rather than state: nothing renders from it, and it is written from
+     * a callback that runs twenty times a second.
+     */
+    const zoomRef = useRef<ZoomState>({
+        range: null,
+        checked: false,
+        value: 1,
+        desired: 1,
+        at: 0,
+        released: false,
+        lastBar: -1,
+        dir: 1,
+        busy: false,
+        target: null,
+    });
+
+    /**
+     * The video track currently being zoomed, kept for cleanup.
+     *
+     * ⚠️ Needed because the zoom must be PUT BACK. The track is AWS's and
+     * belongs to a MediaStream the browser may hand to the next screen — the ID
+     * capture, or a retry — and a camera left at 1.5x would silently crop those
+     * too, with nothing on screen to explain it.
+     */
+    const zoomTrackRef = useRef<MediaStreamTrack | null>(null);
 
     /**
      * Put the glass oval exactly on the wireframe.
@@ -315,13 +519,102 @@ export function LivenessCamera({
     const handleMeshBounds = useCallback(
         (b: { cx: number; cy: number; rx: number; ry: number }) => {
             const glass = glassVideoRef.current;
+            /*
+             * ⚠️ The pane's mask is positioned in SCREEN coordinates, and the
+             * preview is mirrored.
+             *
+             * The measurements below are taken from the unmirrored stream, so a
+             * face at 0.3 across the video appears at 0.7 across the frame. The
+             * mesh handles this by carrying the same `scaleX(-1)` as the video;
+             * this pane cannot, because a transform on a `backdrop-filter`
+             * element moves the element and what it samples together, which
+             * mirrors the softened patch onto the wrong side of the face.
+             *
+             * So the flip is done to the NUMBER instead, once, here.
+             */
+            const screenX = (x: number) => (CAPTURE_MIRROR.enabled ? 1 - x : x);
+            /**
+             * Place the oval on whichever pane is live.
+             *
+             * ⚠️ The two need DIFFERENT centres for the same face. The copy
+             * carries `scaleX(-1)` so its mask is flipped along with its
+             * content and wants the raw, unmirrored measurement; the pane
+             * cannot be transformed at all — a transform on a
+             * `backdrop-filter` element moves what it samples too, mirroring
+             * the softened patch onto the wrong side of the face — so its mask
+             * is positioned in screen coordinates instead.
+             */
+            const placeGlass = (cx: number, cy: number, rx: number, ry: number) => {
+                const set = (el: HTMLElement | null, x: number) => {
+                    if (!el) return;
+                    el.style.setProperty('--live-glass-cx', x.toFixed(4));
+                    el.style.setProperty('--live-glass-cy', cy.toFixed(4));
+                    el.style.setProperty('--live-glass-rx', rx.toFixed(4));
+                    el.style.setProperty('--live-glass-ry', ry.toFixed(4));
+                };
+                set(glass, screenX(cx));
+                set(glassCopyRef.current, cx);
+            };
             if (!glass) return;
             meshPlacesGlassRef.current = true;
             const pad = CAPTURE_LIVE_GLASS.ovalPad;
-            glass.style.setProperty('--live-glass-cx', b.cx.toFixed(4));
-            glass.style.setProperty('--live-glass-cy', b.cy.toFixed(4));
-            glass.style.setProperty('--live-glass-rx', (b.rx * pad).toFixed(4));
-            glass.style.setProperty('--live-glass-ry', (b.ry * pad).toFixed(4));
+            placeGlass(b.cx, b.cy, b.rx * pad, b.ry * pad);
+
+            if (!CAPTURE_LIVE_ZOOM.enabled) return;
+
+            /*
+             * ── The viewfinder's zoom ───────────────────────────────────────
+             *
+             * ⚠️ DISPLAY ONLY. This is a CSS transform on three sibling
+             * elements. AWS reads the MediaStream track and measures against
+             * the stream's geometry; the capture is `drawImage` on the video's
+             * decoded frames. Neither can see a transform. It cannot make the
+             * check easier and it cannot reach the photograph — see
+             * `CAPTURE_LIVE_ZOOM` for why that matters and why it was asked
+             * for anyway.
+             */
+            const released = matchRef.current >= CAPTURE_LIVE_ZOOM.releaseAt;
+            const wanted = released
+                ? 1
+                : Math.min(
+                      CAPTURE_LIVE_ZOOM.max,
+                      Math.max(1, CAPTURE_LIVE_ZOOM.targetWidth / Math.max(0.05, b.rx * 2)),
+                  );
+
+            /*
+             * Put the face in the middle. With `transform-origin` at the
+             * centre, a point at fraction f lands at `0.5 + (f - 0.5) * z + t`,
+             * so centring it means `t = -(f - 0.5) * z`.
+             *
+             * ⚠️ The SIGN FLIPS on a mirrored element. `scaleX(-1)` maps f to
+             * 1 - f before the zoom sees it, so the same face sits on the other
+             * side of centre and the correction has to go the other way. Get
+             * this wrong and the zoom pushes the face off the frame instead of
+             * onto the middle of it — at double the offset, so it is obvious,
+             * but only once somebody sits off-centre.
+             */
+            const mirrored = CAPTURE_MIRROR.enabled;
+            const tx = (mirrored ? b.cx - 0.5 : 0.5 - b.cx) * wanted * 100;
+            const ty = (0.5 - b.cy) * wanted * 100;
+            const zoom = `translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%) scale(${wanted.toFixed(3)})`;
+
+            /*
+             * The three layers of the viewfinder move as one. The mesh's
+             * coordinates and the glass's oval are both in the video's frame,
+             * so anything that scales one and not the others tears them apart.
+             *
+             * The mirror is composed HERE rather than left on the elements:
+             * `transform` is one property, so writing a zoom would otherwise
+             * overwrite the flip the sampling loop put there.
+             */
+            const flip = mirrored ? ' scaleX(-1)' : '';
+            const video = videoElRef.current;
+            const mesh = meshCanvasRef.current;
+            for (const el of [video, glass, mesh]) {
+                if (!el) continue;
+                el.style.transition = `transform ${CAPTURE_LIVE_ZOOM.ms}ms ease-out`;
+                el.style.transform = `${zoom}${flip}`;
+            }
         },
         [],
     );
@@ -469,6 +762,32 @@ export function LivenessCamera({
     useEffect(() => () => uninstallCaptureQuality(), []);
 
     /**
+     * Put the camera's zoom back on the way out.
+     *
+     * ⚠️ Not housekeeping. The track outlives this component — the browser hands
+     * the same device to the ID capture screen and to a retry — so a camera left
+     * at 1.5x would quietly crop those too, with nothing on screen to explain
+     * why. `applyConstraints` on an ended track rejects, which is the normal
+     * case here and is swallowed.
+     */
+    useEffect(
+        () => () => {
+            const track = zoomTrackRef.current;
+            const range = zoomRef.current.range;
+            zoomTrackRef.current = null;
+            if (!track || !range) return;
+            void track
+                .applyConstraints({
+                    advanced: [{ zoom: range.min } as MediaTrackConstraintSet],
+                })
+                .catch(() => {
+                    /* The track has already stopped. Nothing to put back. */
+                });
+        },
+        [],
+    );
+
+    /**
      * Start the segmentation model downloading now, not at capture.
      *
      * ⚠️ This is warming it for the CAPTURE, not for the preview — the live
@@ -611,8 +930,17 @@ export function LivenessCamera({
              * this runs several times a second beside a liveness check that
              * fails below 15fps.
              */
+            /*
+             * ⚠️ ONLY UNTIL THE ZOOM TAKES OVER. `transform` is one property,
+             * so once `handleMeshBounds` starts writing a zoom that composes
+             * the flip itself, a bare mirror written here would overwrite it
+             * five times a second — the viewfinder would jitter between zoomed
+             * and not, which looks like the camera fighting itself.
+             */
             const wanted = CAPTURE_MIRROR.enabled ? 'scaleX(-1)' : 'none';
-            if (video && video.style.transform !== wanted) {
+            const zoomOwnsTransform =
+                CAPTURE_LIVE_ZOOM.enabled && meshPlacesGlassRef.current;
+            if (video && !zoomOwnsTransform && video.style.transform !== wanted) {
                 video.style.transform = wanted;
             }
 
@@ -741,15 +1069,45 @@ export function LivenessCamera({
             }
 
 
-            if (glass && video?.srcObject && glass.srcObject !== video.srcObject) {
-                glass.srcObject = video.srcObject;
-                // Mirrored to match, or the glassed edges would be a flipped
-                // version of the sharp centre they surround.
-                glass.style.transform = wanted;
-                void glass.play().catch(() => {
-                    // Autoplay refusals are survivable: the pane simply does
-                    // not appear, and the plain camera underneath is correct.
-                });
+            /*
+             * ── Which pane can this browser actually draw? ──────────────────
+             *
+             * The stream is offered to the copy; whether the copy DECODES it is
+             * the whole question. Chromium does and the `filter` version works;
+             * WebKit will not put one camera into two video elements, so
+             * `videoWidth` stays 0 forever and the `backdrop-filter` version is
+             * the one that renders there.
+             *
+             * ⚠️ Probed rather than sniffed. A user-agent string is a guess at
+             * a capability; this is the capability. It also cannot rot when a
+             * browser gains or loses it.
+             *
+             * `GLASS_PROBE_MS` is a grace period, not a timeout to tune: a
+             * decode that has not produced a single frame in that long is not
+             * slow, it is not happening.
+             */
+            const glassCopy = glassCopyRef.current;
+            if (glassCopy && video?.srcObject && !glassModeRef.current) {
+                if (glassCopy.srcObject !== video.srcObject) {
+                    glassCopy.srcObject = video.srcObject;
+                    glassProbeAtRef.current = tick;
+                    void glassCopy.play().catch(() => {
+                        // An autoplay refusal answers the question early.
+                        glassModeRef.current = 'pane';
+                    });
+                } else if (glassCopy.videoWidth > 0) {
+                    glassModeRef.current = 'copy';
+                } else if (tick - glassProbeAtRef.current > GLASS_PROBE_MS) {
+                    glassModeRef.current = 'pane';
+                    // Nothing is going to play into it; stop holding a decode
+                    // open for an element that will never show anything.
+                    glassCopy.srcObject = null;
+                }
+
+                if (glassModeRef.current && frameRef.current) {
+                    frameRef.current.dataset.glass = glassModeRef.current;
+                    console.log(`[glass] using the ${glassModeRef.current} pane`);
+                }
             }
 
             /*
@@ -835,6 +1193,275 @@ export function LivenessCamera({
              * Once recording has been seen, its DISAPPEARANCE is itself the
              * end of the stream, and the most direct signal of the three.
              */
+            /*
+             * The match bar. Same document fallback as every other probe here:
+             * the detector mounts parts of itself outside the subtree it was
+             * rendered into.
+             */
+            const bar = (frameRef.current ?? document).querySelector(
+                '.amplify-liveness-match-indicator__bar',
+            );
+            if (bar) {
+                const now = Number(bar.getAttribute('aria-valuenow'));
+                // `aria-valuenow` is 0..100 and absent between states. A bad
+                // read keeps the last value rather than dropping the gauge to
+                // zero, which would flash the mesh back to white.
+                if (Number.isFinite(now)) {
+                    matchRef.current = Math.min(1, Math.max(0, now / 100));
+                }
+            }
+
+            /*
+             * The hint's VISIBLE text. The toast also carries a
+             * visually-hidden live-region copy with different wording, so
+             * `textContent` on the container would concatenate both — the
+             * labelled div is the one on screen.
+             */
+            const hintEl = (frameRef.current ?? document).querySelector(
+                '.amplify-liveness-toast__message div[aria-label]',
+            );
+            const hint = hintEl?.textContent?.trim() ?? '';
+
+            /*
+             * ── The CAMERA's zoom ───────────────────────────────────────────
+             *
+             * Unlike the display zoom (§11c, off), this moves AWS's bar: it
+             * narrows the field of view, so the face occupies more of the
+             * stream while the oval — derived from `videoWidth` — stays the
+             * same size. See `CAPTURE_CAMERA_ZOOM` for why that is legitimate
+             * and where the line is.
+             *
+             * ⚠️ IT LIVES HERE, in the poll, and not in the mesh's callback.
+             * It is driven entirely by AWS's bar, which is read two lines up,
+             * and it must keep working when the face-mesh model fails to load
+             * or is switched off — the zoom is an ACCESSIBILITY aid and the
+             * mesh is decoration. Hanging one off the other was the first
+             * version and it also meant the zoom stopped whenever the mesh lost
+             * the face, which is exactly when somebody is furthest away.
+             */
+            /*
+             * ⚠️ NOT UNTIL AWS IS ACTUALLY MEASURING.
+             *
+             * `bar` is null until the detector reaches `ovalMatching`, which is
+             * after the camera has opened, the socket has connected and
+             * recording has started. Before that `matchRef` is still 0 — and a
+             * loop that reads "bar is 0, zoom in" against a bar that does not
+             * exist yet ramps straight to the camera's maximum the moment the
+             * preview appears, in silence, before anybody has been asked to do
+             * anything. Reported as exactly that: it zoomed on opening.
+             *
+             * Gating on the ELEMENT rather than on the value is what
+             * distinguishes "no match yet" from "not being measured yet". They
+             * are the same number and completely different situations.
+             */
+            if (CAPTURE_CAMERA_ZOOM.enabled && video && bar) {
+                const track =
+                    (video.srcObject as MediaStream | null)?.getVideoTracks?.()?.[0] ??
+                    null;
+                if (track) {
+                    const z = zoomRef.current;
+
+                    /*
+                     * Capability probed ONCE. Most laptop webcams do not expose
+                     * `zoom` at all, and asking every tick would be a wasted
+                     * call on exactly the hardware that cannot use the answer.
+                     */
+                    if (!z.checked) {
+                        z.checked = true;
+                        zoomTrackRef.current = track;
+                        const caps = (
+                            track.getCapabilities?.() as { zoom?: ZoomRange } | undefined
+                        )?.zoom;
+                        // A range with no room in it is not a zoom.
+                        z.range = caps && caps.max > caps.min ? caps : null;
+                        if (z.range) {
+                            const settings = track.getSettings() as { zoom?: number };
+                            z.value = settings.zoom ?? z.range.min;
+                            z.desired = z.value;
+                        } else {
+                            console.log(
+                                '[zoom] camera exposes no zoom capability — leaving it alone',
+                            );
+                        }
+                    }
+
+                    const range = z.range;
+                    if (range && !z.busy && tick - z.at >= CAPTURE_CAMERA_ZOOM.stepMs) {
+                        const bar = matchRef.current;
+                        const { closer, away, hold, gone } = hintTextRef.current;
+                        const ceiling = Math.min(
+                            range.max,
+                            range.min * CAPTURE_CAMERA_ZOOM.max,
+                        );
+                        const clamp = (v: number) =>
+                            Math.min(Math.max(v, range.min), ceiling);
+                        const flip = () => {
+                            z.dir = z.dir === 1 ? -1 : 1;
+                        };
+
+                        /*
+                         * ── Has the match locked? ───────────────────────────
+                         *
+                         * Two signals, because the bar alone misses a case. The
+                         * SDK returns MATCHED from either the IoU clearing its
+                         * threshold OR `isFaceMatchedClosely`, and only the
+                         * first drives the percentage to 100 — so somebody who
+                         * arrives by the second route locks with the bar still
+                         * short, and a release waiting on `lockAt` never comes.
+                         * The "hold still" hint catches that; `holdAt` keeps it
+                         * from firing on the same string shown much earlier,
+                         * when a face is merely detected.
+                         */
+                        const locked =
+                            bar >= CAPTURE_CAMERA_ZOOM.lockAt ||
+                            (!!hold &&
+                                hint === hold &&
+                                bar >= CAPTURE_CAMERA_ZOOM.holdAt);
+
+                        if (!!gone && hint === gone) {
+                            /*
+                             * Nobody in front of the camera. Go home.
+                             *
+                             * A zoom left in on an empty frame is worse than
+                             * pointless: whoever arrives next walks into a
+                             * cropped view of wherever the last person's head
+                             * was, and the loop then has to unwind that before
+                             * it can do anything useful. Unwinding it now, while
+                             * there is nothing to look at, costs nothing.
+                             */
+                            z.target = range.min;
+                            z.desired = Math.max(
+                                range.min,
+                                z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep),
+                            );
+                        } else if (locked) {
+                            /*
+                             * Ease back toward `releaseTo` — see `lockAt` for
+                             * why this window is safe, and `releaseTo` for why
+                             * it is not all the way to 1x.
+                             *
+                             * The target is fixed at the moment of lock. Taken
+                             * from the current value each tick it would be a
+                             * fraction of a number already falling, and the
+                             * pull-back would converge short of where it aimed.
+                             */
+                            if (z.target === null) {
+                                z.target =
+                                    range.min +
+                                    (z.desired - range.min) *
+                                        CAPTURE_CAMERA_ZOOM.releaseTo;
+                            }
+                            z.desired = Math.max(
+                                z.target,
+                                z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep),
+                            );
+                        } else {
+                            // Back under live control — a face returned, or the
+                            // match came undone before recording finished.
+                            z.target = null;
+
+                            /*
+                             * ── Follow AWS, then feel for the rest ──────────
+                             *
+                             * When the SDK says "closer" or "away" it has
+                             * decided something about distance and the camera
+                             * does as it is told. Overruling that with our own
+                             * reading of the bar is how a zoom ends up pulling
+                             * against the sentence on screen — the failure the
+                             * DISPLAY zoom was turned off for.
+                             *
+                             * When it says anything else, the bar is the only
+                             * signal, and this hill climbs: keep going the way
+                             * that helped, turn around when it stops helping.
+                             */
+                            if (!!closer && hint === closer) z.dir = 1;
+                            else if (!!away && hint === away) z.dir = -1;
+                            else if (
+                                z.lastBar >= 0 &&
+                                bar < z.lastBar - CAPTURE_CAMERA_ZOOM.backOff
+                            ) {
+                                flip();
+                            }
+
+                            const next =
+                                z.dir === 1
+                                    ? z.desired * (1 + CAPTURE_CAMERA_ZOOM.maxStep)
+                                    : z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep);
+                            /*
+                             * Hitting either end turns the loop around. Left to
+                             * itself it would keep asking for a value the clamp
+                             * rejects, the applied zoom would never change, and
+                             * it would sit at the stop doing nothing.
+                             */
+                            if (clamp(next) !== next) flip();
+                            z.desired = clamp(next);
+                        }
+
+                        z.desired = clamp(z.desired);
+                        z.lastBar = bar;
+
+                        /*
+                         * ⚠️ ROUNDED TO THE DEVICE'S GRID ONLY HERE.
+                         *
+                         * `desired` moves by a fixed proportion every tick
+                         * regardless of what the camera can express; this is
+                         * where that intent meets the hardware. Several small
+                         * intents accumulate until the rounded value actually
+                         * changes, so a coarse camera moves as smoothly as it
+                         * is able and is never handed a forced jump to make
+                         * something happen.
+                         */
+                        const grid = range.step || 0.01;
+                        const want = clamp(
+                            range.min +
+                                Math.round((z.desired - range.min) / grid) * grid,
+                        );
+
+                        if (Math.abs(want - z.value) >= grid * 0.5) {
+                            z.at = tick;
+                            z.busy = true;
+                            const applied = want;
+                            void track
+                                .applyConstraints({
+                                    advanced: [
+                                        { zoom: applied } as MediaTrackConstraintSet,
+                                    ],
+                                })
+                                .then(() => {
+                                    z.busy = false;
+                                    z.value = applied;
+                                    // One line per adjustment. The zoom is the
+                                    // only thing on this screen that moves
+                                    // without the person doing anything, so
+                                    // when it misbehaves this is the only way
+                                    // to see what it thought it was doing.
+                                    console.log(
+                                        `[zoom] ${(applied / range.min).toFixed(2)}x  bar ${(bar * 100) | 0}%  ${locked ? 'release' : z.dir > 0 ? 'in' : 'out'}`,
+                                    );
+                                })
+                                .catch(() => {
+                                    z.busy = false;
+                                    /*
+                                     * Some cameras advertise `zoom` and then
+                                     * refuse it. Give up for the rest of the
+                                     * check rather than retrying against a
+                                     * device that has already said no.
+                                     */
+                                    z.range = null;
+                                    console.log(
+                                        '[zoom] camera refused applyConstraints — giving up',
+                                    );
+                                });
+                        }
+
+                        if (locked && !z.released) {
+                            z.released = true;
+                            bestFrame.current = null;
+                        }
+                    }
+                }
+            }
+
             const rec = (frameRef.current ?? document).querySelector(
                 '.amplify-liveness-recording-icon, .amplify-liveness-recording-icon-container',
             );
@@ -1081,51 +1708,27 @@ export function LivenessCamera({
                 decoding a second copy of the stream. */}
             {CAPTURE_LIVE_GLASS.enabled && (
                 <>
-                    {/* The refraction, on its own id.
-                        ⚠️ NOT shared with the checking pane's filter. They run
-                        at very different strengths — this one is deliberately
-                        weak because it bends live video at 30fps — and one id
-                        would mean one of them silently taking the other's
-                        scale, with the symptom being either a flat pane or a
-                        dropped framerate. */}
-                    <GlassFilter
-                        id={LIVE_GLASS_FILTER_ID}
-                        scale={CAPTURE_LIVE_GLASS.warpScale}
-                        blur={CAPTURE_LIVE_GLASS.warpBlur}
-                    />
+                    {/*
+                      TWO PANES, one shown. Which technique this browser can
+                      actually draw is probed at runtime and answered on
+                      `data-glass`; see `.rz-live-glass` in liveness.css and the
+                      probe in the sampling loop. Both are hidden until the
+                      probe decides, so an engine that can do both never stacks
+                      them.
+                    */}
                     <video
-                        ref={glassVideoRef}
+                        ref={glassCopyRef}
                         aria-hidden
                         playsInline
                         muted
-                        className="rz-live-glass"
-                        style={
-                            {
-                                '--live-glass-blur': `${CAPTURE_LIVE_GLASS.blur * 0.0625}rem`,
-                                '--live-glass-saturation': CAPTURE_LIVE_GLASS.saturation,
-                                /*
-                                 * ⚠️ /100 — `glass` is a PERCENTAGE and CSS
-                                 * alpha is 0..1. Handing the parser a 40 is not
-                                 * "40%", it is an out-of-range number that
-                                 * clamps to fully opaque, so the oval would
-                                 * render as a solid frosted disc on the face.
-                                 */
-                                '--live-glass-amount': CAPTURE_LIVE_GLASS.glass / 100,
-                                '--live-glass-feather': CAPTURE_LIVE_GLASS.ovalFeather,
-                                /*
-                                 * Starting placement only. `FaceMesh` takes
-                                 * these over on its first detection and owns
-                                 * them from then on — see `handleMeshBounds`.
-                                 */
-                                '--live-glass-cx': CAPTURE_LIVE_GLASS.faceX,
-                                '--live-glass-cy': CAPTURE_LIVE_GLASS.faceY,
-                                '--live-glass-rx': CAPTURE_LIVE_GLASS.face,
-                                '--live-glass-ry': CAPTURE_LIVE_GLASS.face * 1.3,
-                                '--live-glass-warp': CAPTURE_LIVE_GLASS.warpScale
-                                    ? `url(#${LIVE_GLASS_FILTER_ID})`
-                                    : 'none',
-                            } as React.CSSProperties
-                        }
+                        className={`rz-live-glass rz-live-glass--copy ${MIRROR_CLASS}`}
+                        style={GLASS_VARS}
+                    />
+                    <span
+                        ref={glassVideoRef}
+                        aria-hidden
+                        className="rz-live-glass rz-live-glass--pane"
+                        style={GLASS_VARS}
                     />
                 </>
             )}
@@ -1134,7 +1737,12 @@ export function LivenessCamera({
                 on the FACE, which is the one part the glass deliberately leaves
                 clear, so putting it under the pane would hide it exactly where
                 it is meant to be. */}
-            <FaceMesh videoRef={videoElRef} onBounds={handleMeshBounds} />
+            <FaceMesh
+                videoRef={videoElRef}
+                canvasRef={meshCanvasRef}
+                matchRef={matchRef}
+                onBounds={handleMeshBounds}
+            />
 
             <ThemeProvider theme={livenessTheme}>
                 <FaceLivenessDetectorCore
