@@ -24,6 +24,49 @@ const globalEnv =
 const isProdEnv = process.env.NODE_ENV === 'production' || globalEnv.NODE_ENV === 'production';
 
 /**
+ * Where Face Liveness sessions live — `KYC_LIVENESS_REGION`, default us-east-1.
+ *
+ * ── Why this is a variable at all ───────────────────────────────────────────
+ * Distance to this region is the dominant cost of the whole face check. The
+ * browser streams the selfie VIDEO to it directly, and measured from a phone in
+ * the Middle East against us-east-1 the wait between the camera going dark and
+ * AWS answering was 21–28 seconds — of which the inference is a few. Nothing in
+ * this app can shorten that; moving the region can.
+ *
+ * ⚠️ IT MUST MATCH THE REGION THE KYC WORKER MINTS SESSIONS IN. The Worker
+ * calls `CreateFaceLivenessSession` and hands the browser back a `region`, and
+ * the Amplify component signs its socket for THAT one. This variable only
+ * decides which host the CSP permits. Set them differently and the socket is
+ * refused by the policy, which surfaces as a generic detector failure with a
+ * clean network tab — so change both together, or neither.
+ *
+ * ── Why the value is validated and not interpolated ─────────────────────────
+ * It is spliced into `connect-src`. That directive is what stops a tampered
+ * page from posting a camera frame to somebody else's server, and in an app
+ * that photographs faces and identity documents that is not a formality — so a
+ * malformed or hostile value must not be able to widen it. The pattern admits
+ * AWS's region shape and nothing else: no scheme, no path, no dots, no second
+ * host. Anything that fails it is ignored in favour of the default and says so,
+ * because failing closed on a typo is a check nobody can run and a silence
+ * nobody can debug.
+ */
+const LIVENESS_REGION_FALLBACK = 'us-east-1';
+/** `us-east-1`, `eu-central-1`, `me-central-1`, `us-gov-west-1` — and no more. */
+const AWS_REGION = /^[a-z]{2}(?:-[a-z]+){1,2}-\d{1,2}$/;
+
+function livenessRegion(): string {
+    const raw = process.env.KYC_LIVENESS_REGION || globalEnv.KYC_LIVENESS_REGION;
+    if (!raw) return LIVENESS_REGION_FALLBACK;
+    if (!AWS_REGION.test(raw)) {
+        console.warn(
+            `[csp] KYC_LIVENESS_REGION is not an AWS region (${raw}) — using ${LIVENESS_REGION_FALLBACK}`,
+        );
+        return LIVENESS_REGION_FALLBACK;
+    }
+    return raw;
+}
+
+/**
  * May this response be framed by our own origin?
  *
  * The design gallery only, on any environment. It frames each screen so the
@@ -80,7 +123,7 @@ function buildCsp(nonce: string, framable: boolean) {
     // minutes, and permit exactly `rekognition:StartFaceLivenessSession` — see
     // livenessCredentials() in the ramaaz-kyc repo. Everything else about the
     // BFF rule stands: no other origin, and no token that outlives the check.
-    const rekognitionStreaming = 'wss://streaming-rekognition.us-east-1.amazonaws.com';
+    const rekognitionStreaming = `wss://streaming-rekognition.${livenessRegion()}.amazonaws.com`;
 
     // ── The second, and the reason it is named rather than wildcarded ───────
     //

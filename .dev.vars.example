@@ -17,6 +17,24 @@ NEST_API_URL="https://staging-backend.ramaaz.store"
 # again, or the capture ends in a generic failure. Any other value = liveness.
 KYC_FACE_MODE=""
 
+# Which AWS region Face Liveness sessions stream to. Read ONLY by the CSP in
+# src/middleware.ts, which must name that host: the browser streams the selfie
+# video straight to AWS, so `connect-src 'self'` would otherwise block it.
+#
+# Unset = us-east-1, which is what ships.
+#
+# MUST MATCH the region the KYC Worker mints sessions in. The Worker calls
+# CreateFaceLivenessSession and hands the browser back a `region`; this only
+# decides which host the policy permits. Set them differently and the socket is
+# refused with nothing in the network tab to explain it.
+#
+# Worth moving: distance to this region is the dominant cost of the whole face
+# check. Measured from a phone in the Middle East against us-east-1, the wait
+# between the camera going dark and AWS answering was 21-28s, of which the
+# inference is a few. Check the current Face Liveness supported-region list
+# before picking — it is narrower than Rekognition's overall.
+KYC_LIVENESS_REGION=""
+
 # Proves to the backend that the X-Edge-Client-IP / -Country headers came from
 # this Worker and may be trusted. See src/lib/api/edge.ts.
 #
