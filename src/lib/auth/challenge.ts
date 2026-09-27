@@ -1,15 +1,15 @@
-import "server-only";
-import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { isProd } from "@/lib/env";
+import 'server-only';
+import { cookies, headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { isProd } from '@/lib/env';
 import {
-  CHALLENGE_MAX_AGE,
-  REFRESH_MAX_AGE,
-  STAGES,
-  STAGE_ROUTES,
-  type StepResponse,
-} from "@/lib/auth/endpoints";
-import { setAuthCookies, setSessionUser } from "@/lib/auth/cookies";
+    CHALLENGE_MAX_AGE,
+    REFRESH_MAX_AGE,
+    STAGES,
+    STAGE_ROUTES,
+    type StepResponse,
+} from '@/lib/auth/endpoints';
+import { setAuthCookies, setSessionUser } from '@/lib/auth/cookies';
 
 /**
  * The sign-in challenge — the whole client side of the auth state machine.
@@ -24,89 +24,89 @@ import { setAuthCookies, setSessionUser } from "@/lib/auth/cookies";
  * single `challengeToken` and names the position separately — which is what
  * lets `applyStage` route on the server's answer instead of on a step counter.
  */
-const COOKIE = "root_challenge";
+const COOKIE = 'root_challenge';
 
 export type ChallengeState = {
-  /**
-   * The server's own position — "PRIVATE_CODE_REQUIRED", "FACE_REQUIRED", …
-   * The screens gate on this, so a step reached by typing its URL directly
-   * bounces back to wherever the server actually is.
-   */
-  stage?: string;
-  /**
-   * The credential for every step. One value for the whole attempt — it does
-   * not rotate — but it is still stored from the RESPONSE rather than kept
-   * from what we sent, so a server that starts reissuing it needs no change
-   * here.
-   */
-  challengeToken?: string;
-  /**
-   * Correlation id for this attempt. Stable, and not a credential.
-   *
-   * The KYC Worker needs something it can put in a request body and a log line
-   * to identify whose sign-in it is holding, and the token cannot do that job.
-   * Without this the face check fails at the Worker with
-   * `422 challengeId is required`, before the backend is ever contacted.
-   */
-  challengeId?: string;
-  /**
-   * When the whole sequence dies (10 min from /auth/link). ISO string.
-   * Authoritative — do not compute a deadline locally.
-   */
-  challengeExpiresAt?: string;
-  /**
-   * How long a private code lives on THIS deployment, in seconds.
-   *
-   * Stored because the screen that needs it is rendered from the cookie, not
-   * from the response: `/auth/link` answers PRIVATE_CODE_REQUIRED, `applyStage`
-   * redirects to /login, and the page reads the challenge. Without it here the
-   * value would be dropped one line after it arrived.
-   *
-   * ⚠️ For COPY ONLY — "valid for about eight minutes". Never a countdown: the
-   * clock starts when the administrator messages WhatsApp, which neither side
-   * observes.
-   */
-  privateCodeTtlSeconds?: number;
-  /**
-   * The access-link token that opened this challenge. Two jobs:
-   *
-   *  1. It makes `/enter/<token>` IDEMPOTENT — `openLink` compares the incoming
-   *     token against this one and resumes instead of re-opening.
-   *  2. It is the ONLY thing that can open a new challenge, which is what
-   *     `restartSignInAction` needs to actually restart anything.
-   *
-   * ── Why the token and not a hash of it ──────────────────────────────────────
-   * This held a SHA-256 first, on the reasoning that the link token is reusable
-   * for the life of the link while the challenge token beside it dies in ten
-   * minutes — so it is the more valuable of the two and the one worth not
-   * keeping. That reasoning was sound for job 1, which only ever asks "is this
-   * the same link?", and a hash answers that perfectly.
-   *
-   * It cannot do job 2. A hash is one-way, so "start over" had nothing to
-   * re-open and could only clear the challenge and bounce to /login — which
-   * redirects to /no-access the moment there is no challenge, making that button
-   * a guaranteed dead end.
-   *
-   * So the token is stored. The exposure is real but small and bounded: the
-   * cookie is httpOnly, Secure in production, SameSite=lax, and expires with the
-   * challenge at CHALLENGE_MAX_AGE (10 minutes). The same browser already holds
-   * this token in its history, and the message it came from is still sitting in
-   * WhatsApp. Nothing reads it back out to the client — `restartSignInAction`
-   * spends it server-side and never puts it in a URL.
-   */
-  linkToken?: string;
-  /**
-   * Where the face captured earlier in THIS sign-in is stored.
-   *
-   * A URL, so it fits here — the image is ~300KB and a cookie holds 4KB. It is
-   * what makes a refresh on the ID step keep the face: the captured frame is
-   * React state and does not survive a reload, and nobody should be asked to
-   * photograph themselves twice for one sign-in.
-   *
-   * Never handed to the browser as-is. `/api/face-capture` reads it here and
-   * fetches server-side, so the URL stays on this side of the BFF.
-   */
-  faceCaptureUrl?: string;
+    /**
+     * The server's own position — "PRIVATE_CODE_REQUIRED", "FACE_REQUIRED", …
+     * The screens gate on this, so a step reached by typing its URL directly
+     * bounces back to wherever the server actually is.
+     */
+    stage?: string;
+    /**
+     * The credential for every step. One value for the whole attempt — it does
+     * not rotate — but it is still stored from the RESPONSE rather than kept
+     * from what we sent, so a server that starts reissuing it needs no change
+     * here.
+     */
+    challengeToken?: string;
+    /**
+     * Correlation id for this attempt. Stable, and not a credential.
+     *
+     * The KYC Worker needs something it can put in a request body and a log line
+     * to identify whose sign-in it is holding, and the token cannot do that job.
+     * Without this the face check fails at the Worker with
+     * `422 challengeId is required`, before the backend is ever contacted.
+     */
+    challengeId?: string;
+    /**
+     * When the whole sequence dies (10 min from /auth/link). ISO string.
+     * Authoritative — do not compute a deadline locally.
+     */
+    challengeExpiresAt?: string;
+    /**
+     * How long a private code lives on THIS deployment, in seconds.
+     *
+     * Stored because the screen that needs it is rendered from the cookie, not
+     * from the response: `/auth/link` answers PRIVATE_CODE_REQUIRED, `applyStage`
+     * redirects to /login, and the page reads the challenge. Without it here the
+     * value would be dropped one line after it arrived.
+     *
+     * ⚠️ For COPY ONLY — "valid for about eight minutes". Never a countdown: the
+     * clock starts when the administrator messages WhatsApp, which neither side
+     * observes.
+     */
+    privateCodeTtlSeconds?: number;
+    /**
+     * The access-link token that opened this challenge. Two jobs:
+     *
+     *  1. It makes `/enter/<token>` IDEMPOTENT — `openLink` compares the incoming
+     *     token against this one and resumes instead of re-opening.
+     *  2. It is the ONLY thing that can open a new challenge, which is what
+     *     `restartSignInAction` needs to actually restart anything.
+     *
+     * ── Why the token and not a hash of it ──────────────────────────────────────
+     * This held a SHA-256 first, on the reasoning that the link token is reusable
+     * for the life of the link while the challenge token beside it dies in ten
+     * minutes — so it is the more valuable of the two and the one worth not
+     * keeping. That reasoning was sound for job 1, which only ever asks "is this
+     * the same link?", and a hash answers that perfectly.
+     *
+     * It cannot do job 2. A hash is one-way, so "start over" had nothing to
+     * re-open and could only clear the challenge and bounce to /login — which
+     * redirects to /no-access the moment there is no challenge, making that button
+     * a guaranteed dead end.
+     *
+     * So the token is stored. The exposure is real but small and bounded: the
+     * cookie is httpOnly, Secure in production, SameSite=lax, and expires with the
+     * challenge at CHALLENGE_MAX_AGE (10 minutes). The same browser already holds
+     * this token in its history, and the message it came from is still sitting in
+     * WhatsApp. Nothing reads it back out to the client — `restartSignInAction`
+     * spends it server-side and never puts it in a URL.
+     */
+    linkToken?: string;
+    /**
+     * Where the face captured earlier in THIS sign-in is stored.
+     *
+     * A URL, so it fits here — the image is ~300KB and a cookie holds 4KB. It is
+     * what makes a refresh on the ID step keep the face: the captured frame is
+     * React state and does not survive a reload, and nobody should be asked to
+     * photograph themselves twice for one sign-in.
+     *
+     * Never handed to the browser as-is. `/api/face-capture` reads it here and
+     * fetches server-side, so the URL stays on this side of the BFF.
+     */
+    faceCaptureUrl?: string;
 };
 
 /**
@@ -118,20 +118,20 @@ export type ChallengeState = {
  * here would throw away a working sign-in over a date format.
  */
 export function challengeIsLive(state: ChallengeState): boolean {
-  if (!state.challengeToken) return false;
-  if (!state.challengeExpiresAt) return true;
-  const deadline = Date.parse(state.challengeExpiresAt);
-  return Number.isNaN(deadline) || deadline > Date.now();
+    if (!state.challengeToken) return false;
+    if (!state.challengeExpiresAt) return true;
+    const deadline = Date.parse(state.challengeExpiresAt);
+    return Number.isNaN(deadline) || deadline > Date.now();
 }
 
 export async function readChallenge(): Promise<ChallengeState> {
-  const raw = (await cookies()).get(COOKIE)?.value;
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw) as ChallengeState;
-  } catch {
-    return {};
-  }
+    const raw = (await cookies()).get(COOKIE)?.value;
+    if (!raw) return {};
+    try {
+        return JSON.parse(raw) as ChallengeState;
+    } catch {
+        return {};
+    }
 }
 
 /**
@@ -161,32 +161,31 @@ export async function readChallenge(): Promise<ChallengeState> {
 const EXPIRY_GRACE_SECONDS = 60;
 
 function cookieLifetime(state: ChallengeState): number {
-  if (!state.challengeExpiresAt) return CHALLENGE_MAX_AGE;
+    if (!state.challengeExpiresAt) return CHALLENGE_MAX_AGE;
 
-  const deadline = Date.parse(state.challengeExpiresAt);
-  if (Number.isNaN(deadline)) return CHALLENGE_MAX_AGE;
+    const deadline = Date.parse(state.challengeExpiresAt);
+    if (Number.isNaN(deadline)) return CHALLENGE_MAX_AGE;
 
-  const seconds =
-    Math.ceil((deadline - Date.now()) / 1000) + EXPIRY_GRACE_SECONDS;
+    const seconds = Math.ceil((deadline - Date.now()) / 1000) + EXPIRY_GRACE_SECONDS;
 
-  // Never zero or negative: that deletes the cookie outright, and a dead
-  // challenge should still reach the backend to be refused out loud.
-  return Math.max(seconds, EXPIRY_GRACE_SECONDS);
+    // Never zero or negative: that deletes the cookie outright, and a dead
+    // challenge should still reach the backend to be refused out loud.
+    return Math.max(seconds, EXPIRY_GRACE_SECONDS);
 }
 
 /** Server Actions and Route Handlers only — a render may not set cookies. */
 export async function writeChallenge(state: ChallengeState) {
-  (await cookies()).set(COOKIE, JSON.stringify(state), {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "lax",
-    path: "/",
-    maxAge: cookieLifetime(state),
-  });
+    (await cookies()).set(COOKIE, JSON.stringify(state), {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: cookieLifetime(state),
+    });
 }
 
 export async function clearChallenge() {
-  (await cookies()).delete(COOKIE);
+    (await cookies()).delete(COOKIE);
 }
 
 /**
@@ -198,10 +197,10 @@ export async function clearChallenge() {
  * switched on that we have no screen for.
  */
 export class UnknownStageError extends Error {
-  constructor(readonly stage: string) {
-    super(`This sign-in needs a step this app does not support yet (${stage})`);
-    this.name = "UnknownStageError";
-  }
+    constructor(readonly stage: string) {
+        super(`This sign-in needs a step this app does not support yet (${stage})`);
+        this.name = 'UnknownStageError';
+    }
 }
 
 /**
@@ -220,72 +219,92 @@ export class UnknownStageError extends Error {
  * @returns never — it always either redirects or throws.
  */
 export async function applyStage(
-  result: StepResponse,
-  /**
-   * Only `openLink` passes this — it is the one caller that knows which access
-   * link is in play. Every later step omits it and the stored value is carried
-   * forward, exactly as `challengeId` is.
-   */
-  linkToken?: string,
+    result: StepResponse,
+    /**
+     * Only `openLink` passes this — it is the one caller that knows which access
+     * link is in play. Every later step omits it and the stored value is carried
+     * forward, exactly as `challengeId` is.
+     */
+    linkToken?: string,
 ): Promise<never> {
-  // The end of the flow: this is the only response that carries tokens.
-  if (result.stage === STAGES.completed) {
-    if (!result.tokens) {
-      throw new Error("The server reported COMPLETED without issuing tokens");
+    // The end of the flow: this is the only response that carries tokens.
+    if (result.stage === STAGES.completed) {
+        if (!result.tokens) {
+            throw new Error('The server reported COMPLETED without issuing tokens');
+        }
+        const { access_token, refresh_token, expires_in, user } = result.tokens;
+        await setAuthCookies({
+            accessToken: access_token,
+            refreshToken: refresh_token,
+            accessMaxAge: expires_in,
+            // The refresh token never expires; only the cookie ceiling applies.
+            refreshMaxAge: REFRESH_MAX_AGE,
+        });
+        // ⚠️ The ONLY moment the signed-in user is known.
+        //
+        // `GET /v1/me` does not work, so nothing can ask again later. This response
+        // carries the full user and it is the last chance to keep it — miss it and
+        // every protected page decides nobody is signed in. See the USER cookie.
+        await setSessionUser(user, REFRESH_MAX_AGE);
+        await clearChallenge();
+        /*
+         * ── Not the dashboard — the passcode first ──────────────────────────────
+         *
+         * ⚠️ THIS IS A STAND-IN FOR A STAGE THE BACKEND DOES NOT SEND YET, and it
+         * is the one place in this file that names its own successor. Everything
+         * else here routes on what the server said; this does not, because the
+         * server has nothing to say about a passcode: there is no
+         * `PASSCODE_REQUIRED` stage and no endpoint behind it (see
+         * `features/passcode/store.ts`).
+         *
+         * So the screen is reached by sending every completed sign-in through it,
+         * and /set-passcode decides for itself whether it is needed — it steps
+         * aside for a browser that already has one, which is what makes a returning
+         * sign-in land where it always did.
+         *
+         * When the stage exists, this reverts to `redirect("/dashboard")` and the
+         * screen joins `STAGE_ROUTES` like every other step. That is a two-line
+         * change, deliberately: this detour is the only thing in the routing that
+         * knows the passcode exists.
+         */
+        // redirect("/set-passcode");
+        redirect('/dashboard');
     }
-    const { access_token, refresh_token, expires_in, user } = result.tokens;
-    await setAuthCookies({
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      accessMaxAge: expires_in,
-      // The refresh token never expires; only the cookie ceiling applies.
-      refreshMaxAge: REFRESH_MAX_AGE,
+
+    const next = STAGE_ROUTES[result.stage];
+    if (!next) throw new UnknownStageError(result.stage);
+
+    // Every step but the last re-issues the token; a response without one would
+    // leave the next call unable to prove anything, so fail here rather than
+    // sending an empty token and reading CHALLENGE_INVALID as the user's fault.
+    if (!result.challenge_token) {
+        throw new Error(`Stage ${result.stage} arrived without a challenge token`);
+    }
+
+    // Carried forward when a response omits it: the id is stable for the whole
+    // attempt, so a step that does not echo it has not changed it.
+    const current = await readChallenge();
+
+    await writeChallenge({
+        stage: result.stage,
+        challengeToken: result.challenge_token,
+        challengeId: result.challenge_id ?? current.challengeId,
+        challengeExpiresAt: result.challenge_expires_at,
+        // Carried forward like challengeId: only PRIVATE_CODE_REQUIRED sends it,
+        // and a later step must not erase what the code screen will need if the
+        // flow comes back to it.
+        privateCodeTtlSeconds: result.private_code_ttl_seconds ?? current.privateCodeTtlSeconds,
+        // Carried forward for the same reason as challengeId, and it MUST be: drop
+        // it at the first step and `/enter/<token>` stops being idempotent — and
+        // "start over" stops working — the moment the administrator types their
+        // private code, which is precisely when they most need both.
+        linkToken: linkToken ?? current.linkToken,
+        // Carried forward like challengeId: the backend sends it on the response
+        // that first knows about it, and every later step would otherwise drop it.
+        faceCaptureUrl: result.face_capture_url ?? current.faceCaptureUrl,
     });
-    // ⚠️ The ONLY moment the signed-in user is known.
-    //
-    // `GET /v1/me` does not work, so nothing can ask again later. This response
-    // carries the full user and it is the last chance to keep it — miss it and
-    // every protected page decides nobody is signed in. See the USER cookie.
-    await setSessionUser(user, REFRESH_MAX_AGE);
-    await clearChallenge();
-    redirect("/dashboard");
-  }
 
-  const next = STAGE_ROUTES[result.stage];
-  if (!next) throw new UnknownStageError(result.stage);
-
-  // Every step but the last re-issues the token; a response without one would
-  // leave the next call unable to prove anything, so fail here rather than
-  // sending an empty token and reading CHALLENGE_INVALID as the user's fault.
-  if (!result.challenge_token) {
-    throw new Error(`Stage ${result.stage} arrived without a challenge token`);
-  }
-
-  // Carried forward when a response omits it: the id is stable for the whole
-  // attempt, so a step that does not echo it has not changed it.
-  const current = await readChallenge();
-
-  await writeChallenge({
-    stage: result.stage,
-    challengeToken: result.challenge_token,
-    challengeId: result.challenge_id ?? current.challengeId,
-    challengeExpiresAt: result.challenge_expires_at,
-    // Carried forward like challengeId: only PRIVATE_CODE_REQUIRED sends it,
-    // and a later step must not erase what the code screen will need if the
-    // flow comes back to it.
-    privateCodeTtlSeconds:
-      result.private_code_ttl_seconds ?? current.privateCodeTtlSeconds,
-    // Carried forward for the same reason as challengeId, and it MUST be: drop
-    // it at the first step and `/enter/<token>` stops being idempotent — and
-    // "start over" stops working — the moment the administrator types their
-    // private code, which is precisely when they most need both.
-    linkToken: linkToken ?? current.linkToken,
-    // Carried forward like challengeId: the backend sends it on the response
-    // that first knows about it, and every later step would otherwise drop it.
-    faceCaptureUrl: result.face_capture_url ?? current.faceCaptureUrl,
-  });
-
-  redirect(next);
+    redirect(next);
 }
 
 /**
@@ -298,12 +317,12 @@ export async function applyStage(
  * instead of spending an attempt to discover that.
  */
 export async function requireStage(stage: string): Promise<ChallengeState> {
-  const challenge = await readChallenge();
-  if (!challenge.challengeToken) redirect("/login");
-  if (challenge.stage !== stage) {
-    redirect(STAGE_ROUTES[challenge.stage ?? ""] ?? "/login");
-  }
-  return challenge;
+    const challenge = await readChallenge();
+    if (!challenge.challengeToken) redirect('/login');
+    if (challenge.stage !== stage) {
+        redirect(STAGE_ROUTES[challenge.stage ?? ''] ?? '/login');
+    }
+    return challenge;
 }
 
 /* ─────────────────────── the failure flash ─────────────────────── */
@@ -321,21 +340,21 @@ export async function requireStage(stage: string): Promise<ChallengeState> {
  * message must be safe to show slightly late — it never names a cause the
  * server did not name.
  */
-const ERROR_COOKIE = "root_signin_error";
+const ERROR_COOKIE = 'root_signin_error';
 const ERROR_MAX_AGE = 30;
 
 export async function setSignInError(message: string) {
-  (await cookies()).set(ERROR_COOKIE, message, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "lax",
-    path: "/",
-    maxAge: ERROR_MAX_AGE,
-  });
+    (await cookies()).set(ERROR_COOKIE, message, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: ERROR_MAX_AGE,
+    });
 }
 
 export async function readSignInError(): Promise<string | null> {
-  return (await cookies()).get(ERROR_COOKIE)?.value ?? null;
+    return (await cookies()).get(ERROR_COOKIE)?.value ?? null;
 }
 
 /**
@@ -352,7 +371,7 @@ export async function readSignInError(): Promise<string | null> {
  * which is correct: a browser that never held a link has nothing to re-open,
  * and a "try again" that cannot work is worse than silence.
  */
-const LAST_LINK_COOKIE = "root_last_link";
+const LAST_LINK_COOKIE = 'root_last_link';
 
 /**
  * ⚠️ DELIBERATELY MUCH LONGER THAN THE CHALLENGE. Do not tie this to it again.
@@ -381,17 +400,17 @@ const LAST_LINK_COOKIE = "root_last_link";
 const LAST_LINK_MAX_AGE = 60 * 60 * 24;
 
 export async function setLastLink(token: string) {
-  (await cookies()).set(LAST_LINK_COOKIE, token, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "lax",
-    path: "/",
-    maxAge: LAST_LINK_MAX_AGE,
-  });
+    (await cookies()).set(LAST_LINK_COOKIE, token, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: LAST_LINK_MAX_AGE,
+    });
 }
 
 export async function readLastLink(): Promise<string | null> {
-  return (await cookies()).get(LAST_LINK_COOKIE)?.value ?? null;
+    return (await cookies()).get(LAST_LINK_COOKIE)?.value ?? null;
 }
 
 /**
@@ -405,23 +424,31 @@ export async function readLastLink(): Promise<string | null> {
  * agent just yields "Browser".
  */
 export async function sessionLabel(): Promise<string> {
-  const ua = (await headers()).get("user-agent") ?? "";
+    const ua = (await headers()).get('user-agent') ?? '';
 
-  const browser =
-    /\bEdg\//.test(ua) ? "Edge"
-    : /\bOPR\//.test(ua) ? "Opera"
-    : /\bChrome\//.test(ua) ? "Chrome"
-    : /\bFirefox\//.test(ua) ? "Firefox"
-    : /\bSafari\//.test(ua) ? "Safari"
-    : "Browser";
+    const browser = /\bEdg\//.test(ua)
+        ? 'Edge'
+        : /\bOPR\//.test(ua)
+          ? 'Opera'
+          : /\bChrome\//.test(ua)
+            ? 'Chrome'
+            : /\bFirefox\//.test(ua)
+              ? 'Firefox'
+              : /\bSafari\//.test(ua)
+                ? 'Safari'
+                : 'Browser';
 
-  const os =
-    /Windows/.test(ua) ? "Windows"
-    : /Android/.test(ua) ? "Android"
-    : /iPhone|iPad|iPod/.test(ua) ? "iOS"
-    : /Mac OS X/.test(ua) ? "macOS"
-    : /Linux/.test(ua) ? "Linux"
-    : null;
+    const os = /Windows/.test(ua)
+        ? 'Windows'
+        : /Android/.test(ua)
+          ? 'Android'
+          : /iPhone|iPad|iPod/.test(ua)
+            ? 'iOS'
+            : /Mac OS X/.test(ua)
+              ? 'macOS'
+              : /Linux/.test(ua)
+                ? 'Linux'
+                : null;
 
-  return os ? `${browser} on ${os}` : browser;
+    return os ? `${browser} on ${os}` : browser;
 }

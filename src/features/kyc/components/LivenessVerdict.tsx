@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import { VerdictMark } from '@/features/kyc/components/VerdictMark';
+import { VerdictMesh } from '@/features/kyc/components/VerdictMesh';
+import { useStillMesh } from '@/features/kyc/hooks/useStillMesh';
 import { CAPTURE_CHECKING_GLASS } from '@/features/kyc/config/capture';
 import { PhotoGlass } from '@/features/kyc/components/PhotoGlass';
 import { MIRROR_CLASS } from '@/features/kyc/config/capture';
@@ -130,6 +132,20 @@ export function LivenessVerdict({
      * nothing to show.
      */
     const glassSrc = (phase === 'checking' ? (plainSnapshot ?? snapshot) : snapshot) ?? null;
+
+    /**
+     * The face in the frozen frame, as a wireframe — the mark every phase from
+     * here on wears. See `VerdictMesh`.
+     *
+     * ⚠️ READ FROM ONE FIXED PICTURE, not from `glassSrc`. That one swaps at the
+     * verdict (the plain frame under glass, the display frame on a result), and
+     * a swap here would re-run the model and rebuild the mesh at the exact
+     * moment the answer lands — the wireframe would blink out and be redrawn
+     * instead of changing colour. The two frames are the same photograph anyway;
+     * the plain one is simply the better thing to hand a detector, being the one
+     * nothing has been done to.
+     */
+    const mesh = useStillMesh(plainSnapshot ?? snapshot ?? null);
 
     /*
      * The one state that has no honest picture: a phase that shows a face, with
@@ -278,12 +294,20 @@ export function LivenessVerdict({
                         }}
                     />
 
-                    {/* The mark, its light and the frame's edge — see
-                        VerdictMark. Keyed by phase so the verdict animations
-                        replay from their first frame on every transition
-                        rather than being skipped because the element already
-                        existed. */}
-                    <VerdictMark key={phase} phase={phase} />
+                    {/* The mark: the wireframe on the face itself.
+                        ⚠️ NOT keyed by phase, unlike the light below it. It has
+                        to SURVIVE the transition — the mesh the person is
+                        already wearing is what turns green, and remounting it
+                        would rebuild the face and scan it a second time. It
+                        reads the phase and times its own sweep. */}
+                    {mesh.ready && <VerdictMesh phase={phase} mesh={mesh} />}
+
+                    {/* The light, the frame's edge, and — only when no mesh
+                        could be built — the old centred glyph. See VerdictMark.
+                        Keyed by phase so the verdict animations replay from
+                        their first frame on every transition rather than being
+                        skipped because the element already existed. */}
+                    <VerdictMark key={phase} phase={phase} glyph={!mesh.ready} />
                 </>
             )}
 

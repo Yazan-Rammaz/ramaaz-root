@@ -55,6 +55,11 @@
         "faceRotateTitle": "Cihazınızı dik tutun",
         "faceRotateBody": "Yüz kontrolü yalnızca dikey modda çalışır. Tabletinizi çevirin, kontrol kendiliğinden başlayacak.",
         "faceRotateManual": "Bu tarayıcı ekranı sizin için çeviremiyor — lütfen cihazı elle döndürün.",
+        "faceLightTitle": "Işığınızı kontrol edin",
+        "faceLightDark": "Çok karanlık — ışık açın",
+        "faceLightBacklit": "Işık arkanızda — dönün",
+        "faceLightBright": "Çok parlak — ışığı azaltın",
+        "faceLightBlurry": "Bulanık — cihazı sabit tutun",
         "livenessRecording": "Kayıt",
         "livenessCancel": "Kontrolü iptal et",
         "livenessPhotosensitivity": "Bu kontrol renkli ışık yanıp söner.",
@@ -67,6 +72,29 @@
         "matchFailed": "Görüntüde bir tutarsızlık fark ettik ve doğrulamanızda bir sorun var.",
         "matchTryAgain": "Düzelterek tekrar deneyin",
         "matchRetry": "Yeniden eşleştir"
+    },
+    "passcode": {
+        "title": "Şifre Belirle !",
+        "doneTitle": "Şifre Belirlendi",
+        "subtitle": "Son Adım, Hizmetlerimizin Keyfini Çıkarın",
+        "reassurance": "Daha Fazla Güvenlik Sağlayın ve Paranızı Koruyun",
+        "setLabel": "Şifre Belirle",
+        "reenterLabel": "Şifreyi Tekrar Girin",
+        "mismatch": "Girişler eşleşmedi — baştan başlayın",
+        "prompt": "Şifrenizi Girin",
+        "wrong": "Şifre doğru değil",
+        "forgot": "Şifremi Unuttum ?",
+        "passkeyFailed": "Bu işe yaramadı — tekrar denemek için dokunun",
+        "passkeySetup": {
+            "face": "Face ID Kur",
+            "fingerprint": "Parmak İzi Kur",
+            "passkey": "Geçiş Anahtarı Kur"
+        },
+        "passkeyUse": {
+            "face": "Face ID ile Aç",
+            "fingerprint": "Parmak İzi ile Aç",
+            "passkey": "Geçiş Anahtarı ile Aç"
+        }
     },
     "common": {
         "appName": "Ramaaz Root",

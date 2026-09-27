@@ -8,6 +8,7 @@ import {
     getDownsampledImageData,
 } from '@/features/kyc/services/imageQuality';
 import { estimateYaw, useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { faceLightConfig } from '@/features/kyc/config/kycConfig';
 
 /**
  * The gate that decides when a frame is worth sending.
@@ -75,8 +76,10 @@ const MIN_FACE_RATIO = 0.16; // smaller than this and the face is too far away
 const MAX_FACE_RATIO = 0.85; // larger and it is cropped by the frame edges
 const MAX_CENTRE_OFFSET = 0.22; // of frame width/height, from dead centre
 const MAX_YAW_DEG = 18; // beyond this they are looking away, not at us
-const MIN_BRIGHTNESS = 55;
-const MAX_BRIGHTNESS = 215;
+/* Lighting is SHARED with the liveness pre-flight gate — see faceLightConfig.
+ * Both face paths have to agree on what "too dark" means. */
+const MIN_BRIGHTNESS = faceLightConfig.minBrightness;
+const MAX_BRIGHTNESS = faceLightConfig.maxBrightness;
 const MIN_SHARPNESS = 8;
 const MAX_MOTION = 6;
 const SAMPLE_MS = 120;

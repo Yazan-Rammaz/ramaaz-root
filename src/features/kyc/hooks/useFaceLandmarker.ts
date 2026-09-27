@@ -107,6 +107,60 @@ async function loadLandmarker(): Promise<import('@mediapipe/tasks-vision').FaceL
     return landmarker;
 }
 
+/**
+ * The timestamp the shared model last saw.
+ *
+ * ⚠️ MODULE-LEVEL, because the LANDMARKER is module-level. `detectForVideo`
+ * requires strictly increasing timestamps per model instance, and every caller
+ * in the app — the live mesh's hook, the still below — is driving the SAME
+ * cached instance. A per-caller counter satisfies nobody: two of them
+ * interleaving would hand the model a timestamp it had already been given, and
+ * it answers that with a throw rather than with landmarks.
+ */
+let lastStamp = -1;
+
+function nextStamp(): number {
+    const now = performance.now();
+    lastStamp = now > lastStamp ? now : lastStamp + 1;
+    return lastStamp;
+}
+
+/**
+ * Run the model ONCE over a still image — a photograph, not a stream.
+ *
+ * What it is for: the verdict screen has no camera. AWS tears its widget down
+ * when the stream completes, so from then on the only thing on screen is the
+ * frame that was kept — and the wireframe has to sit on THAT face. One
+ * detection is all it needs, because a photograph does not move.
+ *
+ * ⚠️ The model is created in VIDEO running mode and stays that way. Switching
+ * it to IMAGE would be the textbook answer and it is the wrong one here:
+ * `setOptions` reloads the graph, the instance is shared with the live mesh,
+ * and a mode flipped for one still would leave every later frame of the camera
+ * being fed to a model expecting single images. `detectForVideo` takes any
+ * `ImageSource`, an `HTMLImageElement` included — one call, one timestamp, and
+ * nothing about the shared instance changes.
+ *
+ * ⚠️ NEVER THROWS AND NEVER HANGS. Everything it needs can be missing — the
+ * model may not have downloaded, the image may hold no face, the GPU context
+ * may be gone — and all of those answer `null`. The caller draws no wireframe
+ * and shows what it showed before; a decoration must not be able to take out
+ * the screen announcing somebody's verdict.
+ */
+export async function detectStill(
+    image: HTMLImageElement,
+    timeoutMs = 6000,
+): Promise<FaceLandmarkerResult | null> {
+    const ready = await ensureLandmarker(timeoutMs);
+    if (!ready || !cachedLandmarker) return null;
+    if (!image.naturalWidth || !image.naturalHeight) return null;
+    try {
+        return cachedLandmarker.detectForVideo(image, nextStamp());
+    } catch {
+        return null;
+    }
+}
+
 // ─── Yaw estimation from nose–eye geometry ─────────────────────────────────
 /**
  * Derives head yaw (degrees) from the Face Mesh landmark positions.
@@ -161,7 +215,6 @@ export function useFaceLandmarker(): UseFaceLandmarkerReturn {
     const [isReady, setIsReady] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
     const landmarkerRef = useRef<import('@mediapipe/tasks-vision').FaceLandmarker | null>(null);
-    const lastTimestampRef = useRef<number>(-1);
 
     useEffect(() => {
         let cancelled = false;
@@ -190,13 +243,10 @@ export function useFaceLandmarker(): UseFaceLandmarkerReturn {
             if (!landmarkerRef.current || !isReady) return null;
             if (videoEl.readyState < 2) return null;
 
-            // MediaPipe VIDEO mode requires strictly monotonically increasing timestamps.
-            const now = performance.now();
-            if (now <= lastTimestampRef.current) return null;
-            lastTimestampRef.current = now;
-
+            // MediaPipe VIDEO mode requires strictly increasing timestamps, and
+            // the requirement is per MODEL — which is shared. See `nextStamp`.
             try {
-                return landmarkerRef.current.detectForVideo(videoEl, now);
+                return landmarkerRef.current.detectForVideo(videoEl, nextStamp());
             } catch {
                 return null;
             }

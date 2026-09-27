@@ -18,6 +18,9 @@ import { isChallengeExpired, KycHttpError } from '@/features/kyc/services/httpKy
 import { restartSignInAction } from '@/features/auth/actions';
 import { waitForSplash } from '@/features/splash/timing';
 import { ensureLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { useCamera } from '@/features/kyc/hooks/useCamera';
+import { useLightCheck } from '@/features/kyc/hooks/useLightCheck';
+import type { FaceFrameVerdict } from '@/features/kyc/services/imageQuality';
 import { CAPTURE_LIVE_MESH } from '@/features/kyc/config/capture';
 
 // XD px -> scaling rem.
@@ -27,25 +30,46 @@ const rem = (px: number) => `${px * 0.0625}rem`;
  * How long the green verdict holds before the flow moves on.
  *
  * Its counterpart is `FAIL_HOLD_MS` in LivenessVerdict, and the two are
- * deliberately different: a refusal is held just long enough to be understood
- * (2s) because the person still has work to do, while a pass is the one moment
- * in this flow that is purely good news and is worth a beat.
+ * deliberately different: a refusal is held longer (2s) because the person
+ * still has work to do and has to understand why, while a pass only has to be
+ * seen.
+ *
+ * ⚠️ ONE SECOND, AND THE VERDICT ANIMATION IS BUILT TO FIT IT EXACTLY:
+ *
+ *     SWEEP_MS + MESH_HOLD_MS + MESH_FADE_MS  =  PASS_HOLD_MS
+ *     420      + 180          + 400           =  1000     (VerdictMesh)
+ *
+ * The commit now runs ALONGSIDE this rather than after it, so the second that
+ * used to be spent waiting for the upload is spent on the green instead. Cut
+ * this further without cutting those and the dissolve is left half-faded when
+ * the screen navigates; the same warning sits beside them.
  */
-const PASS_HOLD_MS = 3000;
+const PASS_HOLD_MS = 1000;
 
 /**
  * The floor on how long the checking state is shown.
  *
  * ⚠️ A FLOOR, not a delay. The analysis usually takes five to ten seconds and
  * this costs nothing; it exists for the run that comes back fast, where the
- * glass and the AI mark would otherwise flash past and the screen would appear
- * to jump from the camera straight to a verdict.
+ * glass and the mark would otherwise flash past and the screen would appear to
+ * jump from the camera straight to a verdict.
  *
  * That flash is worse than a wait. The mark is the only thing on screen saying
  * the photograph is being worked on, and a result that arrives before anybody
  * saw the work reads as a result that was not computed.
+ *
+ * ⚠️ 1200, DOWN FROM 5000, and the number is DERIVED rather than chosen:
+ * `REVEAL_MS` in `VerdictMesh` (520ms, the web spinning out from the middle of
+ * the face) plus about as long again of it alive and sparkling, so the state
+ * reads as a wait rather than a flicker. Change that one and this follows.
+ *
+ * Five seconds was set against a mark that pulsed indefinitely and had no
+ * moment of completion to wait for. Against one that finishes, everything past
+ * the finish is dead time added to every run the servers answer quickly — and
+ * it is added in the one place nobody is willing to wait, between "hold still"
+ * and being let in.
  */
-const MIN_CHECKING_MS = 5000;
+const MIN_CHECKING_MS = 1200;
 
 /**
  * The face check, done by Amazon Rekognition Face Liveness.
@@ -314,6 +338,19 @@ export function FaceLivenessScreen({
      * first video frame arrives, which on a cold permission prompt is several
      * seconds of nothing.
      *
+     * ⚠️ IT ARRIVES ON `loadedmetadata`, NOT ON A POLL — see the observer in
+     * `LivenessCamera`. The mark has to be gone the instant there is a picture,
+     * because from that instant it is describing something that has already
+     * happened, in the middle of the frame, over the oval AWS measures against
+     * and does not draw. A fifth of a second of a white glyph on a live face is
+     * both visible and wrong, and it was being reported as exactly that: the
+     * Face ID icon appearing after the camera opened.
+     *
+     * Nothing about the ORDER changed, and nothing needed to: the camera is not
+     * asked for until the splash, the landmark model and the AWS session are
+     * all done (see the preparing effect). The mark covers that whole wait and
+     * ends where the picture begins.
+     *
      * Reset per attempt: a retry re-opens the camera, and a stale `true` would
      * skip the standby mark on every run after the first.
      */
@@ -379,6 +416,179 @@ export function FaceLivenessScreen({
     }, []);
 
     /**
+     * ── The light gate ──────────────────────────────────────────────────────
+     *
+     * The second obstacle the person can clear themselves, and the second one
+     * worth catching BEFORE anything is opened.
+     *
+     * In a dark room AWS Face Liveness does not refuse to run. It opens, it
+     * records, it takes the photograph, it bills the session and it spends the
+     * backend's validate — and only then answers no. What that looks like from
+     * the outside is a check that studied your face and rejected it, when the
+     * actual problem was a lamp. Their own `hintIlluminationTooDarkText` does
+     * appear mid-check, but by then the money and the attempt are gone, and it
+     * is competing with the oval for the attention of somebody holding still.
+     *
+     * So the room is measured first, on our own short-lived stream, and the
+     * session is not opened while it is too dark. Same shape as `mustRotate`
+     * above: not an error, nothing spent, and it clears itself the moment the
+     * light is fixed.
+     *
+     * `aspectRatio` matches the 350x400 frame the preview renders into, so the
+     * centre box `useLightCheck` measures is the part of the room the person
+     * can actually see themselves in.
+     */
+    const {
+        videoRef: probeVideoRef,
+        startCamera: startProbe,
+        stopCamera: stopProbe,
+        isActive: probeLive,
+        error: probeError,
+        shouldMirror: probeMirror,
+    } = useCamera({ facingMode: 'user', aspectRatio: 350 / 400 });
+
+    /**
+     * The gate has been passed (or waived). Latches — see `useLightCheck`.
+     *
+     * Everything downstream keys on this rather than on the verdict, so there
+     * is exactly one place that decides the check may start.
+     */
+    const [lightCleared, setLightCleared] = useState(false);
+
+    const { verdict: lightVerdict, progress: lightProgress } = useLightCheck({
+        videoRef: probeVideoRef,
+        paused: !probeLive || lightCleared,
+    });
+
+    /**
+     * The gate is standing — the one condition the probe effect and the frame
+     * both read, so the stream can never be running without somewhere to show
+     * it, or vice versa.
+     *
+     * `PASSED` is consulted for the same reason the session effect consults it:
+     * a challenge already cleared must not reopen a camera to measure a room
+     * nobody is going to be photographed in.
+     */
+    const lightGateOpen = !PASSED.has(challengeId) && !mustRotate && !lightCleared;
+
+    /**
+     * One verdict, one sentence — used by the pre-flight prompt and by the live
+     * warning during the check.
+     *
+     * Shared so the two cannot word the same problem differently. Being told
+     * "find brighter light" before the camera opens and something else five
+     * seconds later, for a room that never changed, reads as two different
+     * complaints and sends people looking for a second thing to fix.
+     */
+    const lightMessage = useCallback(
+        (verdict: FaceFrameVerdict | null) => {
+            switch (verdict) {
+                case 'backlit':
+                    return t('faceLightBacklit');
+                case 'too_bright':
+                    return t('faceLightBright');
+                case 'too_blurry':
+                    return t('faceLightBlurry');
+                default:
+                    return t('faceLightDark');
+            }
+        },
+        [t],
+    );
+
+    /**
+     * The live verdict, while AWS has the camera.
+     *
+     * Null until the first frame is judged. `lightGateOpen` covers the run-up;
+     * this covers everything after, which is where the light actually changes —
+     * somebody turns towards a window, or stands up into their own shadow.
+     */
+    const [liveQuality, setLiveQuality] = useState<FaceFrameVerdict | null>(null);
+
+    /**
+     * Our warning is up, so AWS's hint must come down — see `.rz-hide-hint`.
+     *
+     * Only while the camera is actually showing something (`ready` + live). In
+     * `checking` the stream is already gone and our own verdict glass owns the
+     * frame, so a lighting note there would be advice about a photograph that
+     * has already been taken.
+     */
+    const showLiveWarning =
+        phase === 'ready' && streamLive && liveQuality !== null && liveQuality !== 'ok';
+
+    /** Open the probe stream — after the splash, and only while it is needed. */
+    useEffect(() => {
+        if (!lightGateOpen) return;
+
+        let cancelled = false;
+        void (async () => {
+            // Same reason the session effect waits: a camera permission prompt
+            // raised over a splash the person has not finished watching is one
+            // they refuse, and a refusal sticks to the origin.
+            await waitForSplash();
+            if (cancelled) return;
+            // Never throws — a refusal arrives as `probeError` below.
+            await startProbe();
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [lightGateOpen, startProbe]);
+
+    /**
+     * Good light held long enough — hand the camera over.
+     *
+     * ⚠️ The stream is STOPPED before the gate opens, not after. AWS's SDK
+     * calls `getUserMedia` itself the moment it mounts, and on a phone a second
+     * open against a camera this screen still holds is refused outright. The
+     * order here is what keeps the probe from becoming a new way to fail.
+     */
+    const lightReady = lightProgress >= 1 && lightVerdict === 'ok';
+    useEffect(() => {
+        if (!lightReady || lightCleared) return;
+        stopProbe();
+        setLightCleared(true);
+    }, [lightReady, lightCleared, stopProbe]);
+
+    /**
+     * The probe could not open the camera — waive the gate.
+     *
+     * ⚠️ DELIBERATELY NOT A FAILURE STATE. A blocked or busy camera is a real
+     * problem, but it is one the detector already reports properly: it maps
+     * permission, framerate and device errors to their own copy (see `onError`
+     * below). Blocking here would replace that with a lighting message, which
+     * is both wrong and a dead end — no amount of light fixes a denied
+     * permission. A measurement that cannot be taken must not be able to stop a
+     * sign-in; it stands aside and lets the real check report the real cause.
+     */
+    useEffect(() => {
+        if (probeError && !lightCleared) setLightCleared(true);
+    }, [probeError, lightCleared]);
+
+    /**
+     * Re-arm the gate for another attempt.
+     *
+     * The gate latches so a check already under way cannot be torn down by a
+     * passing shadow, but a RETRY is a new check — and the most likely reason
+     * the last one failed is the thing this gate measures. Without this,
+     * somebody just refused for darkness goes straight back into another billed
+     * session in the same dark room, which is the exact loop the gate exists to
+     * break.
+     *
+     * Called from the two RETRY buttons only, not from the hand-off's `onLive`.
+     * A phone taking over the frame already owns that space with its own panel,
+     * and `probeError` re-waives the gate within a tick anyway if the shimmed
+     * camera will not open for us.
+     */
+    const rearmLightGate = useCallback(() => {
+        setLightCleared(false);
+        // Drop the last check's verdict with it, so the new one does not open
+        // under a warning about a room that has since been fixed.
+        setLiveQuality(null);
+    }, []);
+
+    /**
      * Open a session and fetch credentials before rendering the detector.
      *
      * Both have to be in hand first: the component takes `sessionId` as a prop
@@ -396,6 +606,17 @@ export function FaceLivenessScreen({
         // session and a backend validate. `mustRotate` is a dependency, so
         // turning the device upright runs this effect for real.
         if (mustRotate) return;
+
+        // Too dark to be worth starting. Identical reasoning to the line above:
+        // the detector would run, bill a session, spend the backend's validate
+        // and then refuse a face it could not see. `lightCleared` is a
+        // dependency, so fixing the light runs this effect for real.
+        //
+        // ⚠️ This blocks the landmarker download too, which is the one cost of
+        // putting the guard here rather than around the session call alone. It
+        // is the same trade the landscape guard already makes, and the model is
+        // cached after the first check, so it is paid at most once.
+        if (!lightCleared) return;
 
         let cancelled = false;
 
@@ -505,7 +726,7 @@ export function FaceLivenessScreen({
         };
         // `attempt` is the retry trigger: AWS liveness sessions are single-use,
         // so going again means opening a new one, not reusing the last id.
-    }, [challengeId, attempt, t, mustRotate]);
+    }, [challengeId, attempt, t, mustRotate, lightCleared]);
 
     /**
      * Handed to AWS's SDK, which calls it whenever it needs to sign. Fetching
@@ -577,7 +798,12 @@ export function FaceLivenessScreen({
             };
 
             try {
+                // The third number, beside the two `LivenessCamera` logs: how
+                // long the round trip to /reverify/verify itself takes. The
+                // three together account for the whole checking state.
+                const verifyAt = Date.now();
                 const result = await onSession(sessionId);
+                console.log(`[liveness] verify round trip ${Date.now() - verifyAt}ms`);
                 if (result?.error) {
                     console.error('[liveness] refused:', result.error);
                     await holdChecking();
@@ -617,6 +843,39 @@ export function FaceLivenessScreen({
             setPhase('passed');
 
             /*
+             * ── ⚠️ THE COMMIT STARTS NOW, NOT AFTER THE HOLD ────────────────
+             *
+             * This is the fix for "it waits about five seconds after the green
+             * and then goes". Only the first two of those seconds were the
+             * hold; the rest was `onPassed` running AFTERWARDS — a Server
+             * Action carrying the still, which is a base64 JPEG of a 1280x960
+             * frame, so it is a real upload and not a ping. Held and then
+             * committed, the two costs stack, and the screen spends the second
+             * half of the wait showing a finished verdict with nothing left to
+             * animate. Nobody can tell that apart from the app being stuck.
+             *
+             * Started here and awaited after the hold, they overlap: the whole
+             * wait becomes max(hold, commit) instead of hold + commit, and on
+             * any normal connection the upload is finished before the eye is.
+             *
+             * ⚠️ THE REJECTION IS CAPTURED, NOT LEFT LOOSE. A promise that
+             * rejects while nothing is awaiting it is an unhandled rejection —
+             * and this one rejects on the SUCCESS path, because a Server Action
+             * that redirects signals by throwing. Settling it into a value here
+             * keeps that throw for the handler below, which knows the
+             * difference between a redirect and a failure.
+             *
+             * ⚠️ It does mean the stage can advance while the green is still on
+             * screen. That is the right way round: the check passed, the server
+             * should know, and somebody who closes the tab during the hold has
+             * their progress saved rather than lost.
+             */
+            const commit = Promise.resolve(onPassed?.(shot)).then(
+                (value) => ({ value, thrown: undefined }),
+                (thrown: unknown) => ({ value: undefined, thrown }),
+            );
+
+            /*
              * Hold the green verdict before committing.
              *
              * ⚠️ Committing NAVIGATES, and a redirect never comes back — so
@@ -625,18 +884,30 @@ export function FaceLivenessScreen({
              * longer exists, and the result was a green flash most people never
              * resolved into "it worked".
              *
-             * Three seconds covers the whole arrival — the glyph lands, catches
-             * its shine, and the green sheen reaches the corners — and then
-             * leaves a beat of stillness to read it. See VerdictMark.
+             * ⚠️ 1000, DOWN FROM 3000 IN TWO STEPS. Three seconds was measured
+             * against the old Face ID glyph, which landed, caught its shine and
+             * then simply sat there — the last second was stillness bought to
+             * make the moment register. The web replaced it with something that
+             * ENDS, and the whole of it now fits in a second; see the
+             * arithmetic beside the constant.
              */
             await new Promise((resolve) => setTimeout(resolve, PASS_HOLD_MS));
 
+            // The frame went WITH the commit. It is the same still the verdict
+            // showed — a base64 data URL — and the backend stores it so a
+            // refresh on the ID step has a face to display without asking
+            // anyone to photograph themselves twice.
+            //
+            // Settled above, so this is already done on any normal connection
+            // and the `await` returns immediately. One line per check, because
+            // "it hangs after the green" is otherwise unanswerable from
+            // outside: this says whether the wait was the hold or the upload.
+            const started = Date.now();
+            const { value: committed, thrown } = await commit;
+            console.log(`[liveness] commit settled ${Date.now() - started}ms after the hold ended`);
+
             try {
-                // The frame goes WITH the commit. It is the same still the
-                // verdict showed — a base64 data URL — and the backend stores
-                // it so a refresh on the ID step has a face to display without
-                // asking anyone to photograph themselves twice.
-                const committed = await onPassed?.(shot);
+                if (thrown !== undefined) throw thrown;
                 if (committed?.error) {
                     console.error('[liveness] commit refused:', committed.error);
                     setPhase('failed');
@@ -716,7 +987,9 @@ export function FaceLivenessScreen({
                   this box and still mirrors.
                 */
                 dir="ltr"
-                className="relative isolate h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black"
+                className={`relative isolate h-400 w-350 shrink-0 overflow-hidden rad-30 bg-black${
+                    showLiveWarning ? ' rz-hide-hint' : ''
+                }`}
                 style={{ marginTop: rem(12), marginBottom: rem(70 + 12) }}
             >
                 {/*
@@ -762,6 +1035,84 @@ export function FaceLivenessScreen({
                     </div>
                 )}
 
+                {/*
+                  Find better light — shown INSTEAD of starting anything.
+
+                  Like the rotate prompt above: not an error, nothing spent, and
+                  it clears itself. Unlike it, the camera is LIVE underneath —
+                  seeing your own face go from dark to lit is the whole feedback
+                  loop, and it is what makes "move the lamp in front of you"
+                  something a person can act on rather than guess at.
+                */}
+                {lightGateOpen && (
+                    <>
+                        {/*
+                          ⚠️ MOUNTED FOR THE WHOLE GATE, not just once the stream
+                          is live. `useCamera.startCamera` assigns `srcObject` to
+                          `videoRef.current` and only then flips `isActive`, so an
+                          element that waits for `isActive` to render does not
+                          exist at the moment the stream is handed to it: the ref
+                          is null, the assignment is skipped, and the preview
+                          stays black forever while the probe reports a healthy
+                          camera. Rendering it up front is what gives the hook
+                          something to attach to.
+                        */}
+                        <video
+                            ref={probeVideoRef}
+                            playsInline
+                            muted
+                            autoPlay
+                            className="absolute inset-0 z-10 h-full w-full object-cover"
+                            style={probeMirror ? { transform: 'scaleX(-1)' } : undefined}
+                        />
+                        {/* The copy waits for a live stream — there is nothing to
+                            say about light nobody is measuring yet, and the
+                            standby mark owns the frame until then. */}
+                        {probeLive && (
+                            <div
+                                role="status"
+                                aria-live="polite"
+                                className="absolute inset-0 z-20 flex flex-col items-center justify-end bg-black/55 px-24"
+                                style={{ paddingBottom: rem(28) }}
+                            >
+                                <p className="text-center fz-16 leading-none font-semibold text-white">
+                                    {t('faceLightTitle')}
+                                </p>
+                                <p
+                                    className="max-w-300 text-center fz-13 leading-normal font-medium text-white/80"
+                                    style={{ marginTop: rem(8) }}
+                                >
+                                    {/* Nothing measured yet — say so, rather
+                                        than letting the fallback accuse a room
+                                        nobody has looked at of being dark. */}
+                                    {lightVerdict === null
+                                        ? t('faceLoading')
+                                        : lightVerdict === 'ok'
+                                          ? t('faceHold')
+                                          : lightMessage(lightVerdict)}
+                                </p>
+                                {/*
+                              The hold, drawn. Only while the light is actually
+                              good — a bar sitting at zero under "find brighter
+                              light" reads as a stalled loader, which is the one
+                              thing this state is not.
+                            */}
+                                <div
+                                    className="w-160 overflow-hidden rounded-full bg-white/25"
+                                    style={{ marginTop: rem(14), height: rem(3) }}
+                                >
+                                    <div
+                                        className="h-full rounded-full bg-white transition-[width] duration-150 ease-linear"
+                                        style={{
+                                            width: `${(lightVerdict === 'ok' ? lightProgress : 0) * 100}%`,
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+
                 {/* Standby — the same mark the verdicts use, in white.
                     It was three bouncing dots, which say "loading" and nothing
                     about what; the glyph says the camera is coming, which is
@@ -783,6 +1134,12 @@ export function FaceLivenessScreen({
             arrives. */}
                 {(phase === 'preparing' || (phase === 'ready' && !streamLive)) &&
                     !mustRotate &&
+                    // Hidden once the light prompt has a live stream, for the
+                    // same reason as the rotate one: the glyph belongs to the
+                    // WAIT for a camera, and there is a camera. It deliberately
+                    // stays up over the gate's BLACK frame, which is exactly
+                    // that wait.
+                    !(lightGateOpen && probeLive) &&
                     // ⚠️ Hidden for BOTH of the hand-off's own early phases, and they are
                     // not the same thing as this screen's `preparing`.
                     //
@@ -828,6 +1185,7 @@ export function FaceLivenessScreen({
                             setSnapshot(null);
                             setStreamLive(false);
                             setPhase('preparing');
+                            rearmLightGate();
                             setAttempt((n) => n + 1);
                         }}
                     />
@@ -853,6 +1211,7 @@ export function FaceLivenessScreen({
                                 setSnapshot(null);
                                 setStreamLive(false);
                                 setPhase('preparing');
+                                rearmLightGate();
                                 setAttempt((n) => n + 1);
                             }}
                             title={t('deviceRetry')}
@@ -896,7 +1255,8 @@ export function FaceLivenessScreen({
                         credentialProvider={credentialProvider}
                         onAnalysisComplete={handleComplete}
                         onCameraLive={() => setStreamLive(true)}
-                                    /*
+                        onFrameQuality={setLiveQuality}
+                        /*
                          * Take the frame the moment the camera goes, not when
                          * the analysis returns.
                          *
@@ -1035,6 +1395,48 @@ export function FaceLivenessScreen({
                             setPhase('unavailable');
                         }}
                     />
+                )}
+
+                {/*
+                  The light or the focus went WHILE the check was running.
+
+                  ⚠️ A WARNING, NOT A GATE — and the distinction is the whole
+                  design. AWS owns the stream once the detector is mounted:
+                  there is no way to pause its oval countdown, and refusing the
+                  result afterwards would throw away a liveness that may well
+                  have passed and cost the person an attempt for a lamp. So this
+                  does the one useful thing left — says what changed, while
+                  there are still seconds in which to fix it.
+                *
+                  What enforces it is the frame RANKING in `LivenessCamera`:
+                  a frame that fails this gate never displaces one that passed,
+                  so the still that ends up on the identity record is the lit,
+                  focused one if any such frame went past at all.
+
+                  Deliberately a strip rather than the full-cover panel the
+                  pre-flight gate uses. Covering the camera here would hide the
+                  oval the person is being asked to fill, which is the one thing
+                  they must be able to see, and AWS's own hints live in the
+                  middle of the frame.
+                */}
+                {showLiveWarning && (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        className="absolute inset-x-0 z-30 flex justify-center px-12"
+                        style={{ bottom: rem(30) }}
+                    >
+                        {/* Shaped like AWS's own hint — same dark pill, same
+                            14/medium, same foot of the frame — because it
+                            replaces it rather than joining it. A second style
+                            here would read as a second kind of message. */}
+                        <span
+                            className="rounded-full bg-black/75 text-center fz-14 leading-none font-medium whitespace-nowrap text-white"
+                            style={{ padding: `${rem(10)} ${rem(16)}` }}
+                        >
+                            {lightMessage(liveQuality)}
+                        </span>
+                    </div>
                 )}
             </div>
 

@@ -2,20 +2,35 @@
 
 import { Icon } from '@/components/ui/Icon';
 import { AiSparkle } from '@/features/kyc/components/AiSparkle';
+import { VERDICT_FAIL, VERDICT_PASS } from '@/features/kyc/components/VerdictMesh';
 
 /**
- * What sits on the glass — the mark, its light, and the frame's edge.
+ * The LIGHT on the glass — the wash, the frame's edge, and the fallback mark.
  *
- * Four states, one shape of presentation:
+ * ⚠️ THE MARK ITSELF IS THE MESH, and it is not drawn here. `VerdictMesh` puts
+ * the wireframe on the face: blue-white while a model is looking at it, green
+ * or red in one sweep when the answer lands. What is left in this file is
+ * everything that belongs to the FRAME rather than to the face —
  *
  *   preparing the Face ID glyph in white, with rings leaving it. The camera is
- *             being opened and nothing has been asked of anyone yet.
- *   checking  the AI mark, breathing over a soft glow. Nothing has been
- *             decided, so nothing is coloured.
- *   passed    the Face ID glyph in green, with light travelling out of it to
- *             the corners. The phone-unlock gesture, deliberately: it is the
- *             one animation everybody already reads as "you are in".
- *   failed    the same glyph and the same light in red.
+ *             being opened, there is no face yet, and therefore no mesh: this
+ *             is the one state whose mark is still a glyph.
+ *   passed    light travelling out of the centre to the corners, and the
+ *             frame's edge in green. The phone-unlock gesture, deliberately: it
+ *             is the one animation everybody already reads as "you are in".
+ *   failed    the same light and the same edge in red.
+ *
+ * — plus the centred glyph as a FALLBACK, for the case where no mesh could be
+ * built (see `glyph`). That is why the AI star and the Face ID mark are still
+ * here rather than deleted.
+ *
+ * ── Why the colour travels through the states ───────────────────────────────
+ * The mark used to be white while it thought and coloured only once it had
+ * decided, which made the verdict look like a DIFFERENT animation arriving
+ * rather than the same one resolving. Blue is the working colour — a model is
+ * looking at your photograph — and the verdict is that same material turning
+ * green or red. The mesh carries that; the palette the fallback glyphs use
+ * (`--gem-*` in globals.css) says it the same way for the same reason.
  *
  * ── Why `preparing` uses the verdict's glyph and not the AI star ────────────
  * Because it is about the CAMERA. The star means a model is working on your
@@ -25,6 +40,9 @@ import { AiSparkle } from '@/features/kyc/components/AiSparkle';
  * permission prompt is up.
  *
  * ── Why the two verdicts share everything but a colour ──────────────────────
+ * (and why that is now literally true in the CSS: both derive their whole
+ * palette from `--verdict-color` with `color-mix`, so there is one rule, not a
+ * green one and a red one to keep in step.)
  * A pass and a refusal are the same EVENT — a decision arriving — and dressing
  * them differently would say the refusal is a different kind of thing, which it
  * is not. The colour carries it, and the colour is the only difference. That
@@ -39,14 +57,36 @@ import { AiSparkle } from '@/features/kyc/components/AiSparkle';
 
 export type MarkPhase = 'preparing' | 'checking' | 'passed' | 'failed';
 
-const PASS = '#34C759';
-const FAIL = '#FF3B30';
+/*
+ * The two verdict colours live with the mesh — it is the mark that wears them
+ * now, and the light here only agrees with it. One definition, so the frame's
+ * edge cannot be a different green from the face inside it.
+ */
+const PASS = VERDICT_PASS;
+const FAIL = VERDICT_FAIL;
 
 export function VerdictMark({
     phase,
     rings = true,
+    glyph = true,
 }: {
     phase: MarkPhase;
+    /**
+     * Whether to draw the centred GLYPH — the AI star, or the Face ID mark.
+     *
+     * ⚠️ FALSE WHENEVER A MESH IS ON THE FACE, which is the normal case. The
+     * wireframe IS the mark (see `VerdictMesh`); a star over the middle of it
+     * would be a second thing saying the same sentence, on top of the face the
+     * first one is describing.
+     *
+     * It stays true when the mesh could not be built — no still was grabbed,
+     * the landmark model never downloaded, or there is no face to be found in
+     * the frame. Those are ordinary, and the glyph is a complete mark on its
+     * own; this is why it was not deleted. The light, the ring and the wash are
+     * drawn either way, because they belong to the frame rather than to the
+     * face.
+     */
+    glyph?: boolean;
     /**
      * Whether the standby rings pulse outward from the mark.
      *
@@ -77,7 +117,8 @@ export function VerdictMark({
                 />
             )}
 
-            {/* The mark itself. */}
+            {/* The mark itself — unless the mesh is carrying it; see `glyph`. */}
+            {glyph && (
             <span
                 aria-hidden
                 className="pointer-events-none absolute inset-0 flex items-center justify-center"
@@ -102,6 +143,10 @@ export function VerdictMark({
                         </>
                     ) : phase === 'checking' ? (
                         <>
+                            {/* The blue ground the stars are legible against —
+                                see `.verdict-breathe`. Behind the mark and
+                                twice its size, so it reads as light around it
+                                rather than as a disc it sits on. */}
                             <span className="verdict-breathe absolute h-260 w-260 rounded-full" />
                             <span className="relative">
                                 <AiSparkle />
@@ -121,6 +166,7 @@ export function VerdictMark({
                     )}
                 </span>
             </span>
+            )}
 
             {/* The verdict, as the frame's own edge. Inset so it reads as a ring
                 on the picture rather than a border added around it — the frame

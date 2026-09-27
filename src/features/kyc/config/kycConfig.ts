@@ -408,7 +408,76 @@ export const compareConfig = {
         /** Pause [ms] after a successful match before navigating onward. */
         successNavDelayMs: 2000,
     },
+} as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3 — FACE LIGHTING
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * What counts as enough light to attempt a face check.
+ *
+ * ⚠️ SHARED BY BOTH FACE PATHS, deliberately. `useFaceGate` (the single-frame
+ * capture) and `useLightCheck` (the pre-flight gate in front of AWS Face
+ * Liveness) read the same two numbers. They used to be private constants in
+ * `useFaceGate`; two gates in the same sign-in disagreeing about what "dark"
+ * means is a bug nobody would ever see in review — one screen waves a frame
+ * through and the next refuses it.
+ *
+ * ⚠️ NOT the same as `idConfig.quality`, and must not be merged with it. That
+ * gate reads the whole frame with a card in it and sits at 25, low enough to
+ * let a legible ID through in a dim room. A FACE is not a card: the subject is
+ * the middle of the frame and the verifier is judging skin, so the floor is far
+ * higher. Merging the two would either blind this gate or start telling people
+ * photographing an ID on a dark desk to find a lamp.
+ */
+export const faceLightConfig = {
+    /**
+     * Minimum mean luminance [0–255] of the CENTRE box. Below this the face is
+     * too dark for the verifier, whatever the rest of the room is doing.
+     */
+    minBrightness: 55,
+    /** Maximum mean luminance [0–255] of the centre box — blown-out skin. */
+    maxBrightness: 215,
+    /**
+     * Sobel-variance floor, measured on the CENTRE box like the light is.
+     *
+     * ⚠️ 8, matching `useFaceGate`'s own `MIN_SHARPNESS`, and NOT the ID gate's
+     * 28. A face has far less edge contrast than printed text on a card — skin
+     * is mostly smooth — so the card's floor would call every real face blurry.
+     *
+     * Deliberately a LOW bar. This is meant to catch a camera that has not
+     * focused, a lens someone has smeared, or a phone being moved — not to
+     * grade photographs. A soft frame that a person can still be recognised in
+     * must pass, because the alternative is refusing somebody for a webcam they
+     * cannot do anything about.
+     */
+    minSharpness: 8,
+    /**
+     * Share of each axis sampled for the "face" reading, so 0.5 is the middle
+     * quarter by area. Roughly the oval the person is asked to fill.
+     */
+    centreFraction: 0.5,
+    /**
+     * Frame-mean ÷ centre-mean above which a dark centre is read as BACKLIGHT
+     * rather than a dark room — a window or lamp behind the person.
+     *
+     * Worth separating because the instruction is the opposite of the obvious
+     * one: they are standing in plenty of light and "find brighter light" is
+     * useless advice. 1.6 is comfortably clear of an evenly lit room, where the
+     * two means land within a few percent of each other.
+     */
+    backlitRatio: 1.6,
+    /**
+     * How long the light must be good CONTINUOUSLY before the check starts.
+     *
+     * Not zero: a camera's auto-exposure takes a moment to settle after the
+     * stream opens, and the first frames of a perfectly well-lit room can read
+     * almost black. Starting on the first good sample would let that settling
+     * decide when a billed session opens.
+     */
+    stableMs: 700,
+    /** How often the probe samples a frame. */
+    sampleMs: 150,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -420,6 +489,7 @@ export const compareConfig = {
 export const kycConfig = {
     id: idConfig,
     compare: compareConfig,
+    faceLight: faceLightConfig,
 } as const;
 
 export default kycConfig;

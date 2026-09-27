@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
@@ -19,7 +19,12 @@ import {
 } from '@/features/kyc/config/capture';
 import { FaceMesh } from '@/features/kyc/components/FaceMesh';
 import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
-import { scoreFrameQuality } from '@/features/kyc/services/imageQuality';
+import {
+    judgeFaceFrame,
+    scoreFrameQuality,
+    type FaceFrameVerdict,
+} from '@/features/kyc/services/imageQuality';
+import { faceLightConfig } from '@/features/kyc/config/kycConfig';
 import {
     frameHasContent,
     grabFrame,
@@ -43,6 +48,31 @@ import './liveness.css';
  * one Sobel pass over it.
  */
 const FRAME_POLL_MS = 200;
+
+/**
+ * How long the preview may show the SAME frame before it counts as stopped.
+ *
+ * ── The screen this exists to delete ────────────────────────────────────────
+ * A black frame with a wireframe hanging in the middle of it, corner brackets
+ * still on, for a beat between the camera going and the checking state
+ * arriving. It is the most alarming thing in the flow — it reads as the app
+ * having crashed at the exact moment somebody's face was taken.
+ *
+ * Every other end-of-stream signal here is a DOM one, and each of them lands
+ * after the picture has already stopped: AWS hides the video, tears its tree
+ * down, or swaps in its own verifying screen, and only then do the classes
+ * this loop watches change. The video element keeps its dimensions throughout,
+ * so `!videoWidth` does not fire either — the preview simply freezes and goes
+ * black while everything drawn over it carries on being drawn.
+ *
+ * `currentTime` is the one signal that comes from the PICTURE rather than from
+ * the markup: it advances while frames arrive and stops dead when they do not.
+ *
+ * Two poll ticks and a margin. Shorter and a single dropped frame on a loaded
+ * phone would end the stream; much longer and the black frame is back, which
+ * is the entire thing being fixed.
+ */
+const FRAMES_STALLED_MS = 450;
 
 /**
  * How long the held frame keeps its slot without being beaten.
@@ -348,6 +378,7 @@ export function LivenessCamera({
     onStreamStopped,
     onCameraLive,
     onFaceMetrics,
+    onFrameQuality,
     onError,
 }: {
     sessionId: string;
@@ -436,6 +467,26 @@ export function LivenessCamera({
      * they are moving the right way before AWS says anything.
      */
     onFaceMetrics?: (m: { faceWidth: number; cx: number; cy: number }) => void;
+    /**
+     * Light and focus on the CURRENT frame, reported a few times a second for
+     * as long as the camera is up.
+     *
+     * ── Why the caller needs this mid-check ─────────────────────────────────
+     * The pre-flight gate only proves the room was lit before the session
+     * opened. Everything interesting happens after that: somebody turns to face
+     * a window and is suddenly a silhouette, a light on a timer clicks off, a
+     * phone is lifted and the lens hunts for focus. None of it is visible to a
+     * gate that ran once, and all of it produces the same ending — a recorded
+     * check, a spent attempt, and a refusal.
+     *
+     * AWS's own illumination hint covers part of the light case and none of the
+     * focus one. This reports both, from the same `judgeFaceFrame` the
+     * pre-flight gate uses, so the two can never contradict each other.
+     *
+     * Piggybacks on the frame poll that already runs for best-frame selection,
+     * so it costs one extra 96px downsample every `FRAME_POLL_MS`.
+     */
+    onFrameQuality?: (verdict: FaceFrameVerdict) => void;
     onError: (error: { state?: string; error?: Error }) => void;
 }) {
     const t = useTranslations('auth');
@@ -786,8 +837,33 @@ export function LivenessCamera({
     const bestFrame = useRef<{
         canvas: HTMLCanvasElement;
         sharpness: number;
+        /** Whether this frame passed the light-and-focus gate — see the poll. */
+        good: boolean;
         at: number;
     } | null>(null);
+
+    /**
+     * `onFrameQuality`, held in a ref.
+     *
+     * The poll effect owns an interval and two canvases and must never re-run
+     * (see the note at its dependency array). A prop read directly inside it
+     * would either go stale or have to be listed as a dependency, and listing a
+     * callback the caller re-creates each render would tear the interval down
+     * several times a second. The ref is refreshed below instead.
+     */
+    const qualityRef = useRef(onFrameQuality);
+    useEffect(() => {
+        qualityRef.current = onFrameQuality;
+    }, [onFrameQuality]);
+
+    /**
+     * The frame is too dark or too soft to draw a face mesh over — set by the
+     * poll, read by `FaceMesh`, which fades the tracery and keeps tracking.
+     */
+    const [meshHidden, setMeshHidden] = useState(false);
+
+    /** When the camera went dark — the clock the analysis wait is measured on. */
+    const streamEndAtRef = useRef(0);
 
     /**
      * The other half of the double buffer — the canvas the next poll draws
@@ -913,6 +989,14 @@ export function LivenessCamera({
     const sawRecording = useRef(false);
     const announcedEnd = useRef(false);
     /**
+     * The last distinct frame the preview showed, and when this loop saw it.
+     *
+     * The stall detector's whole state — see `FRAMES_STALLED_MS` for what it is
+     * for and why the DOM signals beside it cannot do the job.
+     */
+    const lastFrameTime = useRef(-1);
+    const lastFrameAt = useRef(0);
+    /**
      * The processed capture, made once at stream-end and reused at
      * analysis-complete.
      *
@@ -961,8 +1045,109 @@ export function LivenessCamera({
         faceMetricsRef.current = onFaceMetrics;
     }, [onFaceMetrics]);
 
+    /**
+     * Said "the camera is live" — once per mount, from whichever signal wins.
+     *
+     * ⚠️ SEPARATE FROM `sawVideo`, which means something else: that the polling
+     * loop has the element and may start looking for the end of the stream.
+     * This is only about the announcement.
+     */
+    const announcedLive = useRef(false);
+    const sayLive = useCallback(() => {
+        if (announcedLive.current) return;
+        announcedLive.current = true;
+        cameraLiveRef.current?.();
+    }, []);
+
+    /**
+     * The camera is live THE INSTANT IT HAS A PICTURE — by event, not by poll.
+     *
+     * ── What this deletes ───────────────────────────────────────────────────
+     * The Face ID standby mark appearing OVER a camera that has already opened.
+     * That mark means "the camera is coming"; the moment a preview exists it is
+     * describing something that has already happened, and it sits in the middle
+     * of the frame — the exact place the face has to go, over the oval AWS
+     * measures against but does not draw. The screen is then actively
+     * misleading, and it is the one part of this flow that is.
+     *
+     * The announcement used to be made by the sampling loop, which runs every
+     * `FRAME_POLL_MS`. That is up to a fifth of a second of a large white glyph
+     * on a live face, every time, and longer whenever the SDK's class lands on
+     * the element later than the picture does.
+     *
+     * `loadedmetadata` is the earliest honest moment: before it the element has
+     * no dimensions and paints nothing, and after it there is a picture. The
+     * observer is what catches videos created inside AWS's tree — they do not
+     * exist when this mounts, so there is nothing to attach to yet.
+     *
+     * The poll still calls `sayLive` too. Two independent routes to the same
+     * one-shot announcement, which is the right shape for a signal that must
+     * not be missed and must not be made twice.
+     */
+    useEffect(() => {
+        const frame = frameRef.current;
+        if (!frame) return;
+
+        const attached = new WeakSet<HTMLVideoElement>();
+        const watch = (video: HTMLVideoElement) => {
+            // Our own glass copy takes its stream FROM AWS's element, so it can
+            // never be the earlier signal — and watching it would mean the
+            // decoration could announce the camera.
+            if (video.classList.contains('rz-live-glass') || attached.has(video)) return;
+            attached.add(video);
+            if (video.readyState >= 1 && video.videoWidth) {
+                sayLive();
+                return;
+            }
+            video.addEventListener('loadedmetadata', sayLive, { once: true });
+            video.addEventListener('playing', sayLive, { once: true });
+        };
+
+        frame.querySelectorAll('video').forEach(watch);
+
+        const observer = new MutationObserver((records) => {
+            for (const record of records) {
+                for (const node of record.addedNodes) {
+                    if (!(node instanceof HTMLElement)) continue;
+                    if (node instanceof HTMLVideoElement) watch(node);
+                    else node.querySelectorAll('video').forEach(watch);
+                }
+            }
+        });
+        observer.observe(frame, { childList: true, subtree: true });
+
+        return () => observer.disconnect();
+    }, [sayLive]);
+
     useEffect(() => {
         const id = setInterval(() => {
+            /*
+             * ── Nothing to sample once the stream is over ───────────────────
+             *
+             * ⚠️ THIS IS A LATENCY FIX, not tidiness. Everything below kept
+             * running for the WHOLE analysis wait — and that wait was measured
+             * at 28 SECONDS on a phone, against the three to eight AWS
+             * normally takes.
+             *
+             * Per tick, five times a second, over a dead camera: a full
+             * 1280x960 `drawImage` in `grabFrame`, a `getImageData` over all
+             * 1.2M pixels in `frameHasContent`, and two separate 96px
+             * downsamples each followed by a Sobel pass (`scoreFrameQuality`
+             * and `judgeFaceFrame`). None of it can produce anything — the
+             * frame is black and `bestFrame` is already sealed — and all of it
+             * is main-thread work competing with the SDK's own websocket
+             * handlers for the event loop it needs to notice that AWS has
+             * answered.
+             *
+             * The end-of-stream branch below is the only thing this loop still
+             * owed, and it has already run by the time this flag is set.
+             *
+             * ⚠️ Not `clearInterval`: the handover RE-OPENS this gate by
+             * setting `announcedEnd` back to false when no picture could be
+             * produced, so the loop has to still be alive to try again.
+             */
+            if (announcedEnd.current) return;
+
             /*
              * ⚠️ BY CLASS, NEVER `querySelector('video')`. There are TWO videos
              * in this frame and the bare selector picks the wrong one.
@@ -1291,8 +1476,24 @@ export function LivenessCamera({
             if (barEl) {
                 if (!sawBarRef.current) {
                     sawBarRef.current = true;
-                    // AWS has its model and is measuring. Ours may load now.
-                    if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
+                    /*
+                     * ⚠️ THE SEGMENTER NO LONGER LOADS HERE, and the move is a
+                     * latency fix — see the stream-end path.
+                     *
+                     * "AWS has its model and is measuring, ours may load now"
+                     * was the reasoning, and it is wrong about what the phone
+                     * is doing at this moment. This is the middle of RECORDING:
+                     * the SDK is encoding a selfie video and pushing it over a
+                     * websocket, and it needs 15fps to be allowed to continue.
+                     * Loading a MediaPipe segmentation model and building two
+                     * GL graphs against the same device is the worst possible
+                     * moment to spend that time.
+                     *
+                     * Nothing needs it until `processFrame`, which runs after
+                     * the camera is already dark and inside a twenty-second
+                     * wait where the main thread is otherwise idle. Loading it
+                     * there is free; loading it here is not.
+                     */
                 }
                 const now = Number(barEl.getAttribute('aria-valuenow'));
                 // `aria-valuenow` is 0..100 and absent between states. A bad
@@ -1555,10 +1756,32 @@ export function LivenessCamera({
                                 flip();
                             }
 
-                            const next =
-                                z.dir === 1
-                                    ? z.desired * (1 + CAPTURE_CAMERA_ZOOM.maxStep)
-                                    : z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep);
+                            /*
+                             * ── The step shrinks as the bar fills ───────────
+                             *
+                             * A fixed step has to be one compromise for two
+                             * jobs: crossing the distance from a face that is
+                             * much too small, and settling onto the oval
+                             * without sailing past it. Sized for the crossing
+                             * it hunts at the end; sized for the settle it
+                             * creeps at the start, which is the ten seconds
+                             * this whole controller was reported for.
+                             *
+                             * `1 - bar` is how far there is left to go, in
+                             * AWS's own measure, so the step is large while the
+                             * face is small and tapers to `minStepShare` of
+                             * itself as the match closes. Fast approach, fine
+                             * endgame, one knob each.
+                             *
+                             * The floor matters: at zero the last few percent
+                             * of the bar would be chased in steps too small for
+                             * the camera to act on, and the zoom would stall
+                             * just short of the oval.
+                             */
+                            const { maxStep, minStepShare } = CAPTURE_CAMERA_ZOOM;
+                            const left = Math.min(1, Math.max(0, 1 - bar));
+                            const step = maxStep * (minStepShare + (1 - minStepShare) * left);
+                            const next = z.dir === 1 ? z.desired * (1 + step) : z.desired / (1 + step);
                             /*
                              * Hitting either end turns the loop around. Left to
                              * itself it would keep asking for a value the clamp
@@ -1716,10 +1939,27 @@ export function LivenessCamera({
              * screen falls back to `onAnalysisComplete` — the behaviour from
              * before any of this, which is dull rather than broken.
              */
+            /*
+             * ── Has the PICTURE stopped? ────────────────────────────────────
+             *
+             * Tracked every tick, whatever else is happening, so the answer is
+             * already there on the tick that needs it. See `FRAMES_STALLED_MS`
+             * — this is the signal that comes from the video rather than from
+             * the SDK's markup, and it is what ends the stream at the moment
+             * the frame goes dark instead of a beat afterwards.
+             */
+            const shown = video?.currentTime ?? -1;
+            if (shown !== lastFrameTime.current) {
+                lastFrameTime.current = shown;
+                lastFrameAt.current = tick;
+            }
+            const stalled =
+                lastFrameAt.current > 0 && tick - lastFrameAt.current > FRAMES_STALLED_MS;
+
             const ended =
                 sawRecording.current &&
                 !!bestFrame.current &&
-                (fadedOut || !recording || checkingOverlay || !video?.videoWidth);
+                (fadedOut || !recording || checkingOverlay || !video?.videoWidth || stalled);
 
             if (sawVideo.current && !announcedEnd.current && ended) {
                 announcedEnd.current = true;
@@ -1750,7 +1990,7 @@ export function LivenessCamera({
                 // thing worth knowing if this ever mistimes again, and there is
                 // no other way to see it from outside.
                 console.log(
-                    `[liveness] stream ended — fadeOut:${fadedOut} recording:${recording} loader:${checkingOverlay} video:${!!video?.videoWidth}`,
+                    `[liveness] stream ended — fadeOut:${fadedOut} recording:${recording} loader:${checkingOverlay} video:${!!video?.videoWidth} stalled:${stalled}`,
                 );
 
                 /*
@@ -1761,16 +2001,41 @@ export function LivenessCamera({
                  * checking state by the time this resolves — it simply arrives
                  * with a face instead of without one.
                  */
+                // Where the wait between the camera going dark and the verify
+                // request actually goes. Two numbers, once per check: how long
+                // OUR pipeline held the main thread, and how long AWS took to
+                // answer after it. Without the split, "checking takes six
+                // seconds" is unattributable and every fix is a guess.
+                streamEndAtRef.current = Date.now();
+
+                /*
+                 * The segmenter's model, loaded HERE rather than mid-recording.
+                 *
+                 * Not awaited: `applyPortrait` loads it itself if this has not
+                 * finished, so this is a head start and never a dependency.
+                 * Starting it now overlaps the load with the raw-still encode
+                 * below and with AWS's own analysis wait — time that is already
+                 * being spent either way.
+                 */
+                if (CAPTURE_PORTRAIT.enabled) kickstartSegmenter();
+
                 void (async () => {
                     const canvas = bestFrame.current?.canvas;
                     const usable = canvas?.width && frameHasContent(canvas);
+                    const processAt = Date.now();
                     producedRef.current = usable ? await processFrame(canvas) : null;
+                    console.log(`[liveness] processFrame took ${Date.now() - processAt}ms`);
                     // One line per check. If the verdict ever renders over
                     // black again, this says whether the camera had a picture
                     // to give — which is the fork the last three fixes were
                     // guessing at from the outside.
                     console.log(
-                        `[liveness] handover — kept:${!!canvas} usable:${!!usable} produced:${!!producedRef.current}`,
+                        `[liveness] handover — kept:${!!canvas} usable:${!!usable} produced:${!!producedRef.current}` +
+                            // The size of the photograph that the commit has to
+                            // upload. `commit settled` is measured against this
+                            // number more than anything else: it is base64, so
+                            // the bytes on the wire are another third again.
+                            ` bytes:${Math.round((producedRef.current?.storedBytes ?? 0) / 1024)}KB`,
                     );
 
                     /*
@@ -1802,7 +2067,11 @@ export function LivenessCamera({
             // The first frame with real dimensions — the moment the camera is
             // genuinely showing something, and the moment the caller's standby
             // mark should come down.
-            if (!sawVideo.current) cameraLiveRef.current?.();
+            // The backstop. The observer above normally gets there first; this
+            // is what covers a browser that fires neither event — `sayLive` is
+            // one-shot, so whichever arrives first wins and the other is a
+            // no-op.
+            sayLive();
             sawVideo.current = true;
             // Hand the element to the live preview, which has no other way to
             // find it — it is created inside AWS's tree.
@@ -1810,6 +2079,39 @@ export function LivenessCamera({
 
             const held = bestFrame.current;
             const score = scoreFrameQuality(video);
+
+            /*
+             * The live half of the light-and-focus gate.
+             *
+             * Same judge as the pre-flight probe, on the frame that exists
+             * right now, so the caller can say "the light just went" while
+             * there is still time to do something about it — rather than after
+             * AWS has recorded, uploaded and refused.
+             */
+            const live = judgeFaceFrame(video, faceLightConfig);
+            const good = live?.verdict === 'ok';
+            if (live) {
+                qualityRef.current?.(live.verdict);
+                /*
+                 * The mesh comes off a frame nobody can see a face in.
+                 *
+                 * ⚠️ The three that make the FACE illegible, not every failing
+                 * verdict. `too_dark` and `backlit` are the same problem seen
+                 * from two sides — an unlit face — and `too_blurry` has no
+                 * features to hang a wireframe on. `too_bright` is left alone
+                 * on purpose: a blown-out face is still a face the landmarker
+                 * tracks perfectly well, and hiding the mesh there would remove
+                 * it from somebody who can see themselves on screen just fine.
+                 *
+                 * React bails out on an unchanged value, so setting this every
+                 * poll costs nothing while the verdict holds.
+                 */
+                setMeshHidden(
+                    live.verdict === 'too_dark' ||
+                        live.verdict === 'backlit' ||
+                        live.verdict === 'too_blurry',
+                );
+            }
 
             /*
              * The first usable frame is taken unconditionally, whatever it
@@ -1822,7 +2124,27 @@ export function LivenessCamera({
              */
             if (held && score) {
                 const stale = Date.now() - held.at > BEST_FRAME_WINDOW_MS;
-                if (!stale && score.sharpness <= held.sharpness) return;
+                if (!stale) {
+                    /*
+                     * ⚠️ A frame that PASSES the gate outranks one that does
+                     * not, whatever the two score on sharpness alone.
+                     *
+                     * This is what keeps a dark or backlit still off the
+                     * identity record when a properly lit one went past during
+                     * the same check. Sharpness cannot express that on its own:
+                     * a crisply-focused silhouette scores well and is useless,
+                     * and a dark frame's Sobel variance is low for the same
+                     * reason its face is invisible, so the two get compared on
+                     * a number that is really measuring the light twice.
+                     *
+                     * Still NOT a floor — read the note above, it stands. When
+                     * every frame of a check is bad the worst of them is still
+                     * kept, because the alternative is a black rectangle where
+                     * the verdict should be. This only decides an ORDER.
+                     */
+                    if (held.good && !good) return;
+                    if (held.good === good && score.sharpness <= held.sharpness) return;
+                }
             }
 
             /*
@@ -1878,11 +2200,17 @@ export function LivenessCamera({
             bestFrame.current = {
                 canvas,
                 sharpness: score?.sharpness ?? 0,
+                good,
                 at: Date.now(),
             };
         }, FRAME_POLL_MS);
         return () => clearInterval(id);
-    }, []);
+        // `sayLive` is a `useCallback` with no dependencies, so its identity is
+        // stable for the component's life — listing it changes nothing at
+        // runtime and keeps the rule satisfied honestly rather than by
+        // suppressing it. The effect must not re-run: it owns the interval and
+        // the double-buffered canvases.
+    }, [sayLive]);
 
     return (
         <div
@@ -1949,6 +2277,7 @@ export function LivenessCamera({
                     canvasRef={meshCanvasRef}
                     matchRef={matchRef}
                     onBounds={handleMeshBounds}
+                    hidden={meshHidden}
                 />
             )}
 
@@ -2006,6 +2335,16 @@ export function LivenessCamera({
                         retryCameraPermissionsText: t('deviceRetry'),
                     }}
                     onAnalysisComplete={async () => {
+                        // AWS's share of the wait: upload plus server-side
+                        // analysis, from the camera going dark to them saying
+                        // there is a result to fetch. Nothing of ours runs
+                        // between those two points, so this number is the floor
+                        // on how soon /reverify/verify can be called.
+                        console.log(
+                            `[liveness] AWS analysis took ${
+                                Date.now() - streamEndAtRef.current
+                            }ms after stream end`,
+                        );
                         /*
                          * The kept frame, through the look pipeline.
                          *

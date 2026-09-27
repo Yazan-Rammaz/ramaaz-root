@@ -74,6 +74,110 @@ export function computeBrightness(img: ImageData): number {
 }
 
 /**
+ * A centred box covering `fraction` of each axis, as its own `ImageData`.
+ *
+ * ── Why the centre and not the frame ────────────────────────────────────────
+ * For a CARD the whole frame is the subject, so the frame-wide measures above
+ * are the right ones. For a FACE they are not: the subject occupies the middle
+ * and the room fills the rest, so a frame-wide reading answers a question
+ * nobody asked — and answers it with the wallpaper.
+ *
+ * The case that makes this load-bearing is backlight — a window or a lamp
+ * behind the person. The frame mean is then HIGH while the face is nearly
+ * black, so a gate reading the frame mean waves it through and the verifier
+ * rejects it, which is the exact failure this is meant to stop.
+ *
+ * It matters just as much for SHARPNESS. A frame-wide Sobel variance is
+ * dominated by whatever has the hardest edges — a bookcase, a door frame, a
+ * patterned wall — all of which stay crisp while the face itself is soft,
+ * because the camera focused on the background. Cropping first is what makes
+ * "blurry" mean *the face is blurry*.
+ *
+ * `fraction` is a share of each axis, so 0.5 is the middle quarter by area.
+ * Clamped so a tiny `ImageData` cannot produce a zero-sized crop.
+ */
+export function cropCentre(img: ImageData, fraction = 0.5): ImageData {
+    const f = Math.min(1, Math.max(0.05, fraction));
+    const bw = Math.max(1, Math.round(img.width * f));
+    const bh = Math.max(1, Math.round(img.height * f));
+    const x0 = Math.floor((img.width - bw) / 2);
+    const y0 = Math.floor((img.height - bh) / 2);
+
+    const out = new Uint8ClampedArray(bw * bh * 4);
+    for (let y = 0; y < bh; y++) {
+        const from = ((y0 + y) * img.width + x0) * 4;
+        out.set(img.data.subarray(from, from + bw * 4), y * bw * 4);
+    }
+    return new ImageData(out, bw, bh);
+}
+
+/**
+ * What a face frame is doing wrong, if anything.
+ *
+ * `ok` is the only value that permits a check to start or a capture to be
+ * trusted; everything else is something the person can fix in a few seconds.
+ */
+export type FaceFrameVerdict = 'ok' | 'too_dark' | 'too_bright' | 'backlit' | 'too_blurry';
+
+export type FaceFrameReading = {
+    verdict: FaceFrameVerdict;
+    /** Mean luma of the centre box — the face. */
+    centre: number;
+    /** Mean luma of the whole frame — the room. */
+    frame: number;
+    /** Sobel-variance of the centre box. */
+    sharpness: number;
+};
+
+/**
+ * ⚠️ THE ONE PLACE that decides whether a face frame is good enough.
+ *
+ * Both gates call it and neither has rules of its own: the pre-flight probe in
+ * `useLightCheck` (before an AWS session is opened) and the live poll in
+ * `LivenessCamera` (while the check is running). They must agree — a frame the
+ * pre-flight gate accepted being refused a second later by the live one, or the
+ * reverse, is the kind of contradiction that reads as the screen being broken.
+ *
+ * Order matters and is cheapest-and-most-actionable first. Light is decided
+ * before focus because a dark frame measures as a soft one — there is no
+ * contrast to find edges in — so testing sharpness first would tell somebody
+ * in an unlit room to hold the phone steadier.
+ *
+ * Returns `null` only when there is no frame to read yet.
+ */
+export function judgeFaceFrame(
+    source: HTMLCanvasElement | HTMLVideoElement,
+    thresholds: {
+        minBrightness: number;
+        maxBrightness: number;
+        minSharpness: number;
+        centreFraction: number;
+        backlitRatio: number;
+    },
+): FaceFrameReading | null {
+    const img = getDownsampledImageData(source, 96);
+    if (!img) return null;
+
+    const centreBox = cropCentre(img, thresholds.centreFraction);
+    const centre = computeBrightness(centreBox);
+    const frame = computeBrightness(img);
+    const sharpness = computeSharpness(centreBox);
+
+    const reading = { centre, frame, sharpness };
+
+    if (centre > thresholds.maxBrightness) return { ...reading, verdict: 'too_bright' };
+    if (centre < thresholds.minBrightness) {
+        // Dark face, bright room → the light is behind them, not absent. The
+        // `centre > 1` guard keeps a pitch-black frame, where the ratio is
+        // meaningless, answering `too_dark` rather than dividing by ~zero.
+        const backlit = centre > 1 && frame / centre >= thresholds.backlitRatio;
+        return { ...reading, verdict: backlit ? 'backlit' : 'too_dark' };
+    }
+    if (sharpness < thresholds.minSharpness) return { ...reading, verdict: 'too_blurry' };
+    return { ...reading, verdict: 'ok' };
+}
+
+/**
  * Variance of a Sobel-style edge magnitude — a cheap, constitution-friendly
  * proxy for image sharpness. Sharper frames have higher edge contrast and
  * therefore higher variance. Operates on a luminance plane built from the

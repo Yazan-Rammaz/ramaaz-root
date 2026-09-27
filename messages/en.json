@@ -55,6 +55,11 @@
     "faceRotateTitle": "Turn your device upright",
     "faceRotateBody": "The face check only runs in portrait. Rotate your tablet and it will start on its own.",
     "faceRotateManual": "This browser will not turn the screen for you — please rotate the device by hand.",
+    "faceLightTitle": "Check your lighting",
+    "faceLightDark": "Too dark — find more light",
+    "faceLightBacklit": "Light is behind you",
+    "faceLightBright": "Too bright — soften the light",
+    "faceLightBlurry": "Blurry — hold steady",
     "livenessRecording": "Rec",
     "livenessCancel": "Cancel the check",
     "livenessPhotosensitivity": "This check flashes coloured light.",
@@ -67,6 +72,29 @@
     "matchFailed": "We noticed a discrepancy in the image and there is an issue with your verification.",
     "matchTryAgain": "Try Again With The Correction",
     "matchRetry": "Rematch"
+  },
+  "passcode": {
+    "title": "Set Passcode !",
+    "doneTitle": "Set Passcode Done",
+    "subtitle": "Last Step And Enjoy Our Services",
+    "reassurance": "Ensure Greater Security And Protect Your Funds",
+    "setLabel": "Set Passcode",
+    "reenterLabel": "Reenter Passcode",
+    "mismatch": "Those didn’t match — start again",
+    "prompt": "Enter Your Passcode",
+    "wrong": "That passcode is not correct",
+    "forgot": "Forget Passcode ?",
+    "passkeyFailed": "That didn’t work — tap to try again",
+    "passkeySetup": {
+      "face": "Set Up Face ID",
+      "fingerprint": "Set Up Fingerprint",
+      "passkey": "Set Up A Passkey"
+    },
+    "passkeyUse": {
+      "face": "Unlock With Face ID",
+      "fingerprint": "Unlock With Fingerprint",
+      "passkey": "Unlock With Passkey"
+    }
   },
   "common": {
     "appName": "Ramaaz Root",

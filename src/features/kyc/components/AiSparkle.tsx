@@ -26,6 +26,12 @@ import { Icon } from '@/components/ui/Icon';
  * falls. The big one only shifts a little side to side — it is the anchor, and
  * a mark whose largest element wanders reads as broken rather than animated.
  *
+ * ── The colour lives in CSS, not here ───────────────────────────────────────
+ * Blue and white, and each star catches the light from its own direction — the
+ * `--gem-*` palette and the per-star overrides in globals.css. It is the same
+ * palette the verdict uses in green or red, which is what makes "thinking" and
+ * "decided" one event. Nothing in this file knows a colour.
+ *
  * ⚠️ `regions/ai-star` (the combined glyph) is still used elsewhere and must
  * stay. These three are additions, not replacements.
  */

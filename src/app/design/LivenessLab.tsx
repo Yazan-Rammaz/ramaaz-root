@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
-import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
+import { LivenessVerdict, type VerdictPhase } from '@/features/kyc/components/LivenessVerdict';
 import { CAPTURE_MIRROR } from '@/features/kyc/config/capture';
 import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 
@@ -68,9 +68,6 @@ type Phase =
     | 'done'
     | 'error';
 
-/** XD px -> the scaling rem this project measures in (AGENTS.md §1). */
-const rem = (px: number) => `${px * 0.0625}rem`;
-
 export function LivenessLab() {
     const [phase, setPhase] = useState<Phase>('idle');
     const [session, setSession] = useState<Session | null>(null);
@@ -113,29 +110,37 @@ export function LivenessLab() {
     const [mirror, setMirror] = useState<boolean>(CAPTURE_MIRROR.enabled);
 
     /**
-     * Hold the checking state up for as long as you want to look at it.
+     * Hold ONE verdict state up for as long as you want to look at it.
      *
      * The real thing lasts as long as one result fetch — a second or two — and
      * on this page each run costs a real AWS check. Reviewing an animation you
      * get two seconds of, at a pound a look, is not reviewing it.
      *
+     * ⚠️ AND A PASS CANNOT BE ORDERED. `passed` and `failed` are whatever AWS
+     * says, so the green mesh and the red one were reviewable only by actually
+     * passing and actually failing a real check — which for the refusal means
+     * deliberately failing one, repeatedly, to look at an animation. This holds
+     * the state instead, over the still from the last run.
+     *
      * Held, it is the SAME component with the same props the sign-in passes, so
      * what you approve here is what ships. The only difference is that nothing
-     * ends it.
+     * ends it — except the refusal, which still hands the frame to its retry
+     * button after two seconds, because that IS the state.
      *
      * It composes with the still from the last run: run once, then hold, and
-     * you are looking at the glass over a real capture of your own face rather
-     * than over black. With no run at all it still renders — which is worth
-     * seeing too, because a failed frame-grab is exactly that case.
+     * you are looking at a real capture of your own face rather than at black.
+     * With no run at all it still renders — which is worth seeing too, because
+     * a failed frame-grab is exactly that case, and a verdict with no face to
+     * put a wireframe on falls back to the centred glyph.
      *
-     * ⚠️ NEVER WHILE STREAMING, and the button is disabled there. Held over a
+     * ⚠️ NEVER WHILE STREAMING, and the buttons are disabled there. Held over a
      * live camera it looks exactly like the bug it is not: the glass sitting
      * where the preview should be, AWS's own "move a little closer" hint
      * legible through it, and no way to tell from the screen that a review
      * toggle is the cause. A tool for inspecting a state must not be able to
      * impersonate that state arriving early.
      */
-    const [holdChecking, setHoldChecking] = useState(false);
+    const [hold, setHold] = useState<VerdictPhase | null>(null);
 
     const start = useCallback(async () => {
         setPhase('starting');
@@ -147,7 +152,7 @@ export function LivenessLab() {
         // Released on every run. A review toggle left on from ten minutes ago
         // must not be part of what the next run shows — and the run that
         // follows is the one whose timing you are trying to watch.
-        setHoldChecking(false);
+        setHold(null);
         try {
             const res = await fetch('/api/kyc/liveness-lab/session', { method: 'POST' });
             if (!res.ok) throw new Error(`session ${res.status}`);
@@ -331,17 +336,21 @@ export function LivenessLab() {
                     bench goes back to the sharp still below, because the
                     numbers are the point here.
 
-                    `holdChecking` keeps it up indefinitely for review; see the
-                    state declaration for why that is worth a control.
+                    `hold` keeps ONE state up indefinitely for review — and is
+                    the only way to see the green mesh and the red one without
+                    passing and failing a real check for each look. See the
+                    state declaration.
 
-                    `onRetry` is a no-op: this only ever renders as `checking`,
-                    which has no retry. The bench's Start button is the way
-                    round again. */}
+                    `onRetry` is a no-op. A real run only ever reaches
+                    `checking` here, and a HELD refusal hands the frame to its
+                    retry button after two seconds exactly as the sign-in does;
+                    pressing it on the bench does nothing, because the Start
+                    button is this page's way round again. */}
                 {(phase === 'waiting' ||
                     phase === 'fetching' ||
-                    (holdChecking && phase !== 'streaming')) && (
+                    (hold && phase !== 'streaming')) && (
                     <LivenessVerdict
-                        phase="checking"
+                        phase={hold ?? 'checking'}
                         snapshot={shot}
                         plainSnapshot={shotPlain}
                         onRetry={() => {}}
@@ -354,7 +363,7 @@ export function LivenessLab() {
                 {phase !== 'streaming' &&
                     phase !== 'waiting' &&
                     phase !== 'fetching' &&
-                    !holdChecking &&
+                    !hold &&
                     !shot && (
                     <div className="absolute inset-0 flex items-center justify-center px-20 text-center">
                         <span className="fz-13 text-white/70">
@@ -416,28 +425,33 @@ export function LivenessLab() {
                 >
                     Run again
                 </button>
+            </div>
 
-                {/* Costs nothing and needs no AWS session — the whole reason it
-                    is here. The checking state is two seconds long in the real
-                    thing and a real check every time you want another look at
-                    it.
+            {/* Costs nothing and needs no AWS session — the whole reason these
+                are here. Each state is two seconds long in the real thing, and
+                two of the three cannot be asked for at all: a pass and a
+                refusal are whatever the check decides.
 
-                    Disabled while the camera is live. The render above refuses
-                    to draw over a stream anyway; this is so the control says
-                    so rather than looking broken when pressing it does
-                    nothing. */}
-                <button
-                    type="button"
-                    disabled={phase === 'streaming'}
-                    onClick={() => setHoldChecking((h) => !h)}
-                    className={`fz-13 h-48 flex-1 rad-12 border font-semibold disabled:opacity-40 ${
-                        holdChecking
-                            ? 'border-primary text-primary'
-                            : 'border-[#d5d5d5] text-[#1D1D1D]'
-                    }`}
-                >
-                    {holdChecking ? 'Release checking' : 'Hold checking'}
-                </button>
+                Pressing the state already held releases it. Disabled while the
+                camera is live — the render above refuses to draw over a stream
+                anyway; this is so the control says so rather than looking
+                broken when pressing it does nothing. */}
+            <div className="mt-8 flex w-350 shrink-0 gap-8 self-center">
+                {(['checking', 'passed', 'failed'] as VerdictPhase[]).map((p) => (
+                    <button
+                        key={p}
+                        type="button"
+                        disabled={phase === 'streaming'}
+                        onClick={() => setHold((h) => (h === p ? null : p))}
+                        className={`fz-13 h-40 flex-1 rad-12 border font-semibold disabled:opacity-40 ${
+                            hold === p
+                                ? 'border-primary text-primary'
+                                : 'border-[#d5d5d5] text-[#1D1D1D]'
+                        }`}
+                    >
+                        {p}
+                    </button>
+                ))}
             </div>
 
             {/* ── The verdict, outside the frame ───────────────────────────────

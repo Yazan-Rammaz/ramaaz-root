@@ -1015,23 +1015,209 @@ export const CAPTURE_LIVE_MESH = {
      * boundary — a mesh that flickers between two topologies several times a
      * second, which is far more distracting than one that is slightly too fine.
      */
-    /*
-     * 0.095 — the middle ground, and the range is worth recording since both
-     * ends have now been seen:
+    /**
+     * ── The web ─────────────────────────────────────────────────────────────
      *
-     *   0      MediaPipe's own density. A grey haze of overlapping hairlines.
-     *   0.095  here. Clearly triangles, still enough of them to describe a face.
-     *   0.17   too few. Reads as a polygon shell laid over somebody rather than
-     *          as a mesh on them.
+     * Spokes out of one centre, rings between it and the face's own outline.
      *
-     * Cell area scales with the square of this, so triangle COUNT scales with
-     * its inverse square: halving it is roughly four times the lines. Move it
-     * in small steps.
+     * ⚠️ THE PATTERN IS GENERATED, NOT DERIVED. Every earlier version clustered
+     * MediaPipe's tessellation down to a readable size, and no amount of
+     * tuning could make that REGULAR — a pattern inferred from where a
+     * particular face's landmarks happen to be inherits their irregularity, and
+     * the left cheek is built from different measurements than the right. The
+     * web is symmetric and even because it is constructed that way; see
+     * `buildWeb`, which also explains why it still belongs to this face.
+     *
+     * ⚠️ `spokes` MUST BE EVEN. That is what makes the set of directions mirror
+     * onto itself, and therefore what makes every vertex have a twin. An odd
+     * count puts a spoke down the middle of one half and nothing opposite it.
+     *
+     * ⚠️ 12, NOT 16, AND THE SAG IS WHY. Every extra spoke shortens the strand
+     * between two of them, and a short strand has nowhere to dip — at 16 the
+     * rings flattened back into the circles `sag` exists to abolish. Twelve
+     * gives each strand a 30° span, which is enough for the dip to read as a
+     * dip at the size this is drawn.
+     *
+     * 12 x 5 is 168 lines, against roughly 1300 for the clustered mesh this
+     * replaced. Far fewer, far heavier, readable at a glance — which is what a
+     * mask is and what a tracery of hairlines never was.
      */
-    cellSize: 0.095,
+    spokes: 12,
+    rings: 5,
 
-    /** Stroke width in XD px. Hairline — this is a tracery, not a cage. */
-    lineWidth: 0.6,
+    /**
+     * How far the web's centre sits above the outline's own middle, as a
+     * fraction of the face's height.
+     *
+     * The outline's middle is around the nose, and a web spun from there puts
+     * its densest point on the one feature that has to stay legible. About a
+     * twelfth of the face's height lifts it to the brow, which is also where
+     * the mask this is imitating carries its own centre.
+     */
+    centreLift: 0.05,
+
+    /**
+     * Where the innermost ring sits, as a fraction of the way out — and there
+     * is NOTHING inside it.
+     *
+     * ⚠️ This is the fix for the blot in the middle of the face. A dozen spokes
+     * running to a single point put a dozen lines through the width of a few
+     * pixels, and at the one place the web is densest it stops being a pattern
+     * — on the bridge of somebody's nose, which is also the worst place on the
+     * screen to put the heaviest mark. A real web is built this way for this
+     * reason.
+     *
+     * ⚠️ It reads as "a small empty circle in the middle" when it is BOTH too
+     * wide and perfectly round. The sag is what fixes the round — a sagging hub
+     * ring is a twelve-pointed star, not a circle — and this number only has to
+     * keep the spokes from crowding. Shrinking it instead was tried first and
+     * made things worse: the opening stopped being legible as an anchor point
+     * and the centre went back to being the densest mark on the face.
+     */
+    hub: 0.19,
+
+    /**
+     * How much further the web reaches upward than downward, 0..1.
+     *
+     * 0 is the face's own outline in every direction, which gives a web as deep
+     * below the centre as above it — and that is not where a mask sits. A mask
+     * runs up over the brow and stops well short of the chin.
+     *
+     * ⚠️ IT IS IN TENSION WITH `centreLift`, which pulls the other way: raising
+     * the hub toward the brow SHORTENS every upward spoke and lengthens every
+     * downward one. So the two have to be picked together, by looking at the
+     * result rather than by reasoning about either alone.
+     *
+     * 0.3 against a lift of 0.08 was measured at 1.35x — and drawn, it threw
+     * the top of the web clear of the head, which is not "wider at the top", it
+     * is off the face. 0.16 against a lift of 0.05 keeps every strand on the
+     * head while the brow still carries visibly more web than the jaw.
+     */
+    taper: 0.16,
+
+    /**
+     * How far each strand dips toward the hub between two spokes, as a fraction
+     * of its own radius.
+     *
+     * ⚠️ OFF. The strands are STRAIGHT — a chord from one spoke to the next,
+     * and nothing between them.
+     *
+     * It was built because a ring of flat chords can read as a circle, and a
+     * real orb web does sag. Drawn at 0.14 it read as fussy rather than as
+     * woven: at twelve spokes and this line weight, a dip in every one of sixty
+     * strands is sixty small kinks, and the eye takes the whole thing for a
+     * texture instead of a structure. Straight runs between spokes are what a
+     * mask is drawn with, and twelve of them per ring is a polygon nobody
+     * mistakes for a circle.
+     *
+     * Kept rather than deleted because it costs one multiply and the geometry
+     * it needs — a point between each pair of spokes — is not obvious to
+     * rebuild. Any value above 0 puts the dips back; see `buildWeb`.
+     */
+    sag: 0,
+
+    /**
+     * How far alternate spokes carry their rings out, as a fraction of the
+     * radius.
+     *
+     * ⚠️ THE BREAK AT EVERY CROSSING. Without it each ring is one smooth closed
+     * figure and the eye reads straight through the spokes — so the spokes look
+     * drawn on top afterwards rather than being what the strands are strung
+     * between. With it, a strand arrives at a crossing, steps, and leaves at a
+     * different slant: twelve breaks per ring, sixty in the web.
+     *
+     * A real orb web gets this from its capture strand being a SPIRAL, passing
+     * each spoke further out than the last. A spiral is chiral and this web has
+     * to mirror exactly, so the step alternates rather than accumulating. It
+     * also only ever steps INWARD — stepping out would carry half the rim off
+     * the face, and the two spokes that must not move at all are the ones
+     * pointing straight up and straight down.
+     *
+     * 0.07 of the radius. Below about 0.04 the kink is lost in the line weight;
+     * above about 0.12 the rings stop reading as rings at all and the web turns
+     * into a field of zigzags.
+     */
+    zig: 0.07,
+
+    /**
+     * How much narrower the web is at the chin than across the middle of the
+     * face, as a fraction of its width there.
+     *
+     * A face narrows from the temples to the jaw and a mask narrows with it,
+     * nearly to a point. The outline alone does some of that, but not enough:
+     * the web's widest strands sit at the level of the mouth, where the
+     * silhouette is still nearly full width, so the bottom of it read as a
+     * blunt fan rather than as something following a chin.
+     *
+     * ⚠️ THIS IS A HORIZONTAL SQUEEZE, NOT A SHORTER REACH. Narrowing by
+     * pulling the downward spokes in was the first attempt and it is what
+     * stopped the web at the mouth — shortening a direction moves the point up
+     * as well as in, so the chin is traded away for the width. Squeezing x
+     * alone leaves every vertex at the height it already had.
+     *
+     * 0.28 at the very bottom, easing in from the centre line, so the jaw
+     * strands are about three quarters the width they would otherwise be.
+     */
+    narrow: 0.28,
+
+    /**
+     * How far each ring sits to one side of its spoke, as a fraction of the
+     * radius — the same break the rings have, given to the SPOKES.
+     *
+     * ⚠️ Without it half the web is woven and half is mechanical. `zig` breaks
+     * the rings at every crossing, but the spokes were still dead straight rays
+     * from the hub to the rim, and a straight ray through a hand-drawn web is
+     * the thing that says it was drawn by a machine. Every ring a spoke passes
+     * now sits a little to one side of it, alternating, so the spoke leaves
+     * each junction on a different slant.
+     *
+     * ⚠️ MEASURE THE TURN, NOT THE OFFSET. This is a sideways step as a share
+     * of the radius, and the thing that matters — how sharply the spoke turns
+     * at a junction — comes out several times larger, because consecutive
+     * rings step to OPPOSITE sides and the radial gap between them is small.
+     * Measured across the whole web:
+     *
+     *   0.02   7-16 degrees. A slant.
+     *   0.03   11-24 degrees. A slant you cannot miss.
+     *   0.06   24-44 degrees. A zigzag; the spoke stops reading as one line.
+     *
+     * 0.03. The turn is widest near the hub, where the rings are closest
+     * together, which is also where a real web is most tangled — so the spread
+     * is right rather than merely tolerable.
+     */
+    kink: 0.03,
+
+    /**
+     * The gap left where a rim segment meets a spoke, in XD px.
+     *
+     * ⚠️ THE BREAK IS AT THE JUNCTIONS, AND NOWHERE ELSE. The rim read as a
+     * circle and the first fix put a notch in the middle of every gap — which
+     * broke the line in the VOID, between the spokes, where nothing meets it.
+     * That is a wobble in the boundary, not a break in it.
+     *
+     * A boundary breaks where something crosses it. So each rim segment is
+     * simply drawn short of both its ends, leaving the spoke tip standing clear
+     * of it: twelve interruptions, all of them exactly where a spoke arrives,
+     * and the runs between them dead straight.
+     *
+     * ⚠️ It is a DRAWING inset, not geometry — the vertices do not move. A
+     * shorter segment would change where the strand goes; this changes only how
+     * much of it is inked, which is what a break is.
+     */
+    rimBreak: 3.2,
+
+    /**
+     * Stroke width in XD px.
+     *
+     * ⚠️ Raised from 0.6 with the web. A hairline was right for a tracery of a
+     * thousand short segments, where weight would have closed the pattern into
+     * a grey field; the web is 144 long lines and a hairline makes it look
+     * like a stray scratch on the lens rather than something laid over a face.
+     * The rule is the same rule as always — the total INK stays roughly
+     * constant — and with a ninth as many lines each one can carry six times
+     * the width.
+     */
+    lineWidth: 1.6,
 
     /**
      * Opacity of the wireframe — STEADY. It never animates.
@@ -1042,13 +1228,19 @@ export const CAPTURE_LIVE_MESH = {
      * distinct from. The mesh is a fixed structure; the dots are the only thing
      * that moves on it.
      *
-     * Raised from 0.16 once the glass oval went in behind it. The two are
-     * related and should move together: the pane softens and slightly flattens
-     * what is under the wireframe, so the same alpha that was right over a
-     * sharp, busy face is too faint over a calm one. Part of the pane's job is
-     * to let this be legible without being loud — see `CAPTURE_LIVE_GLASS`.
+     * Related to the glass oval behind it, and the two should move together:
+     * the pane softens and slightly flattens what is under the wireframe, so
+     * the same alpha that is right over a sharp, busy face is too faint over a
+     * calm one. Part of the pane's job is to let this be legible without being
+     * loud — see `CAPTURE_LIVE_GLASS`.
+     *
+     * ⚠️ 0.16, DOWN FROM 0.22, and the WIDTH is why. The web replaced a tracery
+     * of roughly 1300 hairlines at 0.6px with 108 lines at 1.6px — nearly three
+     * times the ink per line — so the alpha that made a thread legible makes a
+     * cord shout. Every other strength here is a multiple of this one, so
+     * lowering it takes the whole web down together rather than unbalancing it.
      */
-    baseAlpha: 0.22,
+    baseAlpha: 0.16,
 
     /**
      * ── The gems ────────────────────────────────────────────────────────────
@@ -1359,16 +1551,58 @@ export const CAPTURE_CAMERA_ZOOM = {
      * `LivenessCamera`), so a camera that cannot keep up simply moves in larger
      * intervals of its own accord rather than accumulating a queue of requests
      * behind it.
+     *
+     * ── ⚠️ THIS NUMBER IS HOW LONG THE ZOOM TAKES, and it was ten seconds ───
+     * The controller multiplies by at most `1 + maxStep` per step, so reaching
+     * a zoom of Z needs `ln Z / ln(1 + maxStep)` steps. At 0.04 a typical 2.5x
+     * is 23 of them, and each costs `stepMs` PLUS however long the camera takes
+     * to settle — on a phone, 300-400ms all in. That is the nine or ten seconds
+     * of slow creep that was reported, and none of it was the camera's fault.
+     *
+     * At 0.09 the same 2.5x is 11 steps: three to four seconds, which is fast
+     * enough to feel like the frame responding to the person moving rather than
+     * like a machine hunting.
+     *
+     * The ceiling on this is legibility, and it is real: 12% every 600ms was
+     * tried and reported as "like steps". What reads as stepping is the
+     * INTERVAL between visible jumps, not the size of one, so a larger step on
+     * a much shorter clock stays under it.
+     *
+     * ⚠️ THIS IS NOW THE STEP AT ITS LARGEST, not the step. The controller
+     * scales it by how far AWS's bar is from full (see `minStepShare`), so 0.16
+     * is what it uses while the face is still much too small and it tapers to a
+     * quarter of that as the match closes. A flat 0.16 would cross the distance
+     * just as fast and then hunt around the oval; this settles.
+     *
+     * Reaching a typical 2.5x now takes about six large steps and a few small
+     * ones — call it two seconds, against nine or ten at the 0.04 this started
+     * at.
      */
-    maxStep: 0.04,
+    maxStep: 0.16,
+
+    /**
+     * The smallest the step may shrink to, as a share of `maxStep`.
+     *
+     * ⚠️ NOT ZERO. The step tapers with the bar, and at zero the last few
+     * percent would be chased in adjustments too small for the camera to act
+     * on — the zoom would stall just short of the oval, which is the one
+     * failure that strands somebody at "move a little closer" forever.
+     *
+     * A quarter of 0.16 is 0.04, which is exactly the fixed step this
+     * controller used before it tapered. So the endgame is unchanged and only
+     * the approach got faster.
+     */
+    minStepShare: 0.25,
 
     /**
      * Shortest gap between adjustments, in ms.
      *
      * A floor, not a schedule — the real pacing comes from the device, because
-     * the next request does not go out until the last one has completed.
+     * the next request does not go out until the last one has completed. Low
+     * enough that a camera which CAN keep up is never the thing being waited
+     * for; on one that cannot, this changes nothing.
      */
-    stepMs: 200,
+    stepMs: 20,
 
     /**
      * What the zoom is MULTIPLIED BY once the match locks, 0..1.

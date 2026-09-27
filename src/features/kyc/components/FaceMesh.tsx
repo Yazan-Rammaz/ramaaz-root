@@ -8,19 +8,29 @@ import {
     CAPTURE_MIRROR,
 } from '@/features/kyc/config/capture';
 import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import {
+    buildWeb,
+    coverCrop,
+    ringOrder,
+    withAlpha,
+    type Edges,
+    type Web,
+} from '@/features/kyc/services/faceMesh';
 
 /**
- * The face mesh over the live camera, lit like the rest of this flow.
+ * The face web over the live camera, lit like the rest of this flow.
  *
  * ── What it draws ───────────────────────────────────────────────────────────
- * A coarse triangulation of the whole face, drawn STEADY — plus a handful of
- * gems that sit on its vertices, flare, fade, and come back somewhere else. The
- * geometry holds still; only the gems move, and they move by appearing and
- * disappearing rather than by travelling.
+ * A spider's web spun from the middle of the face out to its own outline, drawn
+ * STEADY — plus a handful of gems that sit on its vertices, flare, fade, and
+ * come back somewhere else. The geometry holds still; only the gems move, and
+ * they move by appearing and disappearing rather than by travelling.
  *
- * The triangles are MediaPipe's tessellation collapsed onto a grid (`coarsen`),
- * because its native 478 points make triangles a few pixels across — a texture,
- * not geometry. `cellSize` is how big they are.
+ * ⚠️ IT IS NOT MEDIAPIPE'S TESSELLATION. It was, clustered down to a readable
+ * size, and that could never be made to look regular or symmetric — a pattern
+ * inferred from where one face's landmarks happen to be inherits their
+ * irregularity. `services/faceMesh` carries the full account and the geometry;
+ * this file draws what that returns.
  *
  * ── ⚠️ IT CANNOT AFFECT THE CHECK, and that is structural ───────────────────
  * AWS streams the MediaStream TRACK to Rekognition and runs its face-fit test
@@ -33,10 +43,11 @@ import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
  *
  * ── The two clocks ──────────────────────────────────────────────────────────
  * The model runs at `detectFps`; the canvas draws on every animation frame. In
- * between, the mesh EASES toward the newest landmarks, so it moves at the
- * display's rate while the network runs at a fraction of it. Running detection
- * per frame would not even look better — the model's own output jitters, and
- * the same filter that fills the gaps is what takes that out.
+ * between, the landmarks EASE toward the newest ones and the web is respun on
+ * them, so it moves at the display's rate while the network runs at a fraction
+ * of it. Running detection per frame would not even look better — the model's
+ * own output jitters, and the same filter that fills the gaps is what takes
+ * that out.
  *
  * ── Two things that were tried and are wrong ────────────────────────────────
  * Both are recorded because each looked obviously right before it was drawn.
@@ -44,9 +55,7 @@ import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
  * CHAINING the tessellation into long paths, so a dashed stroke could run along
  * them. A greedy walk through a triangulation wanders, and thinning the runs by
  * dropping vertices cut across the triangles they came from — so the "mesh"
- * became a few hundred zigzag threads over somebody's face. The triangles ARE
- * the geometry; making them bigger has to preserve them, which is what
- * clustering does and edge-dropping does not.
+ * became a few hundred zigzag threads over somebody's face.
  *
  * DASHES as the moving light. A dash travelling a path is the line being drawn
  * in pieces, so it always reads as thread, never as a spark. A gem appears,
@@ -54,20 +63,13 @@ import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
  * lifetimes do that.
  */
 
-/** The edge list's type, derived from a value — `Connection` is not exported. */
-type Edges = typeof import('@mediapipe/tasks-vision').FaceLandmarker.FACE_LANDMARKS_TESSELATION;
-
-/**
- * A `#rrggbb` token plus an alpha, as an `rgba()` string.
- *
- * The fill colour is shared with the passed verdict so the two cannot drift,
- * and canvas wants a colour string per draw — a hex token has no alpha channel
- * to vary.
+/*
+ * The geometry — `buildWeb`, the outline walk and the cover crop — lives in
+ * `services/faceMesh`, because the verdict screen draws the SAME web over the
+ * frozen frame (`VerdictMesh`). Two copies of it would agree until one was
+ * tuned, and the failure would be a web that changed shape at the moment the
+ * camera stopped.
  */
-function withAlpha(hex: string, alpha: number): string {
-    const n = parseInt(hex.slice(1), 16);
-    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha.toFixed(3)})`;
-}
 
 /** One gem: which vertex it sits on, when it appeared, and how long it lives. */
 interface Gem {
@@ -78,115 +80,12 @@ interface Gem {
     life: number;
 }
 
-/** A coarse mesh: edge endpoints in pairs, and the vertices that survived. */
-interface Coarse {
-    edges: Int32Array;
-    vertices: Int32Array;
-}
-
-/**
- * Collapse the tessellation onto a grid, giving larger triangles.
- *
- * ── The problem ─────────────────────────────────────────────────────────────
- * MediaPipe's mesh is 478 points over a single face, so its triangles are a few
- * pixels across. Drawn over somebody filling the frame, that is not geometry —
- * it is a texture, and the lines overlap into a grey haze.
- *
- * Dropping edges does not fix it. The triangles stay exactly as small; they
- * just acquire holes, which looks like damage rather than simplification.
- *
- * ── Vertex clustering ───────────────────────────────────────────────────────
- * Divide the face into cells `cell` wide, elect ONE representative landmark per
- * cell, then redraw every original edge between its endpoints' representatives.
- * Edges whose ends fall in the same cell collapse to nothing and are dropped;
- * edges that now coincide fold together. What is left is a real triangulation
- * of the same face at whatever resolution the cell size asks for.
- *
- * ⚠️ Normalised by the FACE'S BOUNDING BOX, not by the frame. Against the frame
- * the triangles would get finer as somebody leaned in, which is backwards — the
- * geometry should belong to the face, not to how much of the picture it happens
- * to occupy.
- *
- * Called ONCE, on the first detection. Re-running it per frame would reshuffle
- * the whole wireframe every time a landmark crossed a cell boundary.
- */
-function coarsen(points: Float32Array, edges: Edges, cell: number): Coarse {
-    const n = points.length / 2;
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (let i = 0; i < n; i++) {
-        const x = points[i * 2];
-        const y = points[i * 2 + 1];
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-    }
-    const fw = Math.max(1e-4, maxX - minX);
-    const fh = Math.max(1e-4, maxY - minY);
-
-    const rep = new Int32Array(n);
-    const cells = new Map<number, number>();
-    for (let i = 0; i < n; i++) {
-        const gx = Math.floor((points[i * 2] - minX) / fw / cell);
-        const gy = Math.floor((points[i * 2 + 1] - minY) / fh / cell);
-        // One integer key rather than a string: this runs over 478 points and
-        // string keys here were measurable next to nothing else in the loop.
-        const key = gx * 4096 + gy;
-        const found = cells.get(key);
-        if (found === undefined) {
-            cells.set(key, i);
-            rep[i] = i;
-        } else {
-            rep[i] = found;
-        }
-    }
-
-    const seen = new Set<number>();
-    const out: number[] = [];
-    for (const { start, end } of edges) {
-        const a = rep[start];
-        const b = rep[end];
-        if (a === b) continue; // Both ends in one cell — the edge is gone.
-        const key = a < b ? a * 512 + b : b * 512 + a;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(a, b);
-    }
-
-    /*
-     * Ordered CHIN-FIRST, so colouring the first N edges fills the mesh from
-     * the bottom upward like a gauge.
-     *
-     * Sorted once, on the build frame, and never again: the order has to be
-     * STABLE or the green would reshuffle across the face every time somebody
-     * tilted their head, which reads as noise rather than as progress. Faces do
-     * not turn upside down, so one ordering holds for the session.
-     */
-    const order: number[] = [];
-    for (let e = 0; e < out.length; e += 2) order.push(e);
-    const midY = (e: number) => points[out[e] * 2 + 1] + points[out[e + 1] * 2 + 1];
-    order.sort((a, b) => midY(b) - midY(a));
-    const sorted: number[] = [];
-    for (const e of order) sorted.push(out[e], out[e + 1]);
-
-    return {
-        edges: Int32Array.from(sorted),
-        // The gems sit on these, so they land on the intersections of the mesh
-        // that is actually drawn rather than on discarded landmarks between
-        // them — which read as specks floating in the middle of a triangle.
-        vertices: Int32Array.from(new Set(out)),
-    };
-}
-
 export function FaceMesh({
     videoRef,
     canvasRef,
     matchRef,
     onBounds,
+    hidden = false,
 }: {
     /**
      * AWS's own <video>. Owned by `LivenessCamera`'s sampling loop, which is
@@ -222,6 +121,20 @@ export function FaceMesh({
      */
     matchRef: React.RefObject<number>;
     onBounds?: (b: { cx: number; cy: number; rx: number; ry: number }) => void;
+    /**
+     * Fade the tracery out, without stopping anything behind it.
+     *
+     * Set while the frame is too dark or too soft to see a face in. The mesh is
+     * drawn FROM landmarks, so on a frame nobody can make a face out in it is
+     * either wrong — a wireframe hung on noise, jittering over a black
+     * rectangle — or, worse, convincing: it says the camera can see you at the
+     * exact moment the screen is telling you it cannot. That contradiction is
+     * what this removes.
+     *
+     * Only the canvas is faded. Detection, `onBounds` and the glass placement
+     * that depends on it keep running — see the note at the style.
+     */
+    hidden?: boolean;
 }) {
     const { detect, isReady } = useFaceLandmarker();
 
@@ -268,10 +181,23 @@ export function FaceMesh({
     const seenRef = useRef(false);
     const lastDetectRef = useRef(0);
 
-    /** The tessellation, fetched once from the module the hook already loaded. */
-    const edgesRef = useRef<Edges | null>(null);
-    /** The clustered mesh actually drawn. Built once; see `coarsen`. */
-    const coarseRef = useRef<Coarse | null>(null);
+    /**
+     * The face's outline as an ordered ring, fetched once from the module the
+     * hook already loaded. The web is spun out to THIS — see `buildWeb`.
+     */
+    const ringRef = useRef<number[] | null>(null);
+    /**
+     * The web actually drawn.
+     *
+     * ⚠️ REBUILT EVERY FRAME, unlike the clustered mesh it replaces, which was
+     * built once and then carried by easing the landmarks under it. It has to
+     * be: the web's points are not landmarks, they are where a spoke crosses a
+     * ring, so they move whenever the outline does. Rebuilding is ~600 segment
+     * tests against a 36-point outline, which is nothing beside the detection
+     * that already runs here — and `buildWeb` writes back into this same object
+     * rather than allocating.
+     */
+    const webRef = useRef<Web | null>(null);
     const gemsRef = useRef<Gem[]>([]);
     /** The fill, eased toward `matchRef` — see `CAPTURE_MESH_FILL.smoothing`. */
     const fillRef = useRef(0);
@@ -281,9 +207,10 @@ export function FaceMesh({
         void (async () => {
             try {
                 const { FaceLandmarker: L } = await import('@mediapipe/tasks-vision');
-                if (!cancelled) edgesRef.current = L.FACE_LANDMARKS_TESSELATION;
+                if (cancelled) return;
+                ringRef.current = ringOrder(L.FACE_LANDMARKS_FACE_OVAL as Edges);
             } catch {
-                // Nothing to draw without the edge list. The overlay stays
+                // Nothing to draw without the outline. The overlay stays
                 // empty, which is what it does before the model loads anyway —
                 // no error state is worth showing for a decoration.
             }
@@ -300,7 +227,6 @@ export function FaceMesh({
         const {
             detectFps,
             smoothing,
-            cellSize,
             lineWidth,
             baseAlpha,
             dotCount,
@@ -308,15 +234,53 @@ export function FaceMesh({
             dotMaxLifeMs,
             dotRadius,
             maxDpr,
+            rimBreak,
         } = CAPTURE_LIVE_MESH;
         const detectEvery = 1000 / detectFps;
+
+        /**
+         * The last distinct frame the preview showed, and when it showed it.
+         *
+         * ⚠️ THE WIREFRAME MUST NOT OUTLIVE THE PICTURE IT DESCRIBES. When the
+         * stream ends, AWS's <video> keeps its dimensions and simply stops
+         * advancing — so every test based on the ELEMENT still passes while the
+         * frame is black, and the mesh carries on being drawn on the last
+         * landmarks it had. That is the black rectangle with a face-shaped
+         * wireframe floating in it, and it reads as a crash at the exact moment
+         * somebody's face was taken.
+         *
+         * Shorter than `FRAMES_STALLED_MS` in LivenessCamera on purpose: the
+         * mesh has to be gone BEFORE the checking state arrives, never after.
+         */
+        const STALL_MS = 300;
+        let lastShown = -1;
+        let lastShownAt = 0;
 
         const draw = (now: number) => {
             frame = requestAnimationFrame(draw);
 
             const canvas = canvasRef.current;
+            if (!canvas) return;
+            /* Clearing, not merely returning: an early return leaves the last
+               frame painted, which is the whole failure above. */
+            const wipe = () =>
+                canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+
             const video = videoRef.current;
-            if (!canvas || !video?.videoWidth) return;
+            if (!video?.videoWidth) {
+                wipe();
+                return;
+            }
+
+            const shown = video.currentTime;
+            if (shown !== lastShown) {
+                lastShown = shown;
+                lastShownAt = now;
+            }
+            if (lastShownAt > 0 && now - lastShownAt > STALL_MS) {
+                wipe();
+                return;
+            }
 
             /*
              * Size to the element's CSS box, capped. Read every frame because
@@ -347,16 +311,12 @@ export function FaceMesh({
              * loses a third of its width before anything is seen. Mapping
              * straight from 0..1 to the canvas would put the mesh on a face
              * that is not where the mesh thinks it is, stretched by the same
-             * ratio. Same arithmetic as `drawProbe` in LivenessCamera.
+             * ratio. Same arithmetic as `drawProbe` in LivenessCamera, and the
+             * same helper the still mesh uses — see `coverCrop`.
              */
             const vw = video.videoWidth;
             const vh = video.videoHeight;
-            const frameAspect = cssW / cssH;
-            const streamAspect = vw / vh;
-            const sw = streamAspect > frameAspect ? vh * frameAspect : vw;
-            const sh = streamAspect > frameAspect ? vh : vw / frameAspect;
-            const sx = (vw - sw) / 2;
-            const sy = (vh - sh) / 2;
+            const { sx, sy, sw, sh } = coverCrop(vw, vh, cssW, cssH);
 
             // ── The model, on its own clock ─────────────────────────────────
             if (readyRef.current && now - lastDetectRef.current >= detectEvery) {
@@ -403,13 +363,6 @@ export function FaceMesh({
                         if (!seenRef.current) {
                             currentRef.current = target.slice();
                             seenRef.current = true;
-                            // The coarse mesh is built from these first real
-                            // landmarks and then kept — see `coarsen`.
-                            coarseRef.current = coarsen(
-                                target,
-                                edgesRef.current ?? [],
-                                cellSize,
-                            );
                         }
                     }
                 } catch {
@@ -421,8 +374,8 @@ export function FaceMesh({
 
             const target = targetRef.current;
             const cur = currentRef.current;
-            const coarse = coarseRef.current;
-            if (!target || !cur || !coarse) return;
+            const ring = ringRef.current;
+            if (!target || !cur || !ring?.length) return;
 
             // ── Ease toward the latest landmarks ────────────────────────────
             for (let i = 0; i < cur.length; i++) {
@@ -430,17 +383,17 @@ export function FaceMesh({
             }
 
             /*
-             * ── The wireframe ───────────────────────────────────────────────
+             * ── The web, respun on the eased landmarks ──────────────────────
              *
-             * Each edge drawn where it is, with its own `moveTo`. ~2600
-             * segments, ONE path, ONE stroke — the cost of a triangulation is
-             * in the stroke calls, not the segments.
-             *
-             * `miter` joins and `butt` caps: `round` is what made this read as
-             * soft tubing instead of geometry, because it takes the corner off
-             * every triangle — and the corners are what it is made of.
+             * Rebuilt every frame rather than carried: its points are spoke-on-
+             * ring crossings, not landmarks, so they move whenever the outline
+             * does. `webRef.current` is passed back in so the positions are
+             * written into the array that already exists — see `buildWeb`.
              */
-            const { edges: pairs, vertices: nodes } = coarse;
+            const web = buildWeb(cur, ring, CAPTURE_LIVE_MESH, webRef.current ?? undefined);
+            if (!web) return;
+            webRef.current = web;
+            const { edges: pairs, vertices: nodes, verts } = web;
 
             /*
              * ── How much of the mesh is green ───────────────────────────────
@@ -450,8 +403,8 @@ export function FaceMesh({
              * has changed, which is a quantity; blending every line toward
              * green says the same thing in a way nobody can read a value off.
              *
-             * `pairs` is ordered chin-first (see `coarsen`), so it fills
-             * upward.
+             * `pairs` runs from the centre outward (see `buildWeb`), so the
+             * web fills from the middle of the face out to its edge.
              */
             const want = CAPTURE_MESH_FILL.enabled ? (matchRef.current ?? 0) : 0;
             fillRef.current += (want - fillRef.current) * CAPTURE_MESH_FILL.smoothing;
@@ -459,14 +412,36 @@ export function FaceMesh({
             // the next edge's and draw a line across the face.
             const lit = Math.floor((fillRef.current * pairs.length) / 2) * 2;
 
-            const strokeRange = (from: number, to: number, colour: string) => {
+            /**
+             * @param inset How far short of each end to stop, in device px.
+             *   Used on the rim, so the boundary breaks where a spoke arrives —
+             *   see `rimBreak`. The vertices do not move; only the ink stops.
+             */
+            const strokeRange = (from: number, to: number, colour: string, inset = 0) => {
                 if (to <= from) return;
                 ctx.beginPath();
                 for (let e = from; e < to; e += 2) {
                     const a = pairs[e] * 2;
                     const b = pairs[e + 1] * 2;
-                    ctx.moveTo(cur[a] * w, cur[a + 1] * h);
-                    ctx.lineTo(cur[b] * w, cur[b + 1] * h);
+                    let ax = verts[a] * w;
+                    let ay = verts[a + 1] * h;
+                    let bx = verts[b] * w;
+                    let by = verts[b + 1] * h;
+                    if (inset > 0) {
+                        const len = Math.hypot(bx - ax, by - ay);
+                        // A segment shorter than two insets would invert; leave
+                        // those whole rather than drawing them backwards.
+                        if (len > inset * 2.4) {
+                            const ux = ((bx - ax) / len) * inset;
+                            const uy = ((by - ay) / len) * inset;
+                            ax += ux;
+                            ay += uy;
+                            bx -= ux;
+                            by -= uy;
+                        }
+                    }
+                    ctx.moveTo(ax, ay);
+                    ctx.lineTo(bx, by);
                 }
                 ctx.strokeStyle = colour;
                 ctx.stroke();
@@ -487,8 +462,24 @@ export function FaceMesh({
              * a moving camera a hue change alone is close to invisible — the
              * mesh would appear to do nothing while the bar filled.
              */
-            strokeRange(0, lit, withAlpha(CAPTURE_MESH_FILL.colour, baseAlpha * 2.1));
-            strokeRange(lit, pairs.length, `rgba(255, 255, 255, ${baseAlpha})`);
+            const rim = web.rim;
+            // The rim stops short of every spoke — the break. See `rimBreak`.
+            const gap = rimBreak * dpr;
+
+            strokeRange(0, Math.min(lit, rim), withAlpha(CAPTURE_MESH_FILL.colour, baseAlpha * 2.1));
+            strokeRange(rim, lit, withAlpha(CAPTURE_MESH_FILL.colour, baseAlpha * 2.1), gap);
+            strokeRange(lit, Math.min(pairs.length, rim), `rgba(255, 255, 255, ${baseAlpha})`);
+            strokeRange(Math.max(lit, rim), pairs.length, `rgba(255, 255, 255, ${baseAlpha})`, gap);
+
+            /*
+             * ⚠️ THE RIM IS NOT PAINTED DIFFERENTLY, and it was for a while.
+             * Re-stroking the boundary brighter is the obvious way to make it
+             * read, and it is the wrong one: a louder line is not a sharper
+             * one, and an edge picked out in paint stops belonging to the web
+             * it encloses. The rim is legible because every corner of it is a
+             * real angle — see the zig note in `buildWeb`. Same colour, same
+             * weight, different shape.
+             */
 
             /*
              * ── The gems ────────────────────────────────────────────────────
@@ -542,8 +533,8 @@ export function FaceMesh({
                 const flare = Math.pow(Math.sin(t * Math.PI), 1.6);
                 if (flare < 0.02) continue;
 
-                const px = cur[gem.at * 2] * w;
-                const py = cur[gem.at * 2 + 1] * h;
+                const px = verts[gem.at * 2] * w;
+                const py = verts[gem.at * 2 + 1] * h;
 
                 // The halo. Two draws rather than `shadowBlur`, which is a
                 // per-draw blur pass and the most expensive thing that could be
@@ -601,14 +592,29 @@ export function FaceMesh({
             ref={canvasRef}
             aria-hidden
             className="rz-live-mesh"
-            /*
-             * Mirrored with the preview, never independently. The landmarks are
-             * measured on the UNMIRRORED stream, and the video is flipped by a
-             * CSS transform — so the overlay has to take the same transform or
-             * it lands on the wrong side of the face. `CAPTURE_MIRROR` is the
-             * one switch that decides this for every self-view in the app.
-             */
-            style={{ transform: CAPTURE_MIRROR.enabled ? 'scaleX(-1)' : 'none' }}
+            style={{
+                /*
+                 * Mirrored with the preview, never independently. The landmarks
+                 * are measured on the UNMIRRORED stream, and the video is
+                 * flipped by a CSS transform — so the overlay has to take the
+                 * same transform or it lands on the wrong side of the face.
+                 * `CAPTURE_MIRROR` is the one switch that decides this for
+                 * every self-view in the app.
+                 */
+                transform: CAPTURE_MIRROR.enabled ? 'scaleX(-1)' : 'none',
+                /*
+                 * ⚠️ HIDDEN, NOT UNMOUNTED — see the `hidden` prop.
+                 *
+                 * `opacity` keeps the draw loop, the landmark detection and
+                 * `onBounds` all running, which is required: the caller places
+                 * the glass oval and drives the camera zoom from this
+                 * component's reports. Unmounting to hide the tracery would
+                 * silently hand both back to their coarser fallbacks and then
+                 * jump when it returned.
+                 */
+                opacity: hidden ? 0 : 1,
+                transition: 'opacity 200ms ease-out',
+            }}
         />
     );
 }

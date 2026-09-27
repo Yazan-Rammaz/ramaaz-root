@@ -337,11 +337,30 @@ Open items, in priority order:
     - On a 429 from `/v1/auth/refresh`, is the refresh token spent? (We keep the
       cookie and do not retry — see `lib/auth/refresh.ts`.)
 
-2. **Build real screens from XD.** Translate frames using the XD-pixel utilities
+2. **Give the passcode a backend.** `features/passcode` is built and wired —
+   `/set-passcode` (choose, confirm, mismatch returns to the first entry) and
+   the lock over the dashboard on every refresh, five minutes idle, or the
+   navbar control. Everything it stores is in ONE module,
+   `features/passcode/store.ts`: a SHA-256 of the code and the face captured at
+   the ID step, both in `localStorage`, both cleared at sign-out. That file
+   states what the stand-in costs and is what a Server Action pair replaces —
+   no screen changes when it does.
+
+   Two seams go with it, and they are the only places outside that feature that
+   know a passcode exists:
+    - `applyStage()` sends COMPLETED to `/set-passcode` instead of `/dashboard`,
+      because there is no `PASSCODE_REQUIRED` stage to route on. When the
+      backend has one, that reverts to `/dashboard` and the screen joins
+      `STAGE_ROUTES`.
+    - `IdentityStep.onEnroll` keeps the selfie on its way past — the last moment
+      the browser holds it, since `applyStage` clears the challenge cookie that
+      `/api/face-capture` reads. The real version fetches it with the session.
+
+3. **Build real screens from XD.** Translate frames using the XD-pixel utilities
    (section 1). Each new domain area = `npm run gen` then wire pages under
    `src/app/(dashboard)/`. Drop exported `.svg` icons into `/public/icons`.
 
-3. **Give `main` its own worker.** Cloudflare's production branch is `dev`
+4. **Give `main` its own worker.** Cloudflare's production branch is `dev`
    today, so `main` deploys nowhere and every push to `dev` is a release. A
    second worker for `main` with the same config closes that gap — see §8.
 

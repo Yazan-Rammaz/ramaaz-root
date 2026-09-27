@@ -350,33 +350,41 @@ body {
     }
 }
 
-/* Wrong-passcode shake: 3 left-right cycles in 1s, matching the red border
-   shown for the same duration before the boxes clear. Offsets are rem so they
-   scale with the XD engine like everything else. */
+/* Wrong-passcode shake: a short, tight refusal — 3 cycles in 0.36s, travelling
+   4 XD px each way rather than 8. Offsets are rem so they scale with the XD
+   engine like everything else.
+
+   ⚠️ IT IS NOT THE WHOLE FAILURE ANY MORE, which is why it is this brief. It
+   used to run for a full second because it WAS the message: shake, then clear.
+   The row now plays the entered digits back afterwards (see PasscodeBoxes), so
+   the shake is only the first beat — the "no" — and a slow, wide swing in front
+   of that reads as the row still arguing while it is trying to show you what
+   you typed. Wide travel also collides with the neighbouring box at this
+   spacing, which turned a refusal into a wobble. */
 @keyframes root-shake {
     0%,
     100% {
         transform: translateX(0);
     }
     16.6% {
-        transform: translateX(-0.5rem);
+        transform: translateX(-0.25rem);
     }
     33.3% {
-        transform: translateX(0.5rem);
+        transform: translateX(0.25rem);
     }
     50% {
-        transform: translateX(-0.5rem);
+        transform: translateX(-0.25rem);
     }
     66.6% {
-        transform: translateX(0.5rem);
+        transform: translateX(0.25rem);
     }
     83.3% {
-        transform: translateX(-0.25rem);
+        transform: translateX(-0.125rem);
     }
 }
 
 .animate-shake {
-    animation: root-shake 1s ease-in-out;
+    animation: root-shake 0.36s ease-in-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -722,6 +730,53 @@ body {
     animation: verdict-glass-wave var(--glass-wave-dur, 5s) ease-in-out infinite;
 }
 
+/* ── The lock's glass ───────────────────────────────────────────────────────
+   The passcode gate over the dashboard. Liquid glass at 50: the page behind
+   stays legible as shapes and unreadable as text, which is what a lock over
+   somebody's own workspace should look like — their work is still there, they
+   just cannot use it until they say who they are.
+
+   ── It filters a real BACKDROP, and it is the only thing here that does ─────
+   Every other pane in this app is `.verdict-glass`, which draws a filtered COPY
+   of the picture behind it and never touches `backdrop-filter` — for the good
+   reason written at length over there: `backdrop-filter` needs GPU compositing
+   and silently does nothing when the browser is not compositing on the GPU.
+
+   That technique cannot be used here. What is behind this pane is the entire
+   dashboard — live DOM, not one image — and there is no copy of it to draw.
+
+   So this uses `backdrop-filter`, knowing it may do nothing, and is built so
+   that when it does nothing the result is still a LOCK:
+
+     the tint alone already obscures the page. `--lock-tint` is opaque enough
+     that the dashboard is unreadable through it with no filter applied at all;
+     the blur's job is to make that look like glass rather than like a sheet.
+
+   The @supports below raises the tint the rest of the way for a browser that
+   admits it has no `backdrop-filter`. It cannot catch the GPU case — nothing in
+   CSS can — which is exactly why the un-filtered state has to be acceptable on
+   its own rather than merely detectable.
+
+   ⚠️ NOT a security boundary. See `<IdleLock>`: the session cookie stays valid
+   behind this, deliberately, and anything visible through the glass was already
+   rendered into the page. It withholds a screen from a passer-by; it does not
+   withhold data from an attacker. */
+.lock-glass {
+    --lock-tint: 0.62;
+    background: rgb(252 252 252 / var(--lock-tint));
+    /* 50 XD px, through the same 0.0625rem-per-pixel scale as everything else —
+       so the blur grows and shrinks with the canvas instead of being 50 real
+       pixels on a phone and 50 on a laptop. */
+    -webkit-backdrop-filter: blur(3.125rem) saturate(1.2);
+    backdrop-filter: blur(3.125rem) saturate(1.2);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .lock-glass {
+        --lock-tint: 0.94;
+    }
+}
+
 /* ── The star field ─────────────────────────────────────────────────────────
    Twenty of the small mark's stars scattered over the frame while the
    comparison runs, five to seven of them alight at any moment.
@@ -813,18 +868,21 @@ body {
        they were legible over hair and invisible over anything pale, so the
        field looked like it had holes in it.
 
-       0.95 rather than 1 still leaves the gleam somewhere to travel up to,
-       which is the reason the mark's is below full in the first place. */
-    color: rgb(255 255 255 / 0.95);
+       Below full brightness still, so the gleam has somewhere to travel up to —
+       the reason the mark's own base is below full in the first place. Blue for
+       the reason everything else here is: this is the same AI mark doing the
+       same job on a different screen, and it has to be the same colour. */
+    --gem-base: rgb(232 245 255 / 0.95);
+    color: var(--gem-base);
 
     /* The edge that makes them read on a bright background at all: a tight dark
-       shadow for contrast, a close white one for lift. Same pair as
+       shadow for contrast, a close blue one for lift. Same pair as
        `.verdict-spark`, and deliberately tight — a wide halo at this size turns
        a four-pointed star into a smudge. `verdict-gleam` replaces this while it
        runs, and returns to its own version of it. */
     filter:
         drop-shadow(0 0 0.125rem rgb(0 0 0 / 0.5))
-        drop-shadow(0 0 0.3rem rgb(255 255 255 / 0.6));
+        drop-shadow(0 0 0.3rem rgb(140 200 255 / 0.6));
     opacity: 0;
     animation:
         spark-field-lit var(--lit-dur) linear var(--lit-delay) infinite,
@@ -847,6 +905,76 @@ body {
     }
 }
 
+/* ── The gem's palette ──────────────────────────────────────────────────────
+   Blue and white while a model is thinking; the verdict's own colour once it
+   has decided.
+
+   The shine (a sweep ACROSS the glyph) and the gleam (a bloom LEAVING it) are
+   two halves of one material, so they read from ONE set of colours instead of
+   each carrying its own literals. Every user of the mark sets these:
+
+     --gem-base    the glyph at rest
+     --gem-lead    the leading edge of the sweep
+     --gem-core    its peak — the brightest thing on screen, for a few frames
+     --gem-trail   the trailing edge
+     --gem-flash   the gleam's own core, as it leaves the shape
+     --gem-bloom   the gleam's body
+     --gem-halo    its outer reach
+
+   ⚠️ WHY BLUE, AND NOT WHITE WITH A HINT OF COLOUR. These used to be white
+   stars with a nearly subliminal cyan/gold dispersion — a convincing gem, and a
+   mark that said nothing about what was happening. This is the AI mark: blue is
+   what carries "a model is working on your photograph", and the SAME shine
+   coming back green or red at the verdict is what makes the three phases read
+   as one continuous event rather than three unrelated animations. The colour is
+   the state; the motion below is unchanged.
+
+   ⚠️ LEAD AND TRAIL ARE NOT THE SAME BLUE, and that is the point. A facet
+   disperses light, so one edge of the sweep is deeper than the other — which
+   means the blue lands in a DIFFERENT PLACE on each star, because each of the
+   three leans a different way (see the per-star overrides further down). Set
+   lead and trail to one value and the sweep flattens into a coloured band
+   crossing the mark, which is a tinted star rather than a lit one. */
+/* The light the mark sits in, breathing with it.
+   -----------------------------------------------------------------------------
+   ⚠️ THIS CLASS HAD NO RULE AT ALL until the mark went blue — `VerdictMark`
+   rendered the element and the reduced-motion block below parked it, but
+   nothing ever painted it, so the "soft glow" its comment describes was an
+   empty 260-square span. It matters now: the stars are blue on a frosted pane
+   over somebody's face, and a photograph can be any colour. The glow is what
+   they are legible AGAINST — without it a pale background eats the blue and
+   leaves three grey stars.
+
+   Slow and shallow. It is a ground, not an event: the gleam is what flashes,
+   and a glow that pulses hard behind it turns the mark into a beacon. Its clock
+   shares no factor with the three stars', so it never swells in time with any
+   of them. */
+@keyframes verdict-breathe {
+    0%, 100% { transform: scale(0.88); opacity: 0.34; }
+    50%      { transform: scale(1); opacity: 0.62; }
+}
+
+.verdict-breathe {
+    background: radial-gradient(
+        circle,
+        rgb(96 176 255 / 0.5) 0%,
+        rgb(48 102 204 / 0.22) 42%,
+        transparent 70%
+    );
+    animation: verdict-breathe 4.3s ease-in-out infinite;
+}
+
+.verdict-spark,
+.spark-field-star {
+    --gem-base: rgb(219 238 255 / 0.82);
+    --gem-lead: rgb(96 176 255 / 0.95);
+    --gem-core: rgb(245 252 255 / 1);
+    --gem-trail: rgb(170 214 255 / 0.95);
+    --gem-flash: rgb(235 247 255 / 0.95);
+    --gem-bloom: rgb(90 165 255 / 0.9);
+    --gem-halo: rgb(48 102 204 / 0.55);
+}
+
 /* The AI mark — three stars, three clocks.
    -----------------------------------------------------------------------------
    The durations share no common factor (2.3 / 3.1 / 4.7), so the pattern the
@@ -864,18 +992,19 @@ body {
    and clip it against the pane's rounded corner. */
 .verdict-spark {
     /*
-     * ⚠️ NOT pure white, and that is what makes the shine visible at all.
+     * ⚠️ NEITHER PURE WHITE NOR A SOLID BLUE, and both halves of that matter.
      *
-     * The mark was `text-white`. A white sweep across a white glyph is nothing
-     * — the highlight and the base are the same colour, so the animation ran
-     * perfectly and could not be seen. The base sits below full brightness so
-     * the sweep has somewhere to travel UP to; the glint is the difference
-     * between the two, and without a gap there is no difference.
+     * Not white, because the mark has to say which state this is: a blue-white
+     * base is what makes the blue shine read as this mark's own colour rather
+     * than as a light someone shone on a white star.
      *
-     * Low enough to give the shine room, high enough that a star at rest still
-     * reads as white against a photograph.
+     * Not below ~0.8 and not a saturated blue, because the base is what the
+     * sweep travels UP from. The mark was `text-white` once and the shine was
+     * invisible — highlight and base the same colour — and a deep blue base has
+     * the opposite problem: the pale core of the sweep stops reading as light
+     * and starts reading as a hole in the star.
      */
-    color: rgb(255 255 255 / 0.72);
+    color: var(--gem-base);
 
     /*
      * ⚠️ NOT a bloom. The mark must stay a crisp shape.
@@ -886,11 +1015,12 @@ body {
      * the star's own points and rounds them off.
      *
      * Tight shadows only: a dark one for the edge so it holds on a white wall,
-     * a close white one for lift so it holds in a dark room.
+     * a close BLUE one for lift so it holds in a dark room and so the light
+     * around the mark is the same colour as the light crossing it.
      */
     filter:
         drop-shadow(0 0 0.125rem rgb(0 0 0 / 0.45))
-        drop-shadow(0 0 0.375rem rgb(255 255 255 / 0.55));
+        drop-shadow(0 0 0.375rem rgb(120 190 255 / 0.55));
 }
 
 /* ⚠️ EVERY ROTATION NEEDS ITS OWN ORIGIN.
@@ -937,6 +1067,17 @@ body {
     50%      { transform: rotate(18deg) scale(1); }
 }
 
+/* ⚠️ THE THREE STARS DO NOT CATCH THE LIGHT FROM THE SAME DIRECTION.
+   -----------------------------------------------------------------------------
+   Each sets its own lead/trail pair and its own sweep angle, so the deep blue
+   crosses the big star from one side, the top star from the other, and the
+   bottom star diagonally — the blue is somewhere different on each at any
+   moment. Give all three the same pair and the mark reads as one blue shape
+   flashing, which is the thing three unrelated clocks exist to avoid; the
+   colour has to be as unsynchronised as the motion. */
+
+/* The anchor keeps the palette's own direction: deep blue leading, pale
+   trailing. It is the largest shape, so it is the one the others vary FROM. */
 .verdict-spark-big {
     transform-origin: 36.8% 50%;
     animation:
@@ -960,7 +1101,12 @@ body {
     50%      { transform: rotate(38deg) scale(1); }
 }
 
+/* Lit from the other side — the deep blue rides the TRAILING edge here, and on
+   a shallower angle, so this star's colour sits opposite the big one's. */
 .verdict-spark-top {
+    --gem-lead: rgb(176 218 255 / 0.9);
+    --gem-trail: rgb(88 168 255 / 0.95);
+    --shine-angle: 74deg;
     transform-origin: 82.3% 15.8%;
     animation:
         verdict-spark-top 2.3s ease-in-out infinite,
@@ -972,7 +1118,13 @@ body {
     50%      { transform: rotate(-38deg) scale(0.6); }
 }
 
+/* Blue on BOTH edges, on the steepest angle: the most saturated of the three,
+   and the only one whose core is a narrow white slot between two blues. Its
+   colour therefore arrives somewhere neither of the other two put it. */
 .verdict-spark-bottom {
+    --gem-lead: rgb(70 150 255 / 0.95);
+    --gem-trail: rgb(120 190 255 / 0.95);
+    --shine-angle: 132deg;
     transform-origin: 82.3% 84.2%;
     /* Negative delay starts it mid-cycle, so the two are already out of step on
        the first frame rather than drifting apart over the first few seconds —
@@ -1005,32 +1157,38 @@ body {
 .verdict-spark-top > *,
 .verdict-spark-bottom > *,
 .verdict-faceid > * {
-    /* Opaque white at the core, so the band peaks well above the 0.72 base and
-       falls back to it at the edges. A wider core than a literal specular
-       highlight would have: at this size a narrow one crosses a star in a few
-       frames and registers as a flicker rather than a sheen. */
     /*
-     * ⚠️ The two tinted stops are the difference between "bright" and
-     * "diamond", and they are meant to be almost subliminal.
+     * Seven stops and one idea: a bright core with a DEEPER TINT ON EACH SIDE
+     * of it, fading out to nothing at both ends.
      *
-     * A gem does not reflect light, it DISPERSES it: the facets split white
-     * into colour, which is why a diamond flashes blue and gold where polished
-     * steel just flashes white. A purely white sweep reads as chrome. A pale
-     * cyan leading edge and a pale gold trailing one put that split back.
+     * A gem does not reflect light, it DISPERSES it — the facets split white
+     * into colour, which is why a diamond flashes where polished steel merely
+     * shines. The two tinted stops either side of the core are that split, and
+     * the faded ones at 26% / 74% are its falloff: the colour arrives before
+     * the highlight and is still leaving after it, which is what separates
+     * light travelling over a shape from a band sliding across one.
      *
-     * Kept faint on purpose. Push either tint and the mark stops being a white
-     * star with light moving over it and starts being a coloured star, which is
-     * a brand change rather than a shine.
+     * ⚠️ The core is wide (49–53%) on purpose. A literal specular highlight is
+     * narrower, and at this size a narrow one crosses a star in a few frames and
+     * registers as a flicker rather than as a sheen.
+     *
+     * ⚠️ The core must stay the palest stop in the list. It is what the sweep
+     * peaks at, and it has to peak ABOVE `--gem-base`; a core at the same
+     * saturation as the lead and trail turns the whole sweep into one flat
+     * coloured band. Colour belongs on the EDGES.
+     *
+     * Every colour and the angle come from the palette, so the same gradient
+     * serves the blue AI mark and the green/red verdict.
      */
     background-image: linear-gradient(
-        100deg,
+        var(--shine-angle, 100deg),
         transparent 10%,
-        rgb(255 255 255 / 0.5) 30%,
-        rgb(205 240 255 / 0.95) 42%,
-        rgb(255 255 255 / 1) 49%,
-        rgb(255 255 255 / 1) 53%,
-        rgb(255 238 205 / 0.95) 60%,
-        rgb(255 255 255 / 0.5) 72%,
+        color-mix(in srgb, var(--gem-lead) 45%, transparent) 26%,
+        var(--gem-lead) 42%,
+        var(--gem-core) 49%,
+        var(--gem-core) 53%,
+        var(--gem-trail) 60%,
+        color-mix(in srgb, var(--gem-trail) 45%, transparent) 74%,
         transparent 90%
     );
     background-size: 220% 100%;
@@ -1065,21 +1223,27 @@ body {
    rare enough to notice, and a bloom that never subsides is just a glow. Each
    star's gleam runs on a clock unrelated to its own motion AND to the others',
    so the three flash at genuinely unpredictable moments — which is precisely
-   what a real stone does as it turns. */
+   what a real stone does as it turns.
+
+   Its three colours come from the palette (`--gem-flash` / `--gem-bloom` /
+   `--gem-halo`), so the light this throws is always the same colour as the light
+   crossing the glyph — blue while a model is thinking, the verdict's colour once
+   it has answered. The two cannot drift apart, because there is only one set of
+   values to change. */
 @keyframes verdict-gleam {
     0%, 58%, 100% {
         filter: drop-shadow(0 0 0.125rem rgb(0 0 0 / 0.35));
     }
     70% {
         filter:
-            drop-shadow(0 0 0.3rem rgb(255 255 255 / 0.95))
-            drop-shadow(0 0 0.85rem rgb(200 230 255 / 0.85))
-            drop-shadow(0 0 1.6rem rgb(255 240 210 / 0.5));
+            drop-shadow(0 0 0.3rem var(--gem-flash))
+            drop-shadow(0 0 0.85rem var(--gem-bloom))
+            drop-shadow(0 0 1.6rem var(--gem-halo));
     }
     82% {
         filter:
-            drop-shadow(0 0 0.2rem rgb(255 255 255 / 0.6))
-            drop-shadow(0 0 0.6rem rgb(200 230 255 / 0.35));
+            drop-shadow(0 0 0.2rem color-mix(in srgb, var(--gem-flash) 62%, transparent))
+            drop-shadow(0 0 0.6rem color-mix(in srgb, var(--gem-bloom) 40%, transparent));
     }
 }
 
@@ -1401,15 +1565,67 @@ body {
     100% { transform: scale(1); opacity: 1; }
 }
 
+/* The gleam, once — the glyph lands, then throws its light at the room.
+   -----------------------------------------------------------------------------
+   The stars' `verdict-gleam` loops forever because that state is a wait and a
+   wait has to look continuously alive. This one fires a single time, for the
+   same reason the shine does: a result that keeps glinting is a result that
+   looks like it is still being decided.
+
+   ⚠️ 0% AND 100% ARE THE GLYPH'S RESTING FILTER, COPIED. This animation is
+   `both`-filled, so it owns `filter` before its delay and after it ends — if
+   the ends said anything else, the glyph would snap to it and lose its coloured
+   halo. They must move together with `.verdict-faceid`'s own `filter` below,
+   which is the value used when animations are off. */
+@keyframes verdict-faceid-gleam {
+    0%, 100% {
+        filter:
+            drop-shadow(0 0 0.125rem rgb(0 0 0 / 0.35))
+            drop-shadow(0 0 0.5rem color-mix(in srgb, var(--verdict-color) 55%, transparent));
+    }
+    45% {
+        filter:
+            drop-shadow(0 0 0.3rem var(--gem-flash))
+            drop-shadow(0 0 0.9rem var(--gem-bloom))
+            drop-shadow(0 0 1.8rem var(--gem-halo));
+    }
+}
+
 .verdict-faceid {
     display: inline-flex;
+
+    /* ⚠️ THE SAME GEM AS THE AI MARK, IN THE VERDICT'S COLOUR — and derived
+       from `--verdict-color` rather than written out twice, so pass and fail
+       stay what they are meant to be: one event with one difference. Two hand-
+       written palettes would drift the moment either is tuned.
+
+       The mixes are not arbitrary. `--gem-core` stays the palest of the three
+       sweep stops (mostly white, enough hue to belong to the verdict) because
+       it has to peak above a glyph that is already fully saturated; lead and
+       trail carry the colour, as they do on the stars. The bloom is the verdict
+       colour almost neat — this is the moment the whole frame agrees on one
+       thing, and a white flash over it would be a second colour arriving at
+       exactly the wrong instant. */
+    --gem-lead: color-mix(in srgb, var(--verdict-color) 82%, white);
+    --gem-core: color-mix(in srgb, var(--verdict-color) 22%, white);
+    --gem-trail: color-mix(in srgb, var(--verdict-color) 45%, white);
+    --gem-flash: color-mix(in srgb, var(--verdict-color) 28%, white);
+    --gem-bloom: color-mix(in srgb, var(--verdict-color) 92%, white);
+    --gem-halo: color-mix(in srgb, var(--verdict-color) 65%, transparent);
+
     color: var(--verdict-color);
     /* Tight, like the AI mark's — a wide glow at this size rounds off the
-       bracket corners that make the glyph recognisable. */
+       bracket corners that make the glyph recognisable. Kept in step with
+       `verdict-faceid-gleam`'s 0%/100%: see the warning above it. */
     filter:
         drop-shadow(0 0 0.125rem rgb(0 0 0 / 0.35))
         drop-shadow(0 0 0.5rem color-mix(in srgb, var(--verdict-color) 55%, transparent));
-    animation: verdict-faceid 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    /* Two animations, two properties: the landing moves `transform`, the gleam
+       moves `filter`. The gleam starts after the glyph has settled — light
+       catches a thing that has arrived, not one still on its way. */
+    animation:
+        verdict-faceid 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+        verdict-faceid-gleam 1.5s ease-out 0.35s 1 both;
 }
 
 /* The frame's own edge carries the verdict. Inset so it reads as a ring on the

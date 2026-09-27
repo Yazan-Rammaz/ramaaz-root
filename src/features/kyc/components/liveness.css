@@ -330,6 +330,29 @@
     margin-top: auto;
 }
 
+/* ── One hint at a time ─────────────────────────────────────────────────────
+ *
+ * Set on the FRAME by `FaceLivenessScreen` while our own light-and-focus
+ * warning is up, which renders in the same place at the foot of the frame.
+ *
+ * Without it the two stack: AWS saying "move a little closer" while ours says
+ * the room is too dark. Both are true and only one is worth acting on — the
+ * distance hint is unfixable in the dark, because the oval cannot lock onto a
+ * face the detector cannot see. Ours wins for exactly as long as it is up, and
+ * AWS's returns the moment the light is right.
+ *
+ * ⚠️ `opacity`, not `display: none`, for the same reason as the toast rule
+ * further down: the camera loop watches for `.amplify-loader` inside this
+ * element becoming visible to know the stream ended, and removing the box
+ * would kill that signal. Keeping it laid out also holds the foot of the frame
+ * at a constant height, so nothing shifts when the warning clears.
+ */
+.rz-hide-hint .amplify-liveness-hint,
+.rz-hide-hint .amplify-liveness-hint--mobile {
+    opacity: 0;
+    pointer-events: none;
+}
+
 /* 12 from every edge and 12 between the hint and the fit bar — the same spacing
    the rest of this flow uses. AWS ships `--amplify-space-large` padding and a
    16 gap. The hidden Rec and cancel containers are `display: none`, so they

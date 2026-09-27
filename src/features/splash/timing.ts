@@ -20,16 +20,47 @@ export const SPLASH_SLIDE_MS = 450; // iOS slide-out once the bar completes
  */
 const PLAYING = "__rootSplashPlaying" as const;
 
-type SplashWindow = Window & { [PLAYING]?: boolean };
+/**
+ * When the splash will actually be gone — `performance.now()` scale.
+ *
+ * ⚠️ THE DEADLINE CANNOT BE DERIVED FROM THE CONSTANTS, and assuming it could
+ * is a bug that only shows up on slow devices. The splash's timers start when
+ * `SplashGate`'s effect runs, which is after hydration — not at navigation.
+ * `waitForSplash` computed `FILL + SLIDE - performance.now()`, i.e. it assumed
+ * the splash began at time zero, so it under-waited by however long hydration
+ * took: nothing on a desktop, well over a second on a phone. Callers were
+ * released while the splash was still on screen, which is the exact thing they
+ * called it to avoid.
+ *
+ * Recorded at the moment the splash starts, so the wait is right however long
+ * the page took to come up.
+ */
+const ENDS_AT = "__rootSplashEndsAt" as const;
+
+type SplashWindow = Window & { [PLAYING]?: boolean; [ENDS_AT]?: number };
 
 export function setSplashPlaying(value: boolean): void {
   if (typeof window === "undefined") return;
-  (window as SplashWindow)[PLAYING] = value;
+  const win = window as SplashWindow;
+  win[PLAYING] = value;
+  // Stamped here rather than by the caller: this is called exactly when the
+  // splash appears and when it is gone, so it is the one place that knows.
+  win[ENDS_AT] = value
+    ? performance.now() + SPLASH_FILL_MS + SPLASH_SLIDE_MS
+    : undefined;
 }
 
 export function isSplashPlaying(): boolean {
   if (typeof window === "undefined") return false;
   return (window as SplashWindow)[PLAYING] === true;
+}
+
+/** Milliseconds until the splash is off screen; 0 when none is playing. */
+function splashRemaining(): number {
+  if (typeof window === "undefined") return 0;
+  const endsAt = (window as SplashWindow)[ENDS_AT];
+  if (typeof endsAt !== "number") return 0;
+  return Math.max(0, endsAt - performance.now());
 }
 
 /**
@@ -68,10 +99,12 @@ export function isSplashPlaying(): boolean {
  * that happens to be long enough. That works and is fragile; this is the
  * explicit version.
  *
- * ── Why the deadline is measured from page load ─────────────────────────────
- * `performance.now()` is time since the document loaded, which is what the
- * splash's own timers are relative to. Measuring from the call instead would
- * add however long the caller took to get here onto the end of the wait.
+ * ── Where the deadline comes from ───────────────────────────────────────────
+ * The stamp `setSplashPlaying` records when the splash STARTS — see ENDS_AT.
+ * ⚠️ It is not `FILL + SLIDE - performance.now()`. That was the original, and
+ * it silently under-waited by however long hydration took, because it assumed
+ * the splash had begun at navigation. On a phone that is well over a second,
+ * and the caller was let go with the splash still covering the screen.
  */
 export async function waitForSplash(): Promise<void> {
   if (typeof window === "undefined") return;
@@ -82,7 +115,7 @@ export async function waitForSplash(): Promise<void> {
 
   if (!isSplashPlaying()) return;
 
-  const remaining = SPLASH_FILL_MS + SPLASH_SLIDE_MS - performance.now();
+  const remaining = splashRemaining();
   if (remaining > 0) {
     await new Promise((resolve) => setTimeout(resolve, remaining));
   }
