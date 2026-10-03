@@ -1582,8 +1582,15 @@ export const CAPTURE_CAMERA_ZOOM = {
      * Reaching a typical 2.5x now takes about six large steps and a few small
      * ones — call it two seconds, against nine or ten at the 0.04 this started
      * at.
+     *
+     * ⚠️ 0.12, down from 0.16 (2026-10-03), together with `stepMs` going from
+     * 20 to 350. At 0.16 every ~20ms the zoom outran AWS: its "move closer"
+     * hint and its bar lag the stream by a few hundred ms, so the loop kept
+     * obeying a stale "closer" and sailed to ~150% of the oval — face filling
+     * the frame, AWS still saying closer. The step was never the problem on
+     * its own; deciding again before AWS had seen the last one was.
      */
-    maxStep: 0.16,
+    maxStep: 0.12,
 
     /**
      * The smallest the step may shrink to, as a share of `maxStep`.
@@ -1593,21 +1600,25 @@ export const CAPTURE_CAMERA_ZOOM = {
      * on — the zoom would stall just short of the oval, which is the one
      * failure that strands somebody at "move a little closer" forever.
      *
-     * A quarter of 0.16 is 0.04, which is exactly the fixed step this
-     * controller used before it tapered. So the endgame is unchanged and only
-     * the approach got faster.
+     * A third of 0.12 is 0.04, which is exactly the fixed step this
+     * controller used before it tapered — the version reported as landing
+     * perfectly, only slowly. So the endgame is that one and only the approach
+     * got faster.
      */
-    minStepShare: 0.25,
+    minStepShare: 1 / 3,
 
     /**
-     * Shortest gap between adjustments, in ms.
+     * How long to wait AFTER the camera has applied a zoom before deciding the
+     * next one, in ms.
      *
-     * A floor, not a schedule — the real pacing comes from the device, because
-     * the next request does not go out until the last one has completed. Low
-     * enough that a camera which CAN keep up is never the thing being waited
-     * for; on one that cannot, this changes nothing.
+     * ⚠️ MEASURED FROM COMPLETION, and it is AWS's reaction time, not ours.
+     * Every decision reads AWS's hint and bar, and both describe frames AWS has
+     * already processed — a few hundred ms behind the lens. Decide sooner and
+     * the loop acts on an answer about a zoom it has already left: at 20ms it
+     * stacked a dozen "closer" steps onto one stale hint and overshot to ~150%
+     * of the oval. 350 lets the hint catch up with each step before the next.
      */
-    stepMs: 20,
+    stepMs: 350,
 
     /**
      * How much of the zoom is KEPT once the match locks, 0..1 — as a share of

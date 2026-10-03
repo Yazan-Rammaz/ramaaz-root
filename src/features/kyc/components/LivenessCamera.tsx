@@ -1824,6 +1824,10 @@ export function LivenessCamera({
                                 .then(() => {
                                     z.busy = false;
                                     z.value = applied;
+                                    // `stepMs` runs from HERE — the moment the
+                                    // lens actually changed — so AWS gets that
+                                    // long to see it before the next decision.
+                                    z.at = Date.now();
                                     // One line per adjustment. The zoom is the
                                     // only thing on this screen that moves
                                     // without the person doing anything, so
