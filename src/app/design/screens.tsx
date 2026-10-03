@@ -16,7 +16,9 @@ import type { VerificationStep } from '@/features/kyc/types/verification';
 import VerificationPage from '@/features/kyc/components/VerificationPage';
 
 import { SystemList } from '@/features/system/components/SystemList';
+import { SetPasscodeScreen } from '@/features/passcode/components/SetPasscodeScreen';
 import { FaceLivenessPreview } from './FaceLivenessPreview';
+import { PasscodeLockPreview } from './PasscodeLockPreview';
 import { LivenessLab } from './LivenessLab';
 import { CaptureLab } from './CaptureLab';
 
@@ -131,6 +133,24 @@ export const SCREENS: Record<string, () => ReactNode> = {
         <AuthShell>
             <NoAccessPage />
         </AuthShell>
+    ),
+    // The tail of a first sign-in. `preview` keeps it from writing a passcode
+    // into the reviewer's own browser and navigating away — see the prop.
+    'set-passcode': () => (
+        <AuthShell>
+            <Screen variant="centered" maxW={430} gutter={0} className="h-full">
+                <SetPasscodeScreen preview />
+            </Screen>
+        </AuthShell>
+    ),
+    // The gate over the real dashboard shell, which is the only way to judge
+    // it: the glass filters what is BEHIND it, so with nothing behind it there
+    // is nothing to see.
+    'passcode-lock': () => (
+        <DashboardShell>
+            <DashboardPage />
+            {/* <PasscodeLockPreview /> */}
+        </DashboardShell>
     ),
     forbidden: () => <ForbiddenPage />,
 

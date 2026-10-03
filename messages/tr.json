@@ -84,7 +84,18 @@
         "prompt": "Şifrenizi Girin",
         "wrong": "Şifre doğru değil",
         "forgot": "Şifremi Unuttum ?",
+        "rateLimited": "Çok fazla deneme — {seconds} saniye bekleyin",
+        "rateLimitedUnknown": "Çok fazla deneme — bir dakika bekleyin",
+        "unavailable": "Kilit açma şu anda kullanılamıyor",
+        "sessionEnded": "Oturumunuz sona erdi. Tekrar giriş yapmak için erişim bağlantınızı açın.",
         "passkeyFailed": "Bu işe yaramadı — tekrar denemek için dokunun",
+        "passkeySetupFailed": "Cihaz kurulumu başlatılamadı — tekrar deneyin veya şifrenizi kullanın",
+        "passkeyArm": "Devam etmek için şifrenizi girin",
+        "passkeyFinish": {
+            "face": "Face ID Kurulumunu Bitirmek İçin Dokunun",
+            "fingerprint": "Parmak İzi Kurulumunu Bitirmek İçin Dokunun",
+            "passkey": "Geçiş Anahtarı Kurulumunu Bitirmek İçin Dokunun"
+        },
         "passkeySetup": {
             "face": "Face ID Kur",
             "fingerprint": "Parmak İzi Kur",

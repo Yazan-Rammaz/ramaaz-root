@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { proxyImage } from "@/lib/api/proxy-image";
 import { readChallenge } from "@/lib/auth/challenge";
 
 /**
@@ -30,33 +30,5 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const { faceCaptureUrl } = await readChallenge();
-
-  // 404, not 403: whether a sign-in in some other browser has a stored face is
-  // not this caller's business, and the screens treat a miss as "no photo yet".
-  if (!faceCaptureUrl) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  let upstream: Response;
-  try {
-    upstream = await fetch(faceCaptureUrl, { cache: "no-store" });
-  } catch (error) {
-    console.error("[face-capture] fetch failed:", error);
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    console.warn("[face-capture] upstream said", upstream.status);
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  return new Response(upstream.body, {
-    status: 200,
-    headers: {
-      "Content-Type": upstream.headers.get("content-type") ?? "image/jpeg",
-      // A face, tied to one sign-in. No shared cache may hold it, and the
-      // browser must not serve it to the next challenge from memory.
-      "Cache-Control": "no-store, private",
-    },
-  });
+  return proxyImage(faceCaptureUrl, "face-capture");
 }

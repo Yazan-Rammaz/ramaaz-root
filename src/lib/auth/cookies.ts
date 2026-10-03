@@ -40,6 +40,25 @@ const REFRESH = "root_rt";
  * is what makes this substitution acceptable rather than merely convenient.
  */
 const USER = "root_user";
+/**
+ * How many digits this account's PIN has — `pass_code_length` from the sign-in
+ * step, kept because the two screens that ask for the PIN AFTER sign-in (the
+ * dashboard lock and /unlock) are never told it again: `401 PASS_CODE_REQUIRED`
+ * on refresh carries no length. Not a secret; httpOnly only because every
+ * other auth cookie is, and the server reads it anyway.
+ */
+const PIN_LENGTH = "root_pin_len";
+/**
+ * "The server said a passkey is bound to this link" — a HINT, not a fact.
+ *
+ * Decides one thing: whether the lock screens lead with the passkey or offer
+ * to set one up. Written from the three places the server tells us —
+ * `device_available` on the PIN step, `details.device_available` on a locked
+ * refresh, and a successful `/v1/me/device`. Wrong in either direction costs
+ * nothing: a stale "bound" fails its options call and the PIN is still there;
+ * a stale "not bound" offers setup and the server answers 409.
+ */
+const DEVICE = "root_device";
 
 const base = {
   httpOnly: true,
@@ -83,11 +102,34 @@ export async function readSessionUser<T>(): Promise<T | null> {
   }
 }
 
+/** Same lifetime as the user snapshot, for the same reason. */
+export async function setPinLength(length: number, maxAge: number) {
+  (await cookies()).set(PIN_LENGTH, String(length), { ...base, maxAge });
+}
+
+/** Undefined when sign-in never said — callers fall back to their default. */
+export async function readPinLength(): Promise<number | undefined> {
+  const n = Number((await cookies()).get(PIN_LENGTH)?.value);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export async function setDeviceHint(bound: boolean, maxAge: number) {
+  const store = await cookies();
+  if (bound) store.set(DEVICE, "1", { ...base, maxAge });
+  else store.delete(DEVICE);
+}
+
+export async function readDeviceHint(): Promise<boolean> {
+  return (await cookies()).get(DEVICE)?.value === "1";
+}
+
 export async function clearAuthCookies() {
   const store = await cookies();
   store.delete(ACCESS);
   store.delete(REFRESH);
   store.delete(USER);
+  store.delete(PIN_LENGTH);
+  store.delete(DEVICE);
 }
 
 export async function getAccessToken() {
@@ -98,4 +140,4 @@ export async function getRefreshToken() {
   return (await cookies()).get(REFRESH)?.value ?? null;
 }
 
-export const AUTH_COOKIE_NAMES = { ACCESS, REFRESH, USER } as const;
+export const AUTH_COOKIE_NAMES = { ACCESS, REFRESH, USER, PIN_LENGTH, DEVICE } as const;

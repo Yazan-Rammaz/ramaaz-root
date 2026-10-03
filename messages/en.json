@@ -84,7 +84,18 @@
     "prompt": "Enter Your Passcode",
     "wrong": "That passcode is not correct",
     "forgot": "Forget Passcode ?",
+    "rateLimited": "Too many tries — wait {seconds} seconds",
+    "rateLimitedUnknown": "Too many tries — wait a minute",
+    "unavailable": "Unlock is unavailable right now",
+    "sessionEnded": "Your session has ended. Open your access link to sign in again.",
     "passkeyFailed": "That didn’t work — tap to try again",
+    "passkeySetupFailed": "Couldn't start device setup — try again, or use your passcode",
+    "passkeyArm": "Enter your passcode to continue",
+    "passkeyFinish": {
+      "face": "Tap To Finish Face ID Setup",
+      "fingerprint": "Tap To Finish Fingerprint Setup",
+      "passkey": "Tap To Finish Passkey Setup"
+    },
     "passkeySetup": {
       "face": "Set Up Face ID",
       "fingerprint": "Set Up Fingerprint",

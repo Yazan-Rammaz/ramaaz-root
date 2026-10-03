@@ -9,7 +9,7 @@ import {
     STAGE_ROUTES,
     type StepResponse,
 } from '@/lib/auth/endpoints';
-import { setAuthCookies, setSessionUser } from '@/lib/auth/cookies';
+import { setAuthCookies, setDeviceHint, setPinLength, setSessionUser } from '@/lib/auth/cookies';
 
 /**
  * The sign-in challenge — the whole client side of the auth state machine.
@@ -107,6 +107,28 @@ export type ChallengeState = {
      * fetches server-side, so the URL stays on this side of the BFF.
      */
     faceCaptureUrl?: string;
+    /**
+     * The pass-code step's own parameters, from the `PASS_CODE_REQUIRED`
+     * response — the page renders from the cookie, so they are kept here or
+     * dropped one redirect after they arrived. `passCodeMode` is `SET` or
+     * `VERIFY`; the length also outlives the challenge (see `completeSignIn`).
+     */
+    passCodeMode?: string;
+    passCodeLength?: number;
+    /** VERIFY only: the link's passkey may answer instead of the PIN. */
+    passCodeDeviceAvailable?: boolean;
+    /** VERIFY only: this device may be added to the link here (Add device). */
+    passCodeDeviceEnrolAvailable?: boolean;
+    /**
+     * Who the PIN screen is asking — `full_name` and `photo_url` from the
+     * `PASS_CODE_REQUIRED` response. Display only.
+     *
+     * The photo is a signed URL with a 15-minute life, longer than the whole
+     * challenge, so keeping it for the step is safe. Never handed to the
+     * browser: `/api/admin-photo` reads it here and fetches server-side.
+     */
+    fullName?: string;
+    photoUrl?: string;
 };
 
 /**
@@ -173,9 +195,34 @@ function cookieLifetime(state: ChallengeState): number {
     return Math.max(seconds, EXPIRY_GRACE_SECONDS);
 }
 
+/**
+ * The browser's per-cookie ceiling, with room for the name and attributes.
+ *
+ * ⚠️ Past it the browser DROPS the cookie silently — and with it the challenge
+ * token, so the next step is refused and the sign-in dies for a picture. Two
+ * signed S3 URLs (`faceCaptureUrl`, `photoUrl`) run well over a kilobyte each,
+ * which makes this reachable rather than theoretical.
+ */
+const COOKIE_BUDGET = 3800;
+
+/**
+ * The state, minus whatever has to go for it to fit — pictures first, because
+ * they are the only fields a screen can do without (it shows the avatar glyph).
+ */
+function fitted(state: ChallengeState): string {
+    let json = JSON.stringify(state);
+    for (const field of ['faceCaptureUrl', 'photoUrl'] as const) {
+        if (encodeURIComponent(json).length <= COOKIE_BUDGET) break;
+        console.warn(`[auth] challenge cookie over budget — dropping ${field}`);
+        state = { ...state, [field]: undefined };
+        json = JSON.stringify(state);
+    }
+    return json;
+}
+
 /** Server Actions and Route Handlers only — a render may not set cookies. */
 export async function writeChallenge(state: ChallengeState) {
-    (await cookies()).set(COOKIE, JSON.stringify(state), {
+    (await cookies()).set(COOKIE, fitted(state), {
         httpOnly: true,
         secure: isProd,
         sameSite: 'lax',
@@ -204,6 +251,45 @@ export class UnknownStageError extends Error {
 }
 
 /**
+ * Store what a COMPLETED response hands over — tokens, the user, the PIN
+ * length — and retire the challenge. Does NOT navigate.
+ *
+ * `applyStage` calls this and then redirects, which is right for every step
+ * but one: the pass-code screens end on a success animation (the row going
+ * green, "Set Passcode Done") and must choose when to leave. A redirect from
+ * inside their Server Action would cut that frame off, so they call this
+ * directly and navigate themselves.
+ */
+export async function completeSignIn(result: StepResponse): Promise<void> {
+    if (!result.tokens) {
+        throw new Error('The server reported COMPLETED without issuing tokens');
+    }
+    const { access_token, refresh_token, expires_in, user } = result.tokens;
+    await setAuthCookies({
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        accessMaxAge: expires_in,
+        // The refresh token never expires; only the cookie ceiling applies.
+        refreshMaxAge: REFRESH_MAX_AGE,
+    });
+    // ⚠️ The ONLY moment the signed-in user is known without asking — kept so
+    // `getSession` has a fallback when `/v1/me` cannot be reached.
+    // The photo URL rides along for /unlock, the one screen with no token to
+    // ask `/v1/me` with — but it is the first thing to go if it would push the
+    // snapshot past what a cookie holds (see COOKIE_BUDGET).
+    const fits = encodeURIComponent(JSON.stringify(user)).length <= COOKIE_BUDGET;
+    await setSessionUser(fits ? user : { ...user, photo_url: undefined }, REFRESH_MAX_AGE);
+    // Read before the challenge is cleared: the length arrived on the
+    // PASS_CODE_REQUIRED response, one step before this one.
+    const { passCodeLength, passCodeDeviceAvailable } = await readChallenge();
+    if (passCodeLength) await setPinLength(passCodeLength, REFRESH_MAX_AGE);
+    // Whether the PIN step offered the link's passkey — the lock screens lead
+    // with it when it did. See DEVICE in cookies.ts.
+    await setDeviceHint(passCodeDeviceAvailable === true, REFRESH_MAX_AGE);
+    await clearChallenge();
+}
+
+/**
  * THE router. Every step handler ends here, and none of them names its own
  * successor.
  *
@@ -229,45 +315,7 @@ export async function applyStage(
 ): Promise<never> {
     // The end of the flow: this is the only response that carries tokens.
     if (result.stage === STAGES.completed) {
-        if (!result.tokens) {
-            throw new Error('The server reported COMPLETED without issuing tokens');
-        }
-        const { access_token, refresh_token, expires_in, user } = result.tokens;
-        await setAuthCookies({
-            accessToken: access_token,
-            refreshToken: refresh_token,
-            accessMaxAge: expires_in,
-            // The refresh token never expires; only the cookie ceiling applies.
-            refreshMaxAge: REFRESH_MAX_AGE,
-        });
-        // ⚠️ The ONLY moment the signed-in user is known.
-        //
-        // `GET /v1/me` does not work, so nothing can ask again later. This response
-        // carries the full user and it is the last chance to keep it — miss it and
-        // every protected page decides nobody is signed in. See the USER cookie.
-        await setSessionUser(user, REFRESH_MAX_AGE);
-        await clearChallenge();
-        /*
-         * ── Not the dashboard — the passcode first ──────────────────────────────
-         *
-         * ⚠️ THIS IS A STAND-IN FOR A STAGE THE BACKEND DOES NOT SEND YET, and it
-         * is the one place in this file that names its own successor. Everything
-         * else here routes on what the server said; this does not, because the
-         * server has nothing to say about a passcode: there is no
-         * `PASSCODE_REQUIRED` stage and no endpoint behind it (see
-         * `features/passcode/store.ts`).
-         *
-         * So the screen is reached by sending every completed sign-in through it,
-         * and /set-passcode decides for itself whether it is needed — it steps
-         * aside for a browser that already has one, which is what makes a returning
-         * sign-in land where it always did.
-         *
-         * When the stage exists, this reverts to `redirect("/dashboard")` and the
-         * screen joins `STAGE_ROUTES` like every other step. That is a two-line
-         * change, deliberately: this detour is the only thing in the routing that
-         * knows the passcode exists.
-         */
-        // redirect("/set-passcode");
+        await completeSignIn(result);
         redirect('/dashboard');
     }
 
@@ -302,6 +350,17 @@ export async function applyStage(
         // Carried forward like challengeId: the backend sends it on the response
         // that first knows about it, and every later step would otherwise drop it.
         faceCaptureUrl: result.face_capture_url ?? current.faceCaptureUrl,
+        // Carried forward only for the LENGTH, which `completeSignIn` needs
+        // after the step that sent it; the mode and device flag belong to the
+        // one response that names them.
+        passCodeMode: result.pass_code_mode,
+        passCodeLength: result.pass_code_length ?? current.passCodeLength,
+        passCodeDeviceAvailable: result.device_available,
+        passCodeDeviceEnrolAvailable: result.device_enrol_available,
+        // NOT carried forward: they belong to the PIN step's own response, and
+        // a carried photo URL would only be an older, closer-to-dead signature.
+        fullName: result.full_name,
+        photoUrl: result.photo_url,
     });
 
     redirect(next);

@@ -103,6 +103,11 @@ export type SignInDiag = {
   correlationId?: string;
   /** The backend's own wording, which is often more specific than ours. */
   backendMessage?: string;
+  /**
+   * On `422 VALIDATION_FAILED`: which field, and why — `{ pass_code: "…" }`.
+   * The message alone ("The request contains invalid fields.") names neither.
+   */
+  fields?: Record<string, string>;
 };
 
 export function signInDiag(error: unknown): SignInDiag {
@@ -114,7 +119,16 @@ export function signInDiag(error: unknown): SignInDiag {
     code: errorCode(error),
     correlationId: correlationId(error),
     backendMessage: error.message,
+    fields: validationFields(error),
   };
+}
+
+/** `error.fields` from a 422, when the backend named any. */
+function validationFields(error: unknown): Record<string, string> | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  const parsed = apiErrorSchema.safeParse(error.body);
+  const fields = parsed.success ? parsed.data.error.fields : undefined;
+  return fields && Object.keys(fields).length > 0 ? fields : undefined;
 }
 
 /** What to put on the screen. `fallback` covers non-API failures. */
@@ -141,6 +155,13 @@ export function signInError(error: unknown, fallback: string): string {
       // Here so it lands as its own sentence rather than falling through to a
       // generic 401 path that would sign the administrator out.
       return "This action needs an extra security check that is not available yet.";
+    case ERROR_CODES.validationFailed: {
+      // The generic sentence names nothing; the per-field reasons do — e.g. a
+      // PIN the backend refuses as too simple. Show them when there are any.
+      const fields = validationFields(error);
+      if (fields) return Object.values(fields).join(" · ");
+      return error.message || fallback;
+    }
     case ERROR_CODES.preconditionFailed:
       // The backend's own wording is the specific one here — it distinguishes
       // "you skipped a step" from "this session can never do that".

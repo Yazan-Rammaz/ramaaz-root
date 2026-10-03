@@ -1,4 +1,12 @@
-import { AUTH_PATHS, REFRESH_MAX_AGE, refreshResponseSchema, type AuthTokens } from "./endpoints";
+import {
+    apiErrorSchema,
+    AUTH_PATHS,
+    ERROR_CODES,
+    REFRESH_MAX_AGE,
+    refreshResponseSchema,
+    type AuthTokens,
+    type RefreshProof,
+} from "./endpoints";
 
 /**
  * Single-flight refresh.
@@ -56,14 +64,34 @@ import { AUTH_PATHS, REFRESH_MAX_AGE, refreshResponseSchema, type AuthTokens } f
 export type RefreshOutcome =
     /** A new pair. Set both cookies. */
     | { status: 'refreshed'; tokens: AuthTokens }
-    /** The session is over — expired, spent, or reuse detected. Clear cookies. */
-    | { status: 'dead' }
+    /**
+     * The session is over — expired, spent, revoked, reuse detected, or a
+     * transport failure that may have rotated the token unseen. Clear cookies.
+     * `message` is the backend's own sentence when it gave one (e.g. "Sign in
+     * again to set your PIN."), for the screen that explains the sign-out.
+     */
+    | { status: 'dead'; message?: string }
     /**
      * Rate limited. KEEP the cookies and do nothing else — no retry, no timer.
      * The next request the administrator makes will try again, which is the
      * person deciding rather than a loop deciding for them.
      */
-    | { status: 'deferred'; retryAfterSeconds?: number };
+    | { status: 'deferred'; retryAfterSeconds?: number }
+    /**
+     * `401 PASS_CODE_REQUIRED` — the session is ALIVE and wants the PIN (or
+     * the device, when `deviceAvailable`). KEEP the cookies: the token is
+     * unspent and the retry carries the proof with the same one. Treating this
+     * as `dead` is what would sign every administrator out the moment their
+     * access token expired with `ROOT_REQUIRE_PASS_CODE` on.
+     */
+    | { status: 'locked'; deviceAvailable: boolean }
+    /**
+     * `401 INVALID_CREDENTIALS` (wrong PIN, or a device that did not verify) or
+     * `VALIDATION_FAILED` on a proof — only ever the answer to a refresh that
+     * CARRIED one. Unspent token, keep the cookies, let them try again. Whether
+     * another try can succeed (the PIN lockout) is the backend's call, not ours.
+     */
+    | { status: 'rejected' };
 
 /** How long a completed exchange stays reusable. Far inside the ~900s access token life. */
 const RECENT_TTL_MS = 60_000;
@@ -97,6 +125,7 @@ async function exchange(
     base: string,
     refreshToken: string,
     caller: Record<string, string>,
+    proof: RefreshProof | undefined,
 ): Promise<RefreshOutcome> {
     try {
         // The token goes in the BODY, not an Authorization header.
@@ -110,17 +139,12 @@ async function exchange(
                 // these every administrator shares one. See lib/api/edge.ts.
                 ...caller,
             },
-            body: JSON.stringify({ refresh_token: refreshToken }),
+            body: JSON.stringify({ refresh_token: refreshToken, ...proof }),
         });
 
         // Rate limited — say nothing about the session. See RefreshOutcome.
-        //
-        // ⚠️ OPEN QUESTION with the backend: is the token SPENT when a refresh
-        // is rejected with 429? If it is, this token is already dead and we are
-        // keeping a cookie that can never work; if it is not, clearing it would
-        // have thrown out a live session. Keeping it is the recoverable
-        // mistake of the two — a dead token still answers 401 on the next
-        // attempt, which lands in `dead` below and clears properly.
+        // Confirmed (change notes §8): the limiter refuses before the code that
+        // rotates the token, so a 429 did NOT spend it and keeping it is right.
         if (res.status === 429) {
             const header = Number(res.headers.get('Retry-After'));
             return {
@@ -129,10 +153,36 @@ async function exchange(
             };
         }
 
-        if (!res.ok) return { status: 'dead' };
+        if (!res.ok) {
+            // ⚠️ Read the CODE before deciding the session is over. Two 401s
+            // here leave the token unspent, and clearing the cookies on either
+            // would sign out somebody whose session is perfectly alive.
+            const error = apiErrorSchema.safeParse(await res.json().catch(() => null));
+            const code = error.success ? error.data.error.code : undefined;
 
-        // Tokens come back at the TOP level here, unlike /registration/pass-code
-        // which nests them under `tokens`. Parsed rather than cast: a silent
+            if (code === ERROR_CODES.passCodeRequired) {
+                return {
+                    status: 'locked',
+                    deviceAvailable: error.success && error.data.error.details?.device_available === true,
+                };
+            }
+            // A refused PROOF — wrong PIN, unverified device, or a malformed
+            // one. Only possible when one was sent; without a proof these codes
+            // are not expected, and falling through to `dead` is the safe read.
+            if (
+                proof &&
+                (code === ERROR_CODES.invalidCredentials || code === ERROR_CODES.validationFailed)
+            ) {
+                return { status: 'rejected' };
+            }
+            return {
+                status: 'dead',
+                message: error.success ? error.data.error.message : undefined,
+            };
+        }
+
+        // Tokens come back at the TOP level here, unlike the sign-in steps
+        // which nest them under `tokens`. Parsed rather than cast: a silent
         // shape change would otherwise write `undefined` into the auth cookies
         // and log everyone out with no clue why.
         const parsed = refreshResponseSchema.safeParse(await res.json());
@@ -148,11 +198,10 @@ async function exchange(
             },
         };
     } catch {
-        // Transport failure — deliberately still 'dead', which is what it has
-        // always been. It is arguably as transient as a 429, but nothing has
-        // been observed to make that call, and turning a real network partition
-        // into "keep retrying forever" is its own failure mode. Left as a known
-        // question rather than changed on a guess.
+        // Transport failure — `dead`, and the backend says so explicitly
+        // (change notes §8): the request may have reached them and rotated the
+        // token without us seeing the answer, so retrying with the same one
+        // risks TOKEN_REUSED, which revokes every session on the account.
         return { status: 'dead' };
     }
 }
@@ -161,8 +210,8 @@ async function exchange(
  * Exchange `refreshToken` for a fresh pair, at most once per token.
  *
  * Only `dead` licenses the caller to clear the auth cookies — a spent token
- * retried forever can never recover. `deferred` must leave them exactly as they
- * are; see RefreshOutcome for why that distinction exists.
+ * retried forever can never recover. `deferred`, `locked` and `rejected` must
+ * leave them exactly as they are; see RefreshOutcome for why.
  */
 export async function refreshTokens(
     base: string,
@@ -177,14 +226,32 @@ export async function refreshTokens(
      * whatever address they arrived from.
      */
     caller: Record<string, string> = {},
+    /**
+     * The PIN (or device) the person just gave — only from the unlock action.
+     * Middleware never has one, so its refreshes answer `locked` while the
+     * setting is on.
+     */
+    proof?: RefreshProof,
 ): Promise<RefreshOutcome> {
     const alreadyDone = readRecent(refreshToken);
     if (alreadyDone) return { status: 'refreshed', tokens: alreadyDone };
 
     const pending = inflight.get(refreshToken);
-    if (pending) return pending;
+    if (pending) {
+        const shared = await pending;
+        // Without a proof, whatever that exchange decided is the answer for
+        // this request too. A `rejected` there was somebody else's wrong PIN;
+        // for a request that sent none, the honest reading is still "locked".
+        if (!proof) return shared.status === 'rejected' ? { status: 'locked', deviceAvailable: false } : shared;
+        // WITH a proof, only a success can be shared: a PIN-less exchange that
+        // answered `locked` says nothing about this PIN. It has finished, so
+        // starting our own now is sequential, not concurrent.
+        if (shared.status === 'refreshed') return shared;
+        const nowDone = readRecent(refreshToken);
+        if (nowDone) return { status: 'refreshed', tokens: nowDone };
+    }
 
-    const run = exchange(base, refreshToken, caller);
+    const run = exchange(base, refreshToken, caller, proof);
     inflight.set(refreshToken, run);
 
     try {
@@ -192,9 +259,31 @@ export async function refreshTokens(
         // Only successes are remembered. A failure must stay a failure, or a
         // dead session would look alive for a minute — and a `deferred` one
         // must be retried on the next request rather than answered from cache.
+        // A wrong PIN in particular must never be answered from cache.
         if (outcome.status === 'refreshed') writeRecent(refreshToken, outcome.tokens);
         return outcome;
     } finally {
-        inflight.delete(refreshToken);
+        // Only our own entry: a proof-carrying run can start after a shared
+        // one finished, and must not delete a newer run's promise.
+        if (inflight.get(refreshToken) === run) inflight.delete(refreshToken);
     }
+}
+
+/**
+ * The refresh token to use for a call that must not overlap a rotation — the
+ * device options call (`AUTH_PATHS.refreshDeviceOptions`), which spends nothing
+ * but runs every check a refresh does.
+ *
+ * If an exchange of `refreshToken` is in flight in this isolate, wait for it:
+ * asking with the old token while it rotates is exactly the overlap the backend
+ * warns about. A success hands back its replacement (which the caller must
+ * also store); anything else, the token as it was.
+ */
+export async function settledRefreshToken(
+    refreshToken: string,
+): Promise<{ token: string; rotated?: AuthTokens }> {
+    const pending = inflight.get(refreshToken);
+    if (pending) await pending;
+    const rotated = readRecent(refreshToken);
+    return rotated ? { token: rotated.refreshToken, rotated } : { token: refreshToken };
 }

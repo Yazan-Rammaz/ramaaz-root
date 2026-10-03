@@ -6,6 +6,7 @@ import { api } from "@/lib/api/server";
 import {
   applyStage,
   clearChallenge,
+  completeSignIn,
   readChallenge,
   readLastLink,
   setLastLink,
@@ -20,7 +21,9 @@ import {
   stepResponseSchema,
   type DeviceRequest,
   type EvidenceRequest,
+  type PassCodeRequest,
   type PrivateCodeRequest,
+  STAGES,
 } from "@/lib/auth/endpoints";
 import {
   isChallengeDead,
@@ -433,6 +436,184 @@ export async function logoutAction() {
   await clearChallenge();
   // Through the splash → it re-checks (now unauthenticated) and lands on /login.
   redirect("/");
+}
+
+/**
+ * The PIN — the last step of every sign-in while `ROOT_REQUIRE_PASS_CODE` is on.
+ *
+ * One action for both modes: in SET the screen has already had it typed twice
+ * and agreed, so what arrives here is the chosen PIN; in VERIFY it is the
+ * proof. The backend knows which it asked for — this only forwards.
+ *
+ * ── Why COMPLETED does not redirect here ────────────────────────────────────
+ * Every other step hands its answer to `applyStage`, which redirects. This one
+ * ends the sign-in on a success animation the screen owns (the row turning
+ * green), and a redirect thrown from here would cut it off mid-frame. So on
+ * COMPLETED it stores the session and returns `ok`, and the screen leaves when
+ * its animation has played. Any OTHER stage — a check added after this one —
+ * still goes through `applyStage`, so the server stays in charge of the order.
+ */
+export async function submitPassCodeAction(code: string): Promise<ActionState> {
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
+
+  // A shape guard for the length the server asked for, not a verdict: the
+  // boxes cannot emit anything else, so this only stops a tampered call from
+  // spending one of the backend's attempts.
+  const length = challenge.passCodeLength;
+  if (!/^\d+$/.test(code) || (length !== undefined && code.length !== length)) {
+    return { ok: false, error: "Enter every digit" };
+  }
+
+  let result;
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.passCode, {
+      challenge_token: challenge.challengeToken,
+      pass_code: code,
+    } satisfies PassCodeRequest);
+    result = stepResponseSchema.parse(raw);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "That passcode is not correct"),
+      diag: signInDiag(error),
+      restart: isChallengeDead(error),
+    };
+  }
+
+  if (result.stage === STAGES.completed) {
+    await completeSignIn(result);
+    return { ok: true };
+  }
+  // Outside the try — applyStage() redirects by throwing.
+  return applyStage(result);
+}
+
+/**
+ * The passkey answering a VERIFY pass-code step instead of the PIN — offered
+ * when the step said `device_available: true` (change notes §3).
+ *
+ * Same two endpoints as the dormant DEVICE_REQUIRED stage, and they only ever
+ * AUTHENTICATE here, never register: the options come from
+ * `deviceOptionsAction` and the screen refuses anything but
+ * `mode: "authenticate"`. A failed device answer costs the challenge an attempt
+ * but never the account's PIN lockout (backend's rule, not ours).
+ *
+ * Returns rather than redirects on COMPLETED, for the same reason
+ * `submitPassCodeAction` does.
+ */
+export async function submitPassCodeDeviceAction(
+  credential: Record<string, unknown>,
+): Promise<ActionState> {
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
+
+  let result;
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.device, {
+      challenge_token: challenge.challengeToken,
+      credential,
+    } satisfies DeviceRequest);
+    result = stepResponseSchema.parse(raw);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "That device could not be verified"),
+      diag: signInDiag(error),
+      restart: isChallengeDead(error),
+    };
+  }
+
+  if (result.stage === STAGES.completed) {
+    await completeSignIn(result);
+    return { ok: true };
+  }
+  return applyStage(result);
+}
+
+/**
+ * ADD DEVICE at the VERIFY step, call 1 — the PIN opens a registration
+ * (`/v1/auth/pass-code/device/options`, backend bb7e4fb). Offered only when the
+ * step said `device_enrol_available`.
+ *
+ * NOT `/auth/pass-code`: that would finish the sign-in with the PIN alone. This
+ * checks the PIN (a wrong one is `401 INVALID_CREDENTIALS` and starts nothing)
+ * and leaves the challenge at PASS_CODE_REQUIRED until call 2 answers.
+ */
+export async function passCodeDeviceOptionsAction(
+  code: string,
+): Promise<ActionState & { publicKey?: Record<string, unknown> }> {
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
+
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.passCodeDeviceOptions, {
+      challenge_token: challenge.challengeToken,
+      pass_code: code,
+    });
+    const result = deviceOptionsResponseSchema.parse(raw);
+    // Only ever a registration here — anything else is not what was asked.
+    if (result.mode !== "register") {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return { ok: true, publicKey: result.publicKey };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "That passcode is not correct"),
+      diag: signInDiag(error),
+      restart: isChallengeDead(error),
+    };
+  }
+}
+
+/**
+ * ADD DEVICE at the VERIFY step, call 2 — the `create()` answer and its label
+ * (`/v1/auth/pass-code/device`). Binds the passkey to the link and completes
+ * the sign-in. Returns rather than redirects on COMPLETED, like
+ * `submitPassCodeAction`, so the screen plays its success frame.
+ */
+export async function submitPassCodeNewDeviceAction(
+  credential: Record<string, unknown>,
+  label: string,
+): Promise<ActionState> {
+  const challenge = await readChallenge();
+  if (!challenge.challengeToken) redirect("/no-access");
+
+  let result;
+  try {
+    const raw = await api.post<unknown>(AUTH_PATHS.passCodeDevice, {
+      challenge_token: challenge.challengeToken,
+      credential,
+      label,
+    });
+    result = stepResponseSchema.parse(raw);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { ok: false, error: "Unexpected response from the sign-in service" };
+    }
+    return {
+      ok: false,
+      error: signInError(error, "That device could not be added"),
+      diag: signInDiag(error),
+      restart: isChallengeDead(error),
+    };
+  }
+
+  if (result.stage === STAGES.completed) {
+    await completeSignIn(result);
+    return { ok: true };
+  }
+  return applyStage(result);
 }
 
 /* ─────────────────────────── the passkey ─────────────────────────── */

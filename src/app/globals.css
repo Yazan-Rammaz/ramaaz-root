@@ -762,8 +762,10 @@ body {
    rendered into the page. It withholds a screen from a passer-by; it does not
    withhold data from an attacker. */
 .lock-glass {
-    --lock-tint: 0.62;
-    background: rgb(252 252 252 / var(--lock-tint));
+    /* Glass 50: the dashboard's own background at half strength, so the pane
+       reads as the page frosted over rather than a white sheet laid on it. */
+    --lock-tint: 50%;
+    background: color-mix(in srgb, var(--background) var(--lock-tint), transparent);
     /* 50 XD px, through the same 0.0625rem-per-pixel scale as everything else —
        so the blur grows and shrinks with the canvas instead of being 50 real
        pixels on a phone and 50 on a laptop. */
@@ -773,7 +775,8 @@ body {
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .lock-glass {
-        --lock-tint: 0.94;
+        /* No blur to hide the page behind — the tint has to do it alone. */
+        --lock-tint: 94%;
     }
 }
 

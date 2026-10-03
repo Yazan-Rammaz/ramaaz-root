@@ -1,9 +1,10 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Icon } from "@/components/ui/Icon";
 import { SideBox } from "./SideBox";
 import { logoutAction } from "@/features/auth/actions";
+import { Icon } from "@/components/ui/Icon";
+import { sweepLegacyStorage } from "@/features/passcode/store";
 
 /**
  * Left rail (74 XD px wide, full height). Avatar + page slots at the top, the
@@ -15,10 +16,10 @@ export function Sidebar() {
 
   return (
     <aside className="hairline-e flex h-full w-74 shrink-0 flex-col items-center py-16">
-      {/* User avatar (drop the real image in place of the glyph later).
-          The plate — background + radius — belongs to this wrapper, not to
-          avatar.svg, so the two can never disagree about colour or corner
-          rounding at different sizes. */}
+      {/* User avatar — ALWAYS the glyph, never the administrator's face. The
+          portrait belongs to the lock screen, where it says who is being
+          asked; on the rail it would sit on screen all day for anyone passing
+          by to see. */}
       <div className="bg-muted/40 rad-12 h-50 w-50 shrink-0 overflow-hidden">
         <Icon
           name="side/avatar"
@@ -43,11 +44,18 @@ export function Sidebar() {
         <SideBox icon="side/settings" label={t("side.settings")} />
         <SideBox icon="side/systems" label={t("side.systems")} indicator />
         {/* Sign out. The action revokes server-side, clears every auth cookie
-            and returns through "/", which re-checks and lands on /login. */}
+            and returns through "/", which re-checks and lands on /login.
+
+            Older builds kept the lock's portrait in this browser's storage
+            (see passcode/store.ts), which a Server Action cannot reach — so
+            the sweep happens here, first. */}
         <SideBox
           icon="side/logout"
           label={t("side.logout")}
-          onClick={() => void logoutAction()}
+          onClick={() => {
+            sweepLegacyStorage();
+            void logoutAction();
+          }}
         />
       </div>
     </aside>

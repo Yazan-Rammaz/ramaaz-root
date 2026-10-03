@@ -87,8 +87,11 @@ export class BackendNotConfiguredError extends ApiError {
  * ⚠️ The User-Agent forwarded here is the browser's, replacing the fixed string
  * this client used to send. That is not cosmetic: resume matching compares it
  * exactly, so a constant one made every caller look like every other.
+ *
+ * Exported for the one backend call that cannot go through `api`: the PIN
+ * unlock, which must share `lib/auth/refresh.ts`'s single-flight exchange.
  */
-async function callerHeaders(): Promise<Record<string, string>> {
+export async function callerHeaders(): Promise<Record<string, string>> {
   try {
     const incoming = await headers();
     return edgeHeaders(

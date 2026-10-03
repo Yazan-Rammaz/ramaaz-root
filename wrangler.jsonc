@@ -27,7 +27,17 @@
     //
     // Distance to this region is the dominant cost of the whole check: the
     // video upload is a real megabytes-over-the-wire transfer, not a signal.
-    "KYC_LIVENESS_REGION": "us-east-1"
+    "KYC_LIVENESS_REGION": "us-east-1",
+    // The WebAuthn RP ID the lock screens' passkey is offered under. A runtime
+    // var (read with cfEnv), so changing it needs no rebuild.
+    //
+    // ⚠️ It does NOT choose the RP ID: the backend does, inside the options it
+    // issues. This decides only whether to OFFER the passkey on this host —
+    // it is hidden unless the page's host is this value or a subdomain of it.
+    // Keep it equal to the backend's RP ID, or the ceremony fails with a
+    // SecurityError.
+    // Local tunnels override it in .dev.vars / .env.local, never here.
+    "WEBAUTHN_RP_ID": "canroot.yazan-adnof.workers.dev"
   },
   // Service binding to the KYC Worker.
   //

@@ -180,6 +180,20 @@ export const DESIGN_CATALOG: DesignEntry[] = [
         canvas: 'mobile',
         note: 'The one refusal screen — every cause lands here',
     },
+    {
+        slug: 'set-passcode',
+        title: 'Set passcode',
+        group: 'Sign-in',
+        canvas: 'mobile',
+        note: 'Last step — type it, type it again. Mismatch returns to the first entry',
+    },
+    {
+        slug: 'passcode-lock',
+        title: 'Passcode lock',
+        group: 'Sign-in',
+        canvas: 'laptop',
+        note: 'Over the dashboard on every refresh. Any 6 digits open it here',
+    },
     { slug: 'forbidden', title: 'Forbidden', group: 'Sign-in', canvas: 'laptop' },
 
     // ── Identity (KYC) ──────────────────────────────────────────────────────

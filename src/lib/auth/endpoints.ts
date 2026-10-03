@@ -10,8 +10,12 @@ import { z } from "zod";
  * Sign-in is ONE state machine with two paths through it. The server decides
  * which, and says so in `stage` on every response:
  *
- *   FIRST LOGIN   link → private-code → face → id-document → COMPLETED
- *   LATER LOGINS  link → face → COMPLETED
+ *   FIRST LOGIN   link → private-code → face → id-document → pass-code (SET) → COMPLETED
+ *   LATER LOGINS  link → face → pass-code (VERIFY) → COMPLETED
+ *
+ * The pass-code step exists only with `ROOT_REQUIRE_PASS_CODE` on — which it
+ * is, on staging. Off, both paths end one step earlier and nothing here
+ * notices, which is rule 2 below doing its job.
  *
  * ⚠️ DEVICE VERIFICATION IS OFF (`ROOT_REQUIRE_DEVICE=false` — see
  * `backend docs/frontend-security-changes.md` §0), which is why neither path
@@ -74,6 +78,9 @@ import { z } from "zod";
  *
  * ── Status against staging (confirmed by the backend 2026-09-22) ────────────
  *  ✅ live      /v1/auth/link · /private-code · /face · /identity-document
+ *  🟡 on        /v1/auth/pass-code, and the PIN on /v1/auth/refresh —
+ *               `ROOT_REQUIRE_PASS_CODE` is on (owner, 2026-09-30). Built from
+ *               change notes §3/§8; not yet walked end to end against staging.
  *  ✅ real      the face and document checks are Rekognition-backed, not stubs.
  *               Staging thresholds are ~1% for testing, so almost any live face
  *               passes there; production will be strict. Exercise the FAILURE
@@ -173,6 +180,39 @@ export const AUTH_PATHS = {
   identityDocument: "/v1/auth/identity-document",
 
   /**
+   * ✅ The PIN, answering `PASS_CODE_REQUIRED` — the last step of every
+   * sign-in while `ROOT_REQUIRE_PASS_CODE` is on (change notes §3). Takes
+   * `{ challenge_token, pass_code }` and answers the next stage, normally
+   * COMPLETED with `tokens`.
+   *
+   * The step says which of two things it wants in `pass_code_mode`:
+   *   SET      first login, right after the ID document — choose one. The
+   *            "type it twice" confirmation happens in the browser; this is
+   *            posted ONCE, with the agreed value.
+   *   VERIFY   every later login — prove it.
+   * Render from the mode, never from a guess about which login this is.
+   *
+   * What a wrong PIN costs, and when the account locks, is the backend's
+   * business: read the refusal and show it, count nothing here.
+   */
+  passCode: "/v1/auth/pass-code",
+  /**
+   * ADD DEVICE at the VERIFY step — offered only when the step says
+   * `device_enrol_available: true` (backend bb7e4fb). Its own two calls, and
+   * NOT preceded by `/auth/pass-code`, which would finish the sign-in:
+   *
+   *   pass-code/device/options  { challenge_token, pass_code } → { mode: "register", publicKey }
+   *   navigator.credentials.create({ publicKey })
+   *   pass-code/device          { challenge_token, credential, label } → COMPLETED + tokens
+   *
+   * The PIN goes in the options call; a wrong one is `401 INVALID_CREDENTIALS`
+   * and no registration starts. `/auth/device*` at this step only
+   * AUTHENTICATES ("use a device already on this link", `device_available`).
+   */
+  passCodeDeviceOptions: "/v1/auth/pass-code/device/options",
+  passCodeDevice: "/v1/auth/pass-code/device",
+
+  /**
    * 🚫 DORMANT — device verification is off, so no challenge ever sits at the
    * DEVICE stage and this answers 412 PRECONDITION_FAILED. Kept, with the whole
    * ceremony, because the backend setting flips in one line; a stage-driven
@@ -233,8 +273,42 @@ export const AUTH_PATHS = {
    * returns TOKEN_REUSED and the backend KILLS THE WHOLE SESSION — it reads a
    * replay as theft. Never retry a failed refresh with the same token, and
    * never let two requests refresh concurrently.
+   *
+   * ⚠️ WITH `ROOT_REQUIRE_PASS_CODE` ON (it is, on staging): while the console
+   * is in use a refresh is exactly as before, token alone, no prompt. The
+   * CLIENT decides when to lock (page load, idle) and the unlock sends the PIN
+   * — `{ refresh_token, pass_code }` — or a device assertion, never both. The
+   * server enforces one thing itself: a session not refreshed within
+   * `ROOT_REFRESH_IDLE_TIMEOUT` (30 min default) is refused with
+   * `401 PASS_CODE_REQUIRED` until a proof comes with it (change notes §8,
+   * revised 2026-09-30). Our idle lock (5 min) is well inside that window, so
+   * the server's refusal — middleware → /unlock — is the exception path. Neither that refusal nor a wrong PIN
+   * (`401 INVALID_CREDENTIALS`) spends the token, so both are retried with
+   * the SAME one; nothing rotates until the PIN checks out. A 429 does not
+   * spend it either. A timeout or 5xx might have, so those are never retried.
+   * See `lib/auth/refresh.ts`, which turns each of these into an outcome.
    */
   refresh: "/v1/auth/refresh",
+  /**
+   * The passkey alternative to the PIN on refresh (change notes §8): asks for
+   * an `authenticate` ceremony for the passkey bound to this link. Takes
+   * `{ refresh_token }`, spends nothing — but runs every check a refresh does,
+   * so it belongs to the single flight: never ask with a token another request
+   * may be rotating (`settledRefreshToken` in `lib/auth/refresh.ts`).
+   */
+  refreshDeviceOptions: "/v1/auth/refresh/device/options",
+  /**
+   * ADD DEVICE on the lock screen — bind a new passkey to this link, behind the
+   * PIN (backend bb7e4fb). `{ refresh_token, pass_code }` → `{ mode:
+   * "register", publicKey }`; the `create()` answer then goes back as a
+   * refresh: `{ refresh_token, new_device, label }` → tokens. A wrong PIN is
+   * `401 INVALID_CREDENTIALS` (counts toward the lockout) and starts nothing.
+   * A link may hold several devices; one already registered is excluded by the
+   * options, so the browser itself refuses it — there is no 409.
+   *
+   * ⚰️ `/v1/me/device*` is GONE (removed in bb7e4fb).
+   */
+  refreshNewDeviceOptions: "/v1/auth/refresh/new-device/options",
   /** ✅ Best-effort server-side revoke. Bearer access token. */
   logout: "/v1/auth/logout",
 } as const;
@@ -278,6 +352,13 @@ export const apiErrorSchema = z.object({
       .object({
         retry_after_seconds: z.number().int().optional(),
         stage: z.string().optional(),
+        /**
+         * On `401 PASS_CODE_REQUIRED` from /auth/refresh: the passkey bound to
+         * this link may answer instead of the PIN (change notes §8).
+         */
+        device_available: z.boolean().optional(),
+        /** Same refusal: a new passkey may be bound here (Add device). */
+        device_enrol_available: z.boolean().optional(),
       })
       .loose()
       .optional(),
@@ -321,16 +402,26 @@ export const ERROR_CODES = {
    */
   challengeInvalid: "CHALLENGE_INVALID",
   /**
-   * ⚰️ RETIRED on this flow. A wrong private code — and a locked account —
-   * answer UNAUTHENTICATED now. This code was what a locked account used to
-   * return, which made the lock detectable; the backend calls that a bug and
-   * has fixed it.
+   * Two meanings, depending on the call:
    *
-   * Kept only so an older deployment answering it still maps to a sentence
-   * rather than falling through to a raw message. Do not branch on it in new
-   * code.
+   *   /auth/private-code    ⚰️ RETIRED. A wrong private code — and a locked
+   *                         account — answer UNAUTHENTICATED now. This code was
+   *                         what a locked account used to return, which made
+   *                         the lock detectable; the backend fixed it. Do not
+   *                         branch on it there.
+   *   /auth/refresh         ✅ LIVE. A wrong PIN, or a device that did not
+   *                         verify. The refresh token is NOT spent — let them
+   *                         retry with the same one. Also what every attempt
+   *                         answers while the account's PIN lockout lasts; the
+   *                         backend owns that, so it is never told apart here.
    */
   invalidCredentials: "INVALID_CREDENTIALS",
+  /**
+   * `401` from /auth/refresh with `ROOT_REQUIRE_PASS_CODE` on: the session is
+   * alive and wants the PIN (or the device, when `details.device_available`).
+   * NOT a sign-out — the token is unspent and is retried with the proof.
+   */
+  passCodeRequired: "PASS_CODE_REQUIRED",
   /**
    * Per-caller rate limit, keyed on the caller's network ADDRESS:
    *   POST /v1/auth/link                       10 / minute
@@ -418,6 +509,11 @@ export const STAGES = {
    */
   idDocument: "ID_DOCUMENT_REQUIRED",
   /**
+   * The PIN — set it (first login) or prove it (every later one), per
+   * `pass_code_mode` on the response. Only while `ROOT_REQUIRE_PASS_CODE` is on.
+   */
+  passCode: "PASS_CODE_REQUIRED",
+  /**
    * WebAuthn ceremony: enrol this device, or prove it.
    *
    * 🚫 Never sent while device verification is off. Kept so the day it comes
@@ -459,6 +555,12 @@ export const STAGE_ROUTES: Record<string, string> = {
    */
   [STAGES.face]: "/login/identity",
   [STAGES.idDocument]: "/login/identity",
+
+  /**
+   * Its own route: nothing from the identity flow is needed here, and the
+   * face frame that route keeps alive has already done its job.
+   */
+  [STAGES.passCode]: "/login/pass-code",
 
   /**
    * 🚫 Unreachable while device verification is off — no response names this
@@ -579,11 +681,25 @@ export const wireUserSchema = z.object({
   email: z.string().optional(),
 
   /**
-   * ⚠️ Stays `false` FOREVER on a root account — there is no PIN in this
-   * protocol; the passkey replaced it. A UI that reads this as "setup
-   * incomplete" shows a permanent setup prompt to somebody fully enrolled.
+   * Whether the account has chosen its PIN. With `ROOT_REQUIRE_PASS_CODE` on,
+   * the sign-in sequence sets it (`PASS_CODE_REQUIRED` in `SET` mode), so a
+   * completed session normally has one. Not read anywhere: the backend asks
+   * for the PIN itself (`401 PASS_CODE_REQUIRED` on refresh), so nothing here
+   * needs to know in advance.
    */
   has_pass_code: z.boolean().optional(),
+
+  /**
+   * The admin's stored photo — on `tokens.user` (COMPLETED), `/v1/auth/refresh`
+   * and `/v1/me` only (backend docs/frontend-admin-name-and-photo.md). The
+   * original, unblurred; the glass is ours.
+   *
+   * ⚠️ A SIGNED URL that dies after `S3_PRESIGN_TTL` (15 min by default), and
+   * every response carries a new one — so a copy kept anywhere goes stale. It is
+   * OMITTED, never empty, when there is no photo. Fetched server-side only, by
+   * `/api/admin-photo`; the browser never sees it.
+   */
+  photo_url: z.string().optional(),
 
   private_code: z.string().optional(),
   phone: z.string().optional(),
@@ -691,9 +807,46 @@ export const stepResponseSchema = z.object({
    * would refuse it anyway. `/api/face-capture` fetches it server-side.
    */
   face_capture_url: z.string().optional(),
+  /**
+   * Only on `PASS_CODE_REQUIRED`: `SET` (choose one) or `VERIFY` (prove it).
+   * A plain string so an unknown mode parses and is refused in one place —
+   * the pass-code page — rather than failing the whole response here.
+   */
+  pass_code_mode: z.string().optional(),
+  /** Only on `PASS_CODE_REQUIRED`: how many digits the PIN has. */
+  pass_code_length: z.number().int().positive().optional(),
+  /**
+   * Only on `PASS_CODE_REQUIRED` in VERIFY mode: the passkey bound to this
+   * link may answer instead of the PIN. Stored, not yet offered (phase 5).
+   */
+  device_available: z.boolean().optional(),
+  /**
+   * Only on `PASS_CODE_REQUIRED` in VERIFY mode: this device may be ADDED to
+   * the link here — the "Add device" button shows only when this is true.
+   */
+  device_enrol_available: z.boolean().optional(),
+  /**
+   * Only on `PASS_CODE_REQUIRED` (SET and VERIFY, from every route that lands
+   * there): who the PIN screen is asking. Each one is omitted when the account
+   * has none. `photo_url` is the same short-lived signed URL as on the user
+   * object — see `wireUserSchema.photo_url`.
+   */
+  full_name: z.string().optional(),
+  full_name_ar: z.string().optional(),
+  photo_url: z.string().optional(),
   tokens: wireTokensSchema.optional(),
 });
 export type StepResponse = z.infer<typeof stepResponseSchema>;
+
+/* ─────────────────── POST /v1/auth/pass-code ─────────────────── */
+
+export const PASS_CODE_MODES = { set: "SET", verify: "VERIFY" } as const;
+export type PassCodeMode = (typeof PASS_CODE_MODES)[keyof typeof PASS_CODE_MODES];
+
+export type PassCodeRequest = {
+  challenge_token: string;
+  pass_code: string;
+};
 
 /* ────────────────────── GET /v1/me ────────────────────── */
 
@@ -742,6 +895,20 @@ export type MeResponse = z.infer<typeof meResponseSchema>;
  */
 export const refreshResponseSchema = wireTokensSchema;
 export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
+
+/**
+ * What a PIN-gated refresh carries besides the token — exactly one of the two,
+ * never both (`400 VALIDATION_FAILED`). Sent only after the person typed or
+ * performed it; never cached, in memory or storage (change notes §8).
+ *
+ * `device` is the WebAuthn assertion from `/v1/auth/refresh/device/options` →
+ * `navigator.credentials.get()`. Typed here, not yet sent by anything.
+ */
+export type RefreshProof =
+  | { pass_code: string }
+  | { device: unknown }
+  /** Add device on the lock screen — the `create()` answer and its label. */
+  | { new_device: unknown; label: string };
 
 /* ──────────────────────── lifetimes ──────────────────────── */
 

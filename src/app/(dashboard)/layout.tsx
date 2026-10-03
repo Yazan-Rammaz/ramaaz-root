@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
-import { requireSession } from "@/lib/auth/session";
-import { AddActionProvider } from "@/features/shell/add-action";
-import { Sidebar } from "@/features/shell/components/Sidebar";
-import { Navbar } from "@/features/shell/components/Navbar";
+import type { ReactNode } from 'react';
+import { requireSession } from '@/lib/auth/session';
+import { AddActionProvider } from '@/features/shell/add-action';
+import { Sidebar } from '@/features/shell/components/Sidebar';
+import { Navbar } from '@/features/shell/components/Navbar';
+import { PasscodeLock } from '@/features/passcode/components/PasscodeLock';
+import { readDeviceHint, readPinLength } from '@/lib/auth/cookies';
+import { cfEnv } from '@/lib/cf-env';
 
 /**
  * The app shell for the whole protected area: fixed left rail + top navbar, with
@@ -12,33 +15,50 @@ import { Navbar } from "@/features/shell/components/Navbar";
  *
  * `requireSession()` is the authoritative auth gate (backend `/v1/me`).
  *
- * ── The idle lock is temporarily absent ─────────────────────────────────────
- * <IdleLock> used to cover the shell after 5 minutes idle, dismissed by the
- * 6-digit passcode. That passcode no longer exists — this protocol has no PIN —
- * and its replacement is a face re-verify, which needs a session-authenticated
- * face endpoint the backend does not expose yet (/v1/auth/face takes a
- * challenge token, and a locked screen has a session instead).
+ * ── The lock is back, and it is a passcode again ────────────────────────────
+ * <PasscodeLock> covers the shell on every fresh page load, after five minutes
+ * idle, and whenever the navbar's lock control is pressed. A refresh landing on
+ * the passcode screen is the point, not a side effect: arriving here
+ * authenticated proves the browser holds a session, not that the person in
+ * front of it is the administrator.
  *
- * The component itself survives, timer and all, and takes the gate as a prop.
- * Remount it here with the face gate when that endpoint lands. The navbar's
- * lock button still fires its event; nothing listens until then.
+ * It renders BESIDE the shell rather than around it, because the glass has to
+ * have something to be over — `.lock-glass` filters the real backdrop.
+ *
+ * ⚠️ It is a UX lock over a live session — locking must never sign anyone out —
+ * but the PIN it asks for is the account's, checked by the backend. See
+ * `features/passcode/components/PasscodeLock.tsx`.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  await requireSession();
+    const session = await requireSession();
+    // The PIN's length, as the sign-in step reported it. Undefined falls back
+    // to the gate's default.
+    const pinLength = await readPinLength();
+    const deviceBound = await readDeviceHint();
 
-  return (
-    <AddActionProvider>
-      <div className="flex h-full w-full overflow-hidden">
-        <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Navbar />
-          {/* Page content opens here. Long pages scroll INSIDE this region only.
+    return (
+        <AddActionProvider>
+            {/* The name is display only — the gate says WHO is being asked, and the
+          session the gate sits on is the one already loaded above. */}
+            <PasscodeLock
+                name={session.name}
+                length={pinLength}
+                deviceBound={deviceBound}
+                rpId={cfEnv('WEBAUTHN_RP_ID')}
+            />
+            <div className="flex h-full w-full overflow-hidden">
+                <Sidebar />
+                <div className="flex min-w-0 flex-1 flex-col">
+                    <Navbar />
+                    {/* Page content opens here. Long pages scroll INSIDE this region only.
               scrollbar-gutter reserves the scrollbar's width up front so a page
               crossing the scroll threshold (e.g. AI content revealing) doesn't
               shift everything horizontally when the bar appears. */}
-          <main className="thin-scroll relative min-h-0 flex-1 overflow-auto">{children}</main>
-        </div>
-      </div>
-    </AddActionProvider>
-  );
+                    <main className="thin-scroll relative min-h-0 flex-1 overflow-auto">
+                        {children}
+                    </main>
+                </div>
+            </div>
+        </AddActionProvider>
+    );
 }

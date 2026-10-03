@@ -334,27 +334,44 @@ Open items, in priority order:
       `evidence: { step_token }`?
     - Are the stage strings still the `*_REQUIRED` spellings?
     - Is the face verifier real, or still the accept-anything stub?
-    - On a 429 from `/v1/auth/refresh`, is the refresh token spent? (We keep the
-      cookie and do not retry — see `lib/auth/refresh.ts`.)
+    - ~~On a 429 from `/v1/auth/refresh`, is the refresh token spent?~~
+      Answered (change notes §8): no — we keep the cookie. A refresh can also
+      answer `401 PASS_CODE_REQUIRED` now (the PIN lock); middleware keeps the
+      cookies and sends the page to `/unlock`. See `lib/auth/refresh.ts`.
 
-2. **Give the passcode a backend.** `features/passcode` is built and wired —
-   `/set-passcode` (choose, confirm, mismatch returns to the first entry) and
-   the lock over the dashboard on every refresh, five minutes idle, or the
-   navbar control. Everything it stores is in ONE module,
-   `features/passcode/store.ts`: a SHA-256 of the code and the face captured at
-   the ID step, both in `localStorage`, both cleared at sign-out. That file
-   states what the stand-in costs and is what a Server Action pair replaces —
-   no screen changes when it does.
+2. **Finish moving the passcode (PIN) to the backend.** `ROOT_REQUIRE_PASS_CODE`
+   is on in staging (change notes §3/§8). Done:
+    - sign-in: `PASS_CODE_REQUIRED` → `/login/pass-code`, rendered from
+      `pass_code_mode` (SET → `SetPasscodeScreen`, VERIFY → the lock gate),
+      posted through `submitPassCodeAction`. `applyStage` sends COMPLETED to
+      `/dashboard` again; `/set-passcode` is gone.
+    - refresh: `401 PASS_CODE_REQUIRED` is `locked`, not `dead` — middleware
+      keeps the cookies and sends page loads to `/unlock`.
+    - unlocking (`/unlock` and the dashboard overlay) is `unlockAction`: a
+      refresh carrying the PIN. The PIN length rides in `root_pin_len`.
 
-   Two seams go with it, and they are the only places outside that feature that
-   know a passcode exists:
-    - `applyStage()` sends COMPLETED to `/set-passcode` instead of `/dashboard`,
-      because there is no `PASSCODE_REQUIRED` stage to route on. When the
-      backend has one, that reverts to `/dashboard` and the screen joins
-      `STAGE_ROUTES`.
-    - `IdentityStep.onEnroll` keeps the selfie on its way past — the last moment
-      the browser holds it, since `applyStage` clears the challenge cookie that
-      `/api/face-capture` reads. The real version fetches it with the session.
+    - the passkey (`features/passcode/passkey.ts` + `use-passkey-driver.ts`)
+      runs on the backend's WebAuthn (bb7e4fb). "Use this device": sign-in
+      `/auth/device*`, lock/unlock `/auth/refresh/device/options` + a refresh
+      with `device`. "Add device" (several per link): sign-in
+      `/auth/pass-code/device*` when `device_enrol_available`, lock/unlock
+      `/auth/refresh/new-device/options` + a refresh with `new_device`. The
+      browser remembers passkey ids it made or used, and prompts unasked only
+      for those — a new device gets Add device, never a QR code. RP ID comes
+      from the backend's `PUBLIC_URL`; `WEBAUTHN_RP_ID` here must match it.
+
+    - name and photo (backend docs/frontend-admin-name-and-photo.md):
+      `full_name` / `photo_url` on `PASS_CODE_REQUIRED` ride in the challenge
+      cookie; `photo_url` on the user object comes from `/v1/me`. The browser
+      gets the picture only through `/api/admin-photo` (`UserAvatar`), which
+      picks the current source. The localStorage portrait is gone;
+      `store.ts` only sweeps the old keys at sign-out.
+
+   Left: `/unlock` after a reload has no access token, so its photo URL is the
+   sign-in snapshot's — expired after 15 minutes, so it shows the glyph. The
+   backend offered to put the user on the `401 PASS_CODE_REQUIRED` refusal
+   (that doc, §4); when it does, middleware's `locked` branch should write it
+   to the snapshot. The SET screen has no name or photo in its design.
 
 3. **Build real screens from XD.** Translate frames using the XD-pixel utilities
    (section 1). Each new domain area = `npm run gen` then wire pages under

@@ -17,6 +17,16 @@ import { edgeHeaders } from '@/lib/api/edge';
 
 const ACCESS = 'root_at';
 const REFRESH = 'root_rt';
+/** Where a PIN-locked session is sent — `app/(auth)/unlock`. */
+const UNLOCK_PATH = '/unlock';
+/**
+ * The lock screens' photo (`app/api/admin-photo`). Loaded BY /unlock, so it
+ * must not refresh either: a locked refresh would redirect the image request
+ * to /unlock and hand the avatar an HTML page.
+ */
+const ADMIN_PHOTO_PATH = '/api/admin-photo';
+/** The passkey hint — `DEVICE` in lib/auth/cookies.ts, which is server-only. */
+const DEVICE = 'root_device';
 
 // Edge runtime may not expose a global `process`; read it defensively.
 const globalEnv =
@@ -324,7 +334,13 @@ export async function middleware(req: NextRequest) {
 
     const hasAccess = req.cookies.has(ACCESS);
     const hasRefresh = req.cookies.has(REFRESH);
-    if (!hasAccess && hasRefresh && !isPrefetch) {
+    // Never on /unlock itself: a refresh there would answer `locked` and
+    // redirect to the very page being loaded, forever. The unlock action
+    // refreshes WITH the PIN, which is the only refresh that screen needs.
+    // The photo that screen loads is exempt for the same reason.
+    const isUnlock =
+        req.nextUrl.pathname === UNLOCK_PATH || req.nextUrl.pathname === ADMIN_PHOTO_PATH;
+    if (!hasAccess && hasRefresh && !isPrefetch && !isUnlock) {
         const outcome = await tryRefresh(req);
         if (outcome?.status === 'refreshed') {
             const secure = isProdEnv;
@@ -357,6 +373,48 @@ export async function middleware(req: NextRequest) {
                     outcome.retryAfterSeconds ? `, retry after ${outcome.retryAfterSeconds}s` : ''
                 } — keeping cookies`,
             );
+        } else if (outcome?.status === 'locked' || outcome?.status === 'rejected') {
+            // `ROOT_REQUIRE_PASS_CODE`: the session is alive and wants the PIN.
+            // KEEP both cookies — the token is unspent and the unlock retries
+            // it with the PIN. (`rejected` needs a proof, which middleware never
+            // sends; it is here only so no outcome can fall through to a clear.)
+            //
+            // A page load goes to /unlock and comes back to where it was
+            // headed. Anything else — a Server Action POST — is left to run
+            // unauthenticated rather than answered with a redirect it cannot
+            // follow; its own backend call fails, and the next navigation lands
+            // on /unlock.
+            if (req.method === 'GET') {
+                const unlock = req.nextUrl.clone();
+                unlock.pathname = UNLOCK_PATH;
+                unlock.search = '';
+                const back = req.nextUrl.clone();
+                // The RSC cache-buster is transport, not a destination.
+                back.searchParams.delete('_rsc');
+                unlock.searchParams.set('next', `${back.pathname}${back.search}`);
+                const redirect = NextResponse.redirect(unlock);
+                // The refusal says whether the link's passkey may answer
+                // instead — keep that for /unlock (see DEVICE in cookies.ts).
+                if (outcome.status === 'locked' && outcome.deviceAvailable) {
+                    redirect.cookies.set(DEVICE, '1', {
+                        httpOnly: true,
+                        secure: isProdEnv,
+                        sameSite: 'lax',
+                        path: '/',
+                        maxAge: 60 * 60 * 24 * 400,
+                    });
+                } else if (outcome.status === 'locked') {
+                    redirect.cookies.delete(DEVICE);
+                }
+                if (detectedLocale) {
+                    redirect.cookies.set(LOCALE_COOKIE, detectedLocale, {
+                        path: '/',
+                        maxAge: LOCALE_COOKIE_MAX_AGE,
+                        sameSite: 'lax',
+                    });
+                }
+                return applySecurityHeaders(redirect, nonce, false);
+            }
         } else if (outcome?.status === 'dead') {
             // The refresh failed: the token is expired, already spent, or the
             // backend ended the session because a spent one was replayed.

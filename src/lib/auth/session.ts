@@ -25,6 +25,12 @@ export type SessionUser = {
   phone?: string;
   privateCode?: string;
   /**
+   * The backend's `photo_url` — a signed URL that dies in ~15 minutes, so it is
+   * only good for the request that read it. Server-side only: `/api/admin-photo`
+   * fetches it; never pass it to a Client Component.
+   */
+  photoUrl?: string;
+  /**
    * ── Both are vestigial ──────────────────────────────────────────────────
    * They described the previous protocol, where identity was proven AFTER
    * sign-in and a session could exist with the checks still outstanding. The
@@ -66,6 +72,7 @@ export function toSessionUser(u: WireUser): SessionUser {
     role: u.is_root ? "super_admin" : "agent",
     phone: u.phone,
     privateCode: u.private_code,
+    photoUrl: u.photo_url,
     requiresFaceVerification: u.requires_face_verification ?? false,
     requiresKyc: u.requires_kyc ?? false,
   };
@@ -123,9 +130,10 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 
 /**
  * The snapshot written at sign-in. Used only when the backend could not be
- * asked — see `getSession`.
+ * asked — see `getSession` — and by /unlock, which has no access token to ask
+ * with and needs only a name to show on the lock (display, never a session).
  */
-async function sessionFromCookie(): Promise<SessionUser | null> {
+export async function sessionFromCookie(): Promise<SessionUser | null> {
   const user = await readSessionUser<WireUser>();
   if (!user) return null;
 
