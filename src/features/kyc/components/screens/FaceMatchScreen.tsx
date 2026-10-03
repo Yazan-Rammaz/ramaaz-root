@@ -172,6 +172,12 @@ export default function FaceMatchScreen({
      * resolved inside an async run and nothing renders from it.
      */
     const resolvedFaceRef = useRef<string | null>(null);
+    /**
+     * Set when `runMatch` refused before comparing — no face, no ID image — and
+     * already said why. The finaliser must then stay quiet: it would otherwise
+     * overwrite that specific message with the generic one.
+     */
+    const failedEarlyRef = useRef(false);
 
     const handleFailure = useCallback((msg?: string) => {
         // NOTE: do NOT increment the attempt count here. A failed face
@@ -196,6 +202,7 @@ export default function FaceMatchScreen({
             await matchPendingRef.current;
             data = apiResultRef.current;
         }
+        if (failedEarlyRef.current) return;
         if (!data) {
             console.error('[FaceMatch] no compare result when the animation finished');
             handleFailure();
@@ -383,77 +390,87 @@ export default function FaceMatchScreen({
         setAnimDone(false);
         hasFinalisedRef.current = false;
         apiResultRef.current = null;
+        failedEarlyRef.current = false;
 
-        /**
-         * The captured face — from memory, or refetched from the backend.
+        /*
+         * ⚠️ THE PENDING PROMISE COVERS THE WHOLE RUN — the face refetch as well
+         * as the comparison — and it is published BEFORE the first await.
          *
-         * ⚠️ The refetch is what makes a REFRESH survivable. `livenessResult`
-         * is React state holding the frame, and a reload destroys it, so this
-         * guard used to fail with `hasLiveFace: false` on a screen that was
-         * visibly SHOWING the face — because the picture came from the stored
-         * copy while the comparison still demanded the lost bytes.
-         *
-         * `/api/face-capture` serves that same stored image from our own
-         * origin, so it can simply be fetched back. It is the frame Rekognition
-         * judged, committed by the Worker — if anything a better source than
-         * the browser's own copy, which was only ever the still it displayed.
+         * It used to be set only once the compare request went out. On a first
+         * enrolment `livenessResult` is gone (the face step was a different
+         * page), so the face is refetched first — and over a slow link that
+         * took ten seconds, longer than the whole animation. The finaliser then
+         * found no request at all, declared the match failed, and the compare
+         * went out a second later and SUCCEEDED, to nobody (observed
+         * 2026-10-03: "always fails the first time, passes on a rescan").
          */
-        let liveFace = livenessResult?.faceImageData ?? '';
-        if (!liveFace && storedFaceSrc) {
-            try {
-                liveFace = await fetchStoredFace();
-            } catch (err) {
-                console.error('[FaceMatch] could not refetch the stored face:', err);
+        const run = (async () => {
+            /**
+             * The captured face — from memory, or refetched from the backend.
+             *
+             * ⚠️ The refetch is what makes a REFRESH survivable. `livenessResult`
+             * is React state holding the frame, and a reload destroys it, so this
+             * guard used to fail with `hasLiveFace: false` on a screen that was
+             * visibly SHOWING the face — because the picture came from the stored
+             * copy while the comparison still demanded the lost bytes.
+             *
+             * `/api/face-capture` serves that same stored image from our own
+             * origin, so it can simply be fetched back. It is the frame Rekognition
+             * judged, committed by the Worker — if anything a better source than
+             * the browser's own copy, which was only ever the still it displayed.
+             */
+            let liveFace = livenessResult?.faceImageData ?? '';
+            if (!liveFace && storedFaceSrc) {
+                try {
+                    liveFace = await fetchStoredFace();
+                } catch (err) {
+                    console.error('[FaceMatch] could not refetch the stored face:', err);
+                }
             }
-        }
-        resolvedFaceRef.current = liveFace || null;
+            resolvedFaceRef.current = liveFace || null;
 
-        const idFace = idDocument?.idFaceImageData || idDocument?.frontImageData || '';
+            const idFace = idDocument?.idFaceImageData || idDocument?.frontImageData || '';
 
-        if (!liveFace || !idFace) {
-            console.error('[FaceMatch] missing face or ID image', {
-                hasLiveFace: Boolean(liveFace),
-                hasIdFace: Boolean(idFace),
+            if (!liveFace || !idFace) {
+                console.error('[FaceMatch] missing face or ID image', {
+                    hasLiveFace: Boolean(liveFace),
+                    hasIdFace: Boolean(idFace),
+                });
+                // Name the cause. A missing FACE after a reload is not "your face
+                // does not match your ID" — nothing was compared.
+                failedEarlyRef.current = true;
+                handleFailure(
+                    !liveFace
+                        ? 'Your photo could not be loaded. Open your access link again to restart.'
+                        : undefined,
+                );
+                return;
+            }
+
+            // Fire AWS CompareFaces in parallel with the 10s animation.
+            // This was a raw fetch, so an access token that expired during the
+            // verification flow failed the match outright; api.kyc refreshes and
+            // retries. It also never throws, so the catch is gone.
+            // The request is kept as a PROMISE, not just as a result.
+            //
+            // The animation is a floor, not a guarantee: it can finish while this
+            // call is still out — a slow network, a cold Rekognition call, a phone
+            // that throttled the tab. Reading only the settled result meant
+            // `finaliseAfterAnimation` saw `null` and reported the match as timed
+            // out, discarding a request that then answered fine a moment later.
+            // Holding the promise lets the finaliser WAIT for the answer it
+            // already asked for instead of giving up on it — see `run` above.
+            const res = await api.kyc.compareFace({
+                selfieImageData: liveFace,
+                idFaceImageData: idFace,
             });
-            // Name the cause. A missing FACE after a reload is not "your face
-            // does not match your ID" — nothing was compared.
-            handleFailure(
-                !liveFace
-                    ? 'Your photo could not be loaded. Open your access link again to restart.'
-                    : undefined,
-            );
+            apiResultRef.current = res.ok ? res.data : { status: 'error', message: res.error.message };
+        })().finally(() => {
             matchInFlight.current = false;
-            return;
-        }
-
-        // Fire AWS CompareFaces in parallel with the 10s animation.
-        // This was a raw fetch, so an access token that expired during the
-        // verification flow failed the match outright; api.kyc refreshes and
-        // retries. It also never throws, so the catch is gone.
-        // The request is kept as a PROMISE, not just as a result.
-        //
-        // The animation is a floor, not a guarantee: it can finish while this
-        // call is still out — a slow network, a cold Rekognition call, a phone
-        // that throttled the tab. Reading only the settled result meant
-        // `finaliseAfterAnimation` saw `null` and reported the match as timed
-        // out, discarding a request that then answered fine a moment later.
-        // Holding the promise lets the finaliser WAIT for the answer it
-        // already asked for instead of giving up on it.
-        const pending = api.kyc
-            .compareFace({ selfieImageData: liveFace, idFaceImageData: idFace })
-            .then((res) => {
-                apiResultRef.current = res.ok
-                    ? res.data
-                    : { status: 'error', message: res.error.message };
-                return apiResultRef.current;
-            })
-            .finally(() => {
-                matchInFlight.current = false;
-            });
-
-        matchPendingRef.current = pending;
-        await pending;
-    }, [livenessResult, idDocument, handleFailure]);
+        });
+        matchPendingRef.current = run;
+        await run;
+    }, [livenessResult, idDocument, handleFailure, storedFaceSrc]);
 
     useEffect(() => {
         runMatch();

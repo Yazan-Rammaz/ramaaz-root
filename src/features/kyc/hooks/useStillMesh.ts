@@ -45,9 +45,22 @@ export interface StillMesh {
     natural: { w: number; h: number } | null;
     /** True once both above are present and the web can be drawn. */
     ready: boolean;
+    /**
+     * True once the attempt is OVER — with a mesh or without one.
+     *
+     * ⚠️ The difference between "not yet" and "never" is what the fallback
+     * mark hangs on. Drawn on `!ready` alone, the AI star flashed for the
+     * second the model spent finding the face, and then the mesh replaced it —
+     * two marks in a row for one state. The star is for a mesh that is NOT
+     * coming; while one may still arrive, nothing is drawn in its place.
+     * Bounded: `detectStill` gives up after six seconds.
+     */
+    settled: boolean;
 }
 
-const EMPTY: StillMesh = { web: null, natural: null, ready: false };
+const PENDING: StillMesh = { web: null, natural: null, ready: false, settled: false };
+/** No mesh will come — no still, or the mesh switched off. */
+const NONE: StillMesh = { web: null, natural: null, ready: false, settled: true };
 
 export function useStillMesh(src: string | null): StillMesh {
     /*
@@ -66,6 +79,10 @@ export function useStillMesh(src: string | null): StillMesh {
         if (!src || !CAPTURE_LIVE_MESH.enabled) return;
 
         let cancelled = false;
+        // Every way out below that is not a mesh is an answer too.
+        const giveUp = () => {
+            if (!cancelled) setFound({ src, ...NONE });
+        };
 
         void (async () => {
             try {
@@ -85,7 +102,7 @@ export function useStillMesh(src: string | null): StillMesh {
                 if (cancelled) return;
 
                 const landmarks = result?.faceLandmarks?.[0];
-                if (!landmarks?.length) return;
+                if (!landmarks?.length) return giveUp();
 
                 const points = new Float32Array(landmarks.length * 2);
                 for (let i = 0; i < landmarks.length; i++) {
@@ -107,17 +124,19 @@ export function useStillMesh(src: string | null): StillMesh {
                 );
                 // No outline, no web. Same answer as no face: nothing is drawn
                 // and the caller shows its fallback mark.
-                if (!web) return;
+                if (!web) return giveUp();
 
                 setFound({
                     src,
                     web,
                     natural: { w: image.naturalWidth, h: image.naturalHeight },
                     ready: true,
+                    settled: true,
                 });
             } catch {
                 // A still that would not decode, a model that would not load.
-                // The mesh simply never becomes ready — see the note above.
+                // The mesh never becomes ready — see the note above.
+                giveUp();
             }
         })();
 
@@ -126,5 +145,6 @@ export function useStillMesh(src: string | null): StillMesh {
         };
     }, [src]);
 
-    return found && found.src === src ? found : EMPTY;
+    if (!src || !CAPTURE_LIVE_MESH.enabled) return NONE;
+    return found && found.src === src ? found : PENDING;
 }

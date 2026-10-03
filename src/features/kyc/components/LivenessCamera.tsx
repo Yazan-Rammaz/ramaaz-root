@@ -193,6 +193,11 @@ interface ZoomState {
     /** The last value the DEVICE accepted, in the camera's own units. */
     value: number;
     /**
+     * Where the camera was before we touched it — what the release goes back
+     * to, so the capture is framed exactly as the person first lined up.
+     */
+    start: number;
+    /**
      * The zoom we intend, as a float, before the device's granularity.
      *
      * ⚠️ THE REASON THE MOTION IS SMOOTH. Cameras quantise `zoom` to a `step`,
@@ -617,6 +622,7 @@ export function LivenessCamera({
         range: null,
         checked: false,
         value: 1,
+        start: 1,
         desired: 1,
         at: 0,
         released: false,
@@ -1581,6 +1587,7 @@ export function LivenessCamera({
                         if (z.range) {
                             const settings = track.getSettings() as { zoom?: number };
                             z.value = settings.zoom ?? z.range.min;
+                            z.start = z.value;
                             z.desired = z.value;
                         } else {
                             console.log(
@@ -1671,35 +1678,27 @@ export function LivenessCamera({
                          */
                         if (locked) {
                             /*
-                             * Ease back toward `releaseTo` — see `lockAt` for
-                             * why this window is safe, and `releaseTo` for why
-                             * it is not all the way to 1x.
+                             * Back to where the person STARTED, in one move —
+                             * see `lockAt` for why this window is safe, and
+                             * `releaseTo` for why it is the start and not a
+                             * fraction of the zoom.
                              *
-                             * The target is fixed at the moment of lock. Taken
-                             * from the current value each tick it would be a
-                             * fraction of a number already falling, and the
-                             * pull-back would converge short of where it aimed.
+                             * ⚠️ ONE MOVE, not an ease. Easing at `maxStep`
+                             * from 3x took eight adjustments, ~300ms each on a
+                             * phone, and the window between the lock and the
+                             * capture is shorter than that — it was observed
+                             * finishing at 2.59x, "zoomed out a little".
                              */
                             if (z.target === null) {
-                                /*
-                                 * Half the ZOOM, not half the distance above
-                                 * the minimum: 6x goes to 3x. Fixed at the
-                                 * moment of lock, because taken from a value
-                                 * that is already falling it would chase itself
-                                 * and stop short.
-                                 */
-                                z.target = Math.max(
-                                    range.min,
-                                    z.desired * CAPTURE_CAMERA_ZOOM.releaseTo,
+                                z.target = clamp(
+                                    z.start +
+                                        (z.desired - z.start) * CAPTURE_CAMERA_ZOOM.releaseTo,
                                 );
                                 console.log(
-                                    `[zoom] match locked at ${(z.desired / range.min).toFixed(2)}x — easing to ${(z.target / range.min).toFixed(2)}x`,
+                                    `[zoom] match locked at ${(z.desired / range.min).toFixed(2)}x — back to ${(z.target / range.min).toFixed(2)}x`,
                                 );
                             }
-                            z.desired = Math.max(
-                                z.target,
-                                z.desired / (1 + CAPTURE_CAMERA_ZOOM.maxStep),
-                            );
+                            z.desired = z.target;
                         } else if (faceGone) {
                             /*
                              * Nobody in front of the camera. Go home.

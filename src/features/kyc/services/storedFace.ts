@@ -24,7 +24,29 @@
  * server-side and streams the bytes. It takes no parameters, so this cannot ask
  * for anything but the face belonging to the caller's own sign-in.
  */
-export async function fetchStoredFace(): Promise<string> {
+/**
+ * The download in flight, shared by everyone who asks while it runs.
+ *
+ * ⚠️ The comparison screen asks TWICE at once — `useFacePhoto` for the picture
+ * and `runMatch` for the comparison — and the two used to be separate
+ * downloads of the same ~300KB through the Worker. On a slow link each took
+ * ten seconds, so the comparison started late and the face showed the grey
+ * placeholder for just as long. One request now serves both.
+ *
+ * Only the IN-FLIGHT request is shared, never a finished one: the route is
+ * tied to the current challenge, and a result held past it could be the
+ * previous sign-in's face.
+ */
+let inflight: Promise<string> | null = null;
+
+export function fetchStoredFace(): Promise<string> {
+    inflight ??= download().finally(() => {
+        inflight = null;
+    });
+    return inflight;
+}
+
+async function download(): Promise<string> {
     const res = await fetch('/api/face-capture', { cache: 'no-store' });
     if (!res.ok) throw new Error(`face-capture: ${res.status}`);
 

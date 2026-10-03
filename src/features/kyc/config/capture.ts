@@ -1454,8 +1454,13 @@ export const CAPTURE_CAMERA_ZOOM = {
      * past about 3x the stream AWS is analysing has lost enough detail to start
      * costing the anti-spoofing measurement, on a capture §1 spent real effort
      * sharpening.
+     *
+     * ⚠️ 2, down from 3 (2026-10-03): on an iPhone the loop reached the 3x
+     * ceiling in under two seconds and it read as zooming in far too much.
+     * Below the ceiling the bar may not fill on zoom alone — AWS then says
+     * "move closer", and the person does, which is the honest outcome.
      */
-    max: 3,
+    max: 2,
 
     /**
      * ── IT KEEPS GOING UNTIL AWS'S BAR IS FULL ──────────────────────────────
@@ -1605,28 +1610,22 @@ export const CAPTURE_CAMERA_ZOOM = {
     stepMs: 20,
 
     /**
-     * What the zoom is MULTIPLIED BY once the match locks, 0..1.
+     * How much of the zoom is KEPT once the match locks, 0..1 — as a share of
+     * the distance above the zoom the camera STARTED at.
      *
-     * 0.5 halves it: 6x becomes 3x, 4x becomes 2x.
+     *   0     back to exactly where the person started (the default)
+     *   0.5   half way back
+     *   1     stay zoomed in
      *
-     * ⚠️ A MULTIPLE OF THE ZOOM, not of the distance above the camera's
-     * minimum. The difference is small at 2x and wrong at 6x — interpolating
-     * toward `min` gives `1 + (6 - 1) x 0.5 = 3.5`, which is not half of
-     * anything anybody asked for. The zoom is a ratio, so the thing to halve is
-     * the ratio.
-     *
-     * ── Why it is not 0 ────────────────────────────────────────────────────
-     * The capture has to look like what the person was looking at. Dropping the
-     * whole way back at the moment AWS says "hold still" pulls the face
-     * abruptly small right as it is photographed, and the still that gets filed
-     * is framed nothing like the preview they had just settled into.
-     *
-     * Half is the compromise: the tightest crop is gone — which is what
-     * protected the photograph from the complaint in §2 — while the framing
-     * stays close to what was on screen a second earlier. The pull-back eases
-     * at `maxStep` like every other move, so it glides rather than snapping.
+     * ⚠️ 0, and a jump, since 2026-10-03. It was 0.5 of the zoom, eased: the
+     * reasoning was that dropping all the way back would pull the face small
+     * right as it is photographed. In practice the ease never finished inside
+     * the capture window (observed ending at 2.59x from 3x), and the result
+     * read as "it zooms out a little". The ask is the real starting position,
+     * so the release goes straight there — the camera's own start, read from
+     * `getSettings()` before the first adjustment, not an assumed 1x.
      */
-    releaseTo: 0.5,
+    releaseTo: 0,
 } as const;
 
 /**

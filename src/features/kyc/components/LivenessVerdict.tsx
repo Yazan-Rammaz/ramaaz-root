@@ -307,7 +307,7 @@ export function LivenessVerdict({
                         Keyed by phase so the verdict animations replay from
                         their first frame on every transition rather than being
                         skipped because the element already existed. */}
-                    <VerdictMark key={phase} phase={phase} glyph={!mesh.ready} />
+                    <VerdictMark key={phase} phase={phase} glyph={mesh.settled && !mesh.ready} />
                 </>
             )}
 

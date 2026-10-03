@@ -1,7 +1,6 @@
 'use client';
 
 import { Icon } from '@/components/ui/Icon';
-import { AiSparkle } from '@/features/kyc/components/AiSparkle';
 import { VERDICT_FAIL, VERDICT_PASS } from '@/features/kyc/components/VerdictMesh';
 
 /**
@@ -20,9 +19,13 @@ import { VERDICT_FAIL, VERDICT_PASS } from '@/features/kyc/components/VerdictMes
  *             is the one animation everybody already reads as "you are in".
  *   failed    the same light and the same edge in red.
  *
- * — plus the centred glyph as a FALLBACK, for the case where no mesh could be
- * built (see `glyph`). That is why the AI star and the Face ID mark are still
- * here rather than deleted.
+ * — plus the Face ID glyph as a FALLBACK on a verdict, for the case where no
+ * mesh could be built (see `glyph`).
+ *
+ * ⚠️ NOTHING IS DRAWN HERE WHILE CHECKING. The mesh is the checking animation
+ * and the only one: the AI star that used to sit in the middle was removed on
+ * request (2026-10-03), fallback included — with no mesh, `checking` is the
+ * photograph under glass and nothing else.
  *
  * ── Why the colour travels through the states ───────────────────────────────
  * The mark used to be white while it thought and coloured only once it had
@@ -72,7 +75,8 @@ export function VerdictMark({
 }: {
     phase: MarkPhase;
     /**
-     * Whether to draw the centred GLYPH — the AI star, or the Face ID mark.
+     * Whether to draw the centred GLYPH — the Face ID mark. Never drawn while
+     * `checking`; see the note at the top.
      *
      * ⚠️ FALSE WHENEVER A MESH IS ON THE FACE, which is the normal case. The
      * wireframe IS the mark (see `VerdictMesh`); a star over the middle of it
@@ -141,18 +145,7 @@ export function VerdictMark({
                                 <Icon name="kyc/face_detect" size={72} mask alt="" />
                             </span>
                         </>
-                    ) : phase === 'checking' ? (
-                        <>
-                            {/* The blue ground the stars are legible against —
-                                see `.verdict-breathe`. Behind the mark and
-                                twice its size, so it reads as light around it
-                                rather than as a disc it sits on. */}
-                            <span className="verdict-breathe absolute h-260 w-260 rounded-full" />
-                            <span className="relative">
-                                <AiSparkle />
-                            </span>
-                        </>
-                    ) : (
+                    ) : phase === 'checking' ? null : (
                         <span
                             className="verdict-faceid relative"
                             style={{ '--verdict-color': color } as React.CSSProperties}
