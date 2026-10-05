@@ -86,6 +86,73 @@ export async function isPasskeyOffered(rpId?: string): Promise<boolean> {
 }
 
 /**
+ * Can THIS device keep a passkey of its own — is "Set Up" worth offering?
+ *
+ * ⚠️ Asked for SETUP only, never for using one already made (see the note on
+ * `isPasskeyOffered` for why that question stays unasked there).
+ *
+ * Without it, a Linux machine whose Chrome has no Google account — nowhere to
+ * store a passkey — was offered setup, and the ceremony then waited on a
+ * "use a phone or security key" window for the backend's five-minute timeout
+ * while the lock sat frozen (Observe, 2026-10-05). A passkey on ANOTHER phone,
+ * reached by QR code, is not "this device" either, which is what setup means.
+ *
+ * Windows is the exception, for the reason given on `isPasskeyOffered`: there
+ * this answers "has Windows Hello been switched on yet", and hiding the offer
+ * hid it from the very person who would discover it by being offered it.
+ *
+ * Unknown answers offer: an API that is missing or throws must not take the
+ * feature away from a device that would have worked.
+ */
+export async function canEnrolHere(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (/Windows/i.test(navigator.userAgent)) return true;
+  try {
+    const available = PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable;
+    return typeof available === "function" ? await available.call(PublicKeyCredential) : true;
+  } catch {
+    return true;
+  }
+}
+
+/* ─────────────────────── a setup in progress ─────────────────────── */
+
+/**
+ * How long a setup may wait on the device before it is called off, in ms.
+ *
+ * The backend's options allow five minutes, and a device with nowhere to put
+ * a passkey can spend all of them showing nothing — the lock froze for exactly
+ * that long. A person who is actually looking at the device's sheet answers in
+ * seconds, so a minute is a wait, not a cut-off.
+ */
+const REGISTRATION_TIMEOUT_MS = 60_000;
+
+/** The setup currently waiting on the device, with its way out. */
+let registering: { cancel: () => void } | null = null;
+const registeringListeners = new Set<() => void>();
+
+function announceRegistering(): void {
+  registeringListeners.forEach((listener) => listener());
+}
+
+/** For `useSyncExternalStore` — the control shows "Waiting… Cancel". */
+export function subscribeRegistering(listener: () => void): () => void {
+  registeringListeners.add(listener);
+  return () => {
+    registeringListeners.delete(listener);
+  };
+}
+
+export function isRegistering(): boolean {
+  return registering !== null;
+}
+
+/** The person pressed Cancel. The setup ends as `failed:Cancelled`. */
+export function cancelRegistration(): void {
+  registering?.cancel();
+}
+
+/**
  * Can a passkey exist on THIS origin at all?
  *
  * ⚠️ THIS CHECK IS NOT REDUNDANT, and leaving it out produced the worst version
@@ -317,8 +384,27 @@ export async function runRegistration(
 ): Promise<Record<string, unknown> | "exists" | { refused: string }> {
   if (!isWebAuthnAvailable()) return { refused: "NoWebAuthn" };
   checkRpId(publicKey);
+
+  // Never left waiting: a minute, or Cancel, ends it — see
+  // REGISTRATION_TIMEOUT_MS. `stopped` names which, because both arrive as
+  // the same AbortError.
+  const controller = new AbortController();
+  let stopped: "Timeout" | "Cancelled" | null = null;
+  const timer = setTimeout(() => {
+    stopped = "Timeout";
+    controller.abort();
+  }, REGISTRATION_TIMEOUT_MS);
+  registering = {
+    cancel: () => {
+      stopped = "Cancelled";
+      controller.abort();
+    },
+  };
+  announceRegistering();
+
   try {
     const credential = (await navigator.credentials.create({
+      signal: controller.signal,
       publicKey: toPublicKeyOptions(
         deviceBoundOnAndroid(publicKey),
         "register",
@@ -350,8 +436,13 @@ export async function runRegistration(
      * the second never learned the id and offered "Add device". Retrying
      * cannot work; using the passkey that is there does.
      */
+    if (stopped) return { refused: stopped };
     if (name === "InvalidStateError") return "exists";
     return { refused: name || "Error" };
+  } finally {
+    clearTimeout(timer);
+    registering = null;
+    announceRegistering();
   }
 }
 

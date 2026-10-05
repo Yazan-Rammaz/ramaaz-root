@@ -29,6 +29,20 @@ function withReason(sentence: string, outcome: PasskeySetupOutcome): string {
     const reason = setupFailureReason(outcome);
     return reason ? `${sentence} · ${reason}` : sentence;
 }
+
+/**
+ * What a setup that did not finish says. A timeout and a cancel are not
+ * "that didn't work": one is a device that never answered, the other was the
+ * person's own choice — and in both the passcode is the way on.
+ */
+function setupMessage(
+    t: (key: 'passkeyFailed' | 'passkeyTimeout' | 'passkeyCancelled') => string,
+    outcome: PasskeySetupOutcome,
+): string {
+    if (outcome === 'failed:Timeout') return `${t('passkeyTimeout')} · Timeout`;
+    if (outcome === 'failed:Cancelled') return t('passkeyCancelled');
+    return withReason(t('passkeyFailed'), outcome);
+}
 import { PasskeyUnlock } from './PasskeyUnlock';
 import { UserAvatar } from './UserAvatar';
 
@@ -201,7 +215,7 @@ export function PasscodeLockGate({
                      * cleared, and the next PIN typed unlocks as usual.
                      */
                     setArmed(false);
-                    return { ok: false, error: withReason(t('passkeyFailed'), outcome) };
+                    return { ok: false, error: setupMessage(t, outcome) };
                 })
               : verify
                 ? verify(value)
@@ -443,7 +457,7 @@ export function PasscodeLockGate({
                                 // `exists` is handled by the control itself and
                                 // is not an error worth a red line.
                                 if (outcome !== 'exists') {
-                                    fail(withReason(t('passkeyFailed'), outcome));
+                                    fail(setupMessage(t, outcome));
                                 }
                             }}
                         />

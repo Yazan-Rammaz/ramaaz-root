@@ -1,13 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
 import { iosEase } from '@/components/motion/presets';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
 import {
+    cancelRegistration,
+    canEnrolHere,
     hasLocalPasskey,
+    isRegistering,
+    subscribeRegistering,
     isAutofillAvailable,
     isPasskeyOffered,
     passkeyKind,
@@ -182,6 +186,11 @@ export function PasskeyUnlock({
                 if (live) setState('none');
                 return;
             }
+            // Setup is offered only where this device can keep the passkey
+            // itself — see `canEnrolHere`. Using one already made is not
+            // affected by this.
+            const enrolHere = !!driver.enrol && (await canEnrolHere());
+            if (!live) return;
             // Nothing bound — or bound, but never on THIS device: offer setup
             // where binding is possible, else stay out of the way. Opening a
             // prompt here would only get Chrome's "passkey from another
@@ -189,7 +198,7 @@ export function PasskeyUnlock({
             // inside `authenticate`, for a device that holds a different
             // account's passkey.)
             if (!driver.bound) {
-                if (live) setState(driver.enrol ? 'enrol' : 'none');
+                if (live) setState(enrolHere ? 'enrol' : 'none');
                 return;
             }
             /*
@@ -201,7 +210,7 @@ export function PasskeyUnlock({
              * somebody who should simply set this device up.
              */
             if (!hasLocalPasskey()) {
-                if (live) setState(driver.enrol ? 'enrol' : 'none');
+                if (live) setState(enrolHere ? 'enrol' : 'none');
                 return;
             }
 
@@ -276,7 +285,7 @@ export function PasskeyUnlock({
             // has used (or the server offered none). Same as above — Add
             // device, never a QR code.
             if (outcome === 'unavailable') {
-                setState(driver.enrol ? 'enrol' : 'none');
+                setState(enrolHere ? 'enrol' : 'none');
                 return;
             }
 
@@ -320,6 +329,9 @@ export function PasskeyUnlock({
      * from an effect, so there is one source for it.
      */
     const shown: State = deviceHasPasskey && state === 'enrol' ? 'retry' : state;
+
+    /** A setup is waiting on the device — see `REGISTRATION_TIMEOUT_MS`. */
+    const registering = useSyncExternalStore(subscribeRegistering, isRegistering, () => false);
 
     async function press() {
         // Setup, second tap: the PIN opened a registration and this click is
@@ -375,6 +387,33 @@ export function PasskeyUnlock({
     // Nothing this device can do. No message: a lock screen is not the place to
     // explain what a browser lacks, and the passcode above is unaffected.
     if (shown === 'asking' || shown === 'none') return null;
+
+    /*
+     * ── While the device is being asked to make the passkey ─────────────────
+     *
+     * Never a silent wait. A device's own sheet normally covers this line; when
+     * there is no sheet — nowhere to keep a passkey, a window behind the
+     * browser — this is what is left on screen, and it always has a way out.
+     */
+    if (registering) {
+        return (
+            <p
+                className="fz-12 flex items-center justify-center gap-8 leading-none font-medium text-[#484A48]"
+                style={{ marginTop: rem(16) }}
+                role="status"
+                aria-live="polite"
+            >
+                <span>{t('passkeyWaiting')}</span>
+                <button
+                    type="button"
+                    onClick={cancelRegistration}
+                    className="cursor-pointer font-semibold text-[#388CFF]"
+                >
+                    {t('passkeyCancel')}
+                </button>
+            </p>
+        );
+    }
 
     /**
      * ── Words are for the SETUP only ────────────────────────────────────────
