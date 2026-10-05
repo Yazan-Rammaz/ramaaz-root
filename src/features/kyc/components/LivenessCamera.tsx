@@ -1756,31 +1756,16 @@ export function LivenessCamera({
                             }
 
                             /*
-                             * ── The step shrinks as the bar fills ───────────
-                             *
-                             * A fixed step has to be one compromise for two
-                             * jobs: crossing the distance from a face that is
-                             * much too small, and settling onto the oval
-                             * without sailing past it. Sized for the crossing
-                             * it hunts at the end; sized for the settle it
-                             * creeps at the start, which is the ten seconds
-                             * this whole controller was reported for.
-                             *
-                             * `1 - bar` is how far there is left to go, in
-                             * AWS's own measure, so the step is large while the
-                             * face is small and tapers to `minStepShare` of
-                             * itself as the match closes. Fast approach, fine
-                             * endgame, one knob each.
-                             *
-                             * The floor matters: at zero the last few percent
-                             * of the bar would be chased in steps too small for
-                             * the camera to act on, and the zoom would stall
-                             * just short of the oval.
+                             * ⚠️ ONE FIXED SMALL STEP, deliberately. A faster,
+                             * tapering step (up to 16%, then 12%) was tried on
+                             * 2026-10-03 and overshot: AWS's hint and bar lag
+                             * the stream, so big steps stacked on a stale
+                             * "closer". 4% every `stepMs` is the version that
+                             * landed exactly on the oval with no "move closer"
+                             * left for the person — slower, and right.
                              */
-                            const { maxStep, minStepShare } = CAPTURE_CAMERA_ZOOM;
-                            const left = Math.min(1, Math.max(0, 1 - bar));
-                            const step = maxStep * (minStepShare + (1 - minStepShare) * left);
-                            const next = z.dir === 1 ? z.desired * (1 + step) : z.desired / (1 + step);
+                            const { maxStep } = CAPTURE_CAMERA_ZOOM;
+                            const next = z.dir === 1 ? z.desired * (1 + maxStep) : z.desired / (1 + maxStep);
                             /*
                              * Hitting either end turns the loop around. Left to
                              * itself it would keep asking for a value the clamp
@@ -1824,10 +1809,6 @@ export function LivenessCamera({
                                 .then(() => {
                                     z.busy = false;
                                     z.value = applied;
-                                    // `stepMs` runs from HERE — the moment the
-                                    // lens actually changed — so AWS gets that
-                                    // long to see it before the next decision.
-                                    z.at = Date.now();
                                     // One line per adjustment. The zoom is the
                                     // only thing on this screen that moves
                                     // without the person doing anything, so

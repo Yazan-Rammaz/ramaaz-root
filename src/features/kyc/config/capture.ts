@@ -1455,12 +1455,11 @@ export const CAPTURE_CAMERA_ZOOM = {
      * costing the anti-spoofing measurement, on a capture §1 spent real effort
      * sharpening.
      *
-     * ⚠️ 2, down from 3 (2026-10-03): on an iPhone the loop reached the 3x
-     * ceiling in under two seconds and it read as zooming in far too much.
-     * Below the ceiling the bar may not fill on zoom alone — AWS then says
-     * "move closer", and the person does, which is the honest outcome.
+     * ⚠️ NOT 2. Lowered to 2 on 2026-10-03 and it stopped short: the log read
+     * "out — 2.00x, bar 25%" — the ceiling bound while AWS still wanted the face
+     * bigger, so it kept saying "move closer". 3 is the value that landed.
      */
-    max: 2,
+    max: 3,
 
     /**
      * ── IT KEEPS GOING UNTIL AWS'S BAR IS FULL ──────────────────────────────
@@ -1573,52 +1572,25 @@ export const CAPTURE_CAMERA_ZOOM = {
      * INTERVAL between visible jumps, not the size of one, so a larger step on
      * a much shorter clock stays under it.
      *
-     * ⚠️ THIS IS NOW THE STEP AT ITS LARGEST, not the step. The controller
-     * scales it by how far AWS's bar is from full (see `minStepShare`), so 0.16
-     * is what it uses while the face is still much too small and it tapers to a
-     * quarter of that as the match closes. A flat 0.16 would cross the distance
-     * just as fast and then hunt around the oval; this settles.
-     *
-     * Reaching a typical 2.5x now takes about six large steps and a few small
-     * ones — call it two seconds, against nine or ten at the 0.04 this started
-     * at.
-     *
-     * ⚠️ 0.12, down from 0.16 (2026-10-03), together with `stepMs` going from
-     * 20 to 350. At 0.16 every ~20ms the zoom outran AWS: its "move closer"
-     * hint and its bar lag the stream by a few hundred ms, so the loop kept
-     * obeying a stale "closer" and sailed to ~150% of the oval — face filling
-     * the frame, AWS still saying closer. The step was never the problem on
-     * its own; deciding again before AWS had seen the last one was.
+     * ⚠️ BACK TO 0.04, AND FIXED (2026-10-05). It went to 0.16 and then 0.12,
+     * tapering with the bar, to cut the wait — and it overshot both times. AWS's
+     * "move closer" and its bar describe frames a few hundred ms old, so large
+     * steps kept obeying a stale "closer" and drove the face to ~125-150% of the
+     * oval while AWS still asked for closer. 0.04 every `stepMs` was reported
+     * as perfect: it reached the oval with nothing left for the person to do.
+     * Slower is the price of landing on the answer instead of past it.
      */
-    maxStep: 0.12,
+    maxStep: 0.04,
 
     /**
-     * The smallest the step may shrink to, as a share of `maxStep`.
+     * Shortest gap between adjustments, in ms — measured from the moment the
+     * previous one was REQUESTED, and the next one does not go out until that
+     * one has completed (the in-flight guard in `LivenessCamera`).
      *
-     * ⚠️ NOT ZERO. The step tapers with the bar, and at zero the last few
-     * percent would be chased in adjustments too small for the camera to act
-     * on — the zoom would stall just short of the oval, which is the one
-     * failure that strands somebody at "move a little closer" forever.
-     *
-     * A third of 0.12 is 0.04, which is exactly the fixed step this
-     * controller used before it tapered — the version reported as landing
-     * perfectly, only slowly. So the endgame is that one and only the approach
-     * got faster.
+     * 200 is the value that landed on the oval. It gives AWS's hint and bar
+     * time to catch up with each step; 20 did not, and the loop overshot.
      */
-    minStepShare: 1 / 3,
-
-    /**
-     * How long to wait AFTER the camera has applied a zoom before deciding the
-     * next one, in ms.
-     *
-     * ⚠️ MEASURED FROM COMPLETION, and it is AWS's reaction time, not ours.
-     * Every decision reads AWS's hint and bar, and both describe frames AWS has
-     * already processed — a few hundred ms behind the lens. Decide sooner and
-     * the loop acts on an answer about a zoom it has already left: at 20ms it
-     * stacked a dozen "closer" steps onto one stale hint and overshot to ~150%
-     * of the oval. 350 lets the hint catch up with each step before the next.
-     */
-    stepMs: 350,
+    stepMs: 200,
 
     /**
      * How much of the zoom is KEPT once the match locks, 0..1 — as a share of
