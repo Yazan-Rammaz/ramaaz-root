@@ -88,6 +88,7 @@ export function PasskeyUnlock({
     onArm,
     enrolOptions,
     onEnrolFailed,
+    deviceHasPasskey = false,
 }: {
     driver: PasskeyDriver;
     /** Labels the credential in the device's own passkey list. Display only. */
@@ -101,6 +102,11 @@ export function PasskeyUnlock({
     onEnrolFailed: () => void;
     /** The registration options, once the PIN opened one. */
     enrolOptions: Record<string, unknown> | null;
+    /**
+     * A setup found this device already holds the passkey (owned by the gate).
+     * The control stops offering setup and offers "use this device" instead.
+     */
+    deviceHasPasskey?: boolean;
 }) {
     const t = useTranslations('passcode');
     const [state, setState] = useState<State>('asking');
@@ -304,6 +310,13 @@ export function PasskeyUnlock({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    /**
+     * What is rendered: `state`, except that a device found to hold the
+     * passkey already is never offered setup again — derived rather than set
+     * from an effect, so there is one source for it.
+     */
+    const shown: State = deviceHasPasskey && state === 'enrol' ? 'retry' : state;
+
     async function press() {
         // Setup, second tap: the PIN opened a registration and this click is
         // the activation `create()` requires.
@@ -311,6 +324,13 @@ export function PasskeyUnlock({
             const outcome = await driver.enrol.finish(enrolOptions, passkeyLabel(name));
             if (outcome === 'ok') {
                 onUnlocked();
+                return;
+            }
+            // Already on this device (another browser made it): use it, on
+            // this same tap, instead of a setup that can never succeed.
+            if (outcome === 'exists') {
+                onEnrolFailed();
+                await unlockWithThisDevice();
                 return;
             }
             // NOT let in: the PIN only opened the registration — the accepted
@@ -322,7 +342,7 @@ export function PasskeyUnlock({
         }
 
         // Setup, first tap: arm the row. The next PIN goes to `driver.enrol`.
-        if (state === 'enrol') {
+        if (shown === 'enrol') {
             if (!armed) onArm();
             return;
         }
@@ -350,7 +370,7 @@ export function PasskeyUnlock({
 
     // Nothing this device can do. No message: a lock screen is not the place to
     // explain what a browser lacks, and the passcode above is unaffected.
-    if (state === 'asking' || state === 'none') return null;
+    if (shown === 'asking' || shown === 'none') return null;
 
     /**
      * ── Words are for the SETUP only ────────────────────────────────────────
@@ -365,7 +385,7 @@ export function PasskeyUnlock({
      * so it more than doubles. Same glyph, two jobs.
      */
     const confirming = enrolOptions !== null;
-    const setup = state === 'enrol' || confirming;
+    const setup = shown === 'enrol' || confirming;
 
     /**
      * While the platform prompt is open the icon BEATS.
@@ -375,7 +395,7 @@ export function PasskeyUnlock({
      * with the real instruction — which is the phone's, not ours. A pulse says
      * "waiting" without claiming a second voice.
      */
-    const waiting = state === 'unlocking';
+    const waiting = shown === 'unlocking';
 
     const label = failed
         ? t('passkeyFailed')

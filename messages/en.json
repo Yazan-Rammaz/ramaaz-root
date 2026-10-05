@@ -89,6 +89,7 @@
     "unavailable": "Unlock is unavailable right now",
     "sessionEnded": "Your session has ended. Open your access link to sign in again.",
     "passkeyFailed": "That didn’t work — tap to try again",
+    "passkeyExists": "This device already has a passkey — tap the icon to use it",
     "passkeySetupFailed": "Couldn't start device setup — try again, or use your passcode",
     "passkeyArm": "Enter your passcode to continue",
     "passkeyFinish": {

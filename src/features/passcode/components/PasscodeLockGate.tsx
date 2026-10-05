@@ -106,6 +106,12 @@ export function PasscodeLockGate({
     const [armed, setArmed] = useState(false);
     /** The registration options that PIN opened — hands the control its "finish". */
     const [enrolOptions, setEnrolOptions] = useState<Record<string, unknown> | null>(null);
+    /**
+     * A setup was refused because this device already holds one of the link's
+     * passkeys. The control then offers it ("use this device") instead of
+     * setup. See `exists` in `PasskeyDriver.enrol.finish`.
+     */
+    const [deviceHasPasskey, setDeviceHasPasskey] = useState(false);
 
     /**
      * The check, in flight.
@@ -147,6 +153,28 @@ export function PasscodeLockGate({
                         return { ok: true, hold: true };
                     }
                     if (outcome === 'ok') return { ok: true };
+                    /*
+                     * This device already has the passkey — another browser on
+                     * it made it (Safari and Chrome on an iPhone share iCloud
+                     * Keychain). Use it now, in the same flow; this browser
+                     * learns its id from the assertion and offers it on its own
+                     * from then on.
+                     *
+                     * If the browser will not open a second prompt without a
+                     * fresh tap, the control turns into "use this device" and
+                     * the row says so — never "try again", which cannot work.
+                     */
+                    if (outcome === 'exists' && passkey) {
+                        setArmed(false);
+                        const used = await passkey.authenticate(
+                            new AbortController().signal,
+                            'optional',
+                            false,
+                        );
+                        if (used === 'ok') return { ok: true };
+                        setDeviceHasPasskey(true);
+                        return { ok: false, error: t('passkeyExists') };
+                    }
                     /*
                      * ⚠️ NOT let in. The options call only CHECKED the PIN — it
                      * neither completes a sign-in nor unlocks; the credential
@@ -387,6 +415,7 @@ export function PasscodeLockGate({
                             onUnlocked={onUnlocked}
                             armed={armed}
                             onArm={() => setArmed(true)}
+                            deviceHasPasskey={deviceHasPasskey}
                             enrolOptions={enrolOptions}
                             onEnrolFailed={() => {
                                 // The "finish" tap's prompt failed too. Same as

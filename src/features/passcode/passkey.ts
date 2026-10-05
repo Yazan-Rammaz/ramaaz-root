@@ -264,11 +264,13 @@ function checkRpId(publicKey: Record<string, unknown>): void {
  * activation window has closed by then refuses instantly, and the screen falls
  * back to a "finish" tap.
  *
- * @returns the credential as JSON for the server, or null if refused.
+ * @returns the credential as JSON for the server; `"exists"` when this device
+ * already holds a passkey for the account; null if refused for any other
+ * reason.
  */
 export async function runRegistration(
   publicKey: Record<string, unknown>,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown> | "exists" | null> {
   if (!isWebAuthnAvailable()) return null;
   checkRpId(publicKey);
   try {
@@ -292,6 +294,16 @@ export async function runRegistration(
     console.warn(
       `[passkey] registration failed on ${window.location.origin} — ${name}: ${message}`,
     );
+    /*
+     * ⚠️ InvalidStateError is NOT a failure — it is an answer. The server's
+     * options exclude the link's existing credentials, and the authenticator
+     * found one of them HERE. On an iPhone that is the normal case for a second
+     * browser: Safari and Chrome share iCloud Keychain, so a passkey made in
+     * one is already in the other — but each keeps its own localStorage, so
+     * the second never learned the id and offered "Add device". Retrying
+     * cannot work; using the passkey that is there does.
+     */
+    if (name === "InvalidStateError") return "exists";
     return null;
   }
 }
@@ -411,12 +423,15 @@ export type PasskeyDriver = {
      *   blocked  the browser refused almost instantly — no user activation left
      *            (the PIN's keystroke expired during the round trip, which some
      *            Safari builds are strict about). Offer a tap to try again.
+     *   exists   this device already holds one of the link's passkeys (another
+     *            browser on it made it). Use it — `authenticate` with
+     *            `requireLocal: false` — rather than set up again.
      *   failed   dismissed, or refused by the server. Details in the console.
      */
     finish: (
       publicKey: Record<string, unknown>,
       label: string,
-    ) => Promise<"ok" | "blocked" | "failed">;
+    ) => Promise<"ok" | "blocked" | "exists" | "failed">;
   };
 };
 

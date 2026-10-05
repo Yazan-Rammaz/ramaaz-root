@@ -89,6 +89,7 @@
         "unavailable": "Kilit açma şu anda kullanılamıyor",
         "sessionEnded": "Oturumunuz sona erdi. Tekrar giriş yapmak için erişim bağlantınızı açın.",
         "passkeyFailed": "Bu işe yaramadı — tekrar denemek için dokunun",
+        "passkeyExists": "Bu cihazda zaten bir geçiş anahtarı var — kullanmak için simgeye dokunun",
         "passkeySetupFailed": "Cihaz kurulumu başlatılamadı — tekrar deneyin veya şifrenizi kullanın",
         "passkeyArm": "Devam etmek için şifrenizi girin",
         "passkeyFinish": {
