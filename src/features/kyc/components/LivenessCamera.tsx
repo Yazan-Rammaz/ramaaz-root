@@ -125,6 +125,13 @@ const FACE_LOST_MS = 1500;
 const ZOOM_STALL_MS = 2500;
 
 /**
+ * The longest the "camera is live" announcement waits for AWS's video to cover
+ * the frame — see `announceWhenCovering`. Past this it is announced anyway: a
+ * cover held up for ever would be worse than a picture briefly mis-sized.
+ */
+const COVER_WAIT_MS = 2500;
+
+/**
  * The amounts both panes are drawn from.
  *
  * One object, shared by the two elements, because they are the same pane drawn
@@ -1095,18 +1102,58 @@ export function LivenessCamera({
         if (!frame) return;
 
         const attached = new WeakSet<HTMLVideoElement>();
+        let raf = 0;
+        let giveUp: ReturnType<typeof setTimeout> | null = null;
+
+        /*
+         * ⚠️ "LIVE" MEANS THE PICTURE COVERS THE FRAME, not that the stream has
+         * metadata.
+         *
+         * AWS sizes its video in a layout effect that runs only after the
+         * element can PLAY (`isCameraReady` in LivenessCameraModule), and on
+         * iOS the size it starts from is the getUserMedia one, width and height
+         * swapped. Announcing at `loadedmetadata` lifted the cover over that
+         * first layout: a small, off-centre, wrongly-zoomed picture in the
+         * corner of the frame (reported 2026-10-05). So the announcement waits
+         * until the element's box actually spans the frame, two frames in a
+         * row, with a ceiling so a layout that never matches cannot hold the
+         * cover up for ever.
+         */
+        const announceWhenCovering = (video: HTMLVideoElement) => {
+            if (giveUp === null) giveUp = setTimeout(sayLive, COVER_WAIT_MS);
+            let good = 0;
+            const check = () => {
+                const f = frame.getBoundingClientRect();
+                const v = video.getBoundingClientRect();
+                const covers =
+                    video.videoWidth > 0 &&
+                    f.width > 0 &&
+                    v.width >= f.width * 0.98 &&
+                    v.height >= f.height * 0.98;
+                good = covers ? good + 1 : 0;
+                if (good >= 2) {
+                    sayLive();
+                    return;
+                }
+                raf = requestAnimationFrame(check);
+            };
+            cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(check);
+        };
+
         const watch = (video: HTMLVideoElement) => {
             // Our own glass copy takes its stream FROM AWS's element, so it can
             // never be the earlier signal — and watching it would mean the
             // decoration could announce the camera.
             if (video.classList.contains('rz-live-glass') || attached.has(video)) return;
             attached.add(video);
-            if (video.readyState >= 1 && video.videoWidth) {
-                sayLive();
+            if (video.readyState >= 2 && video.videoWidth) {
+                announceWhenCovering(video);
                 return;
             }
-            video.addEventListener('loadedmetadata', sayLive, { once: true });
-            video.addEventListener('playing', sayLive, { once: true });
+            const go = () => announceWhenCovering(video);
+            video.addEventListener('playing', go, { once: true });
+            video.addEventListener('canplay', go, { once: true });
         };
 
         frame.querySelectorAll('video').forEach(watch);
@@ -1122,7 +1169,11 @@ export function LivenessCamera({
         });
         observer.observe(frame, { childList: true, subtree: true });
 
-        return () => observer.disconnect();
+        return () => {
+            observer.disconnect();
+            cancelAnimationFrame(raf);
+            if (giveUp !== null) clearTimeout(giveUp);
+        };
     }, [sayLive]);
 
     useEffect(() => {

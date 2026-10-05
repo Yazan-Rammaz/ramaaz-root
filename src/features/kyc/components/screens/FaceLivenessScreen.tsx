@@ -529,6 +529,14 @@ export function FaceLivenessScreen({
             if (cancelled) return;
             // Never throws — a refusal arrives as `probeError` below.
             await startProbe();
+            /*
+             * Start the face-mesh model download NOW, while the person is
+             * still lining up their light. It costs nothing (no AWS session is
+             * open), and the session effect awaits the same shared download —
+             * so the gap between this camera closing and AWS's opening is the
+             * session call alone, not the session plus ~15MB of model.
+             */
+            if (CAPTURE_LIVE_MESH.enabled) void ensureLandmarker(MESH_MODEL_TIMEOUT_MS);
         })();
 
         return () => {
@@ -545,11 +553,38 @@ export function FaceLivenessScreen({
      * order here is what keeps the probe from becoming a new way to fail.
      */
     const lightReady = lightProgress >= 1 && lightVerdict === 'ok';
+
+    /**
+     * The light check's last frame, held on screen until AWS's camera is
+     * actually showing — so the two camera opens read as ONE.
+     *
+     * Two opens are unavoidable (AWS calls `getUserMedia` itself, and a phone
+     * refuses a second open of a camera this screen still holds), but they
+     * were VISIBLE: the picture went black with the standby rings while the
+     * session opened, then came back as a second camera — reported as "it
+     * opens the camera two times". Bridging the gap with the last frame keeps
+     * the person looking at themselves throughout.
+     */
+    const [handoverStill, setHandoverStill] = useState<string | null>(null);
+
     useEffect(() => {
         if (!lightReady || lightCleared) return;
+        const video = probeVideoRef.current;
+        if (video?.videoWidth && video.videoHeight) {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d')?.drawImage(video, 0, 0);
+                setHandoverStill(canvas.toDataURL('image/jpeg', 0.8));
+            } catch {
+                // No still — the standby mark covers the gap as before.
+            }
+        }
         stopProbe();
         setLightCleared(true);
-    }, [lightReady, lightCleared, stopProbe]);
+    }, [lightReady, lightCleared, stopProbe, probeVideoRef]);
+
 
     /**
      * The probe could not open the camera — waive the gate.
@@ -583,6 +618,7 @@ export function FaceLivenessScreen({
      */
     const rearmLightGate = useCallback(() => {
         setLightCleared(false);
+        setHandoverStill(null);
         // Drop the last check's verdict with it, so the new one does not open
         // under a warning about a room that has since been fixed.
         setLiveQuality(null);
@@ -1164,8 +1200,30 @@ export function FaceLivenessScreen({
                          * mounting. The verdict learned this the hard way; this is the same
                          * lesson one state earlier.
                          */
-                        <span className="verdict-layer pointer-events-none absolute inset-0">
-                            <VerdictMark phase="preparing" />
+                        /*
+                         * ⚠️ OPAQUE. It used to be the glyph alone over whatever
+                         * was beneath — and beneath, during `ready && !streamLive`,
+                         * is AWS's camera before it has sized itself: a small,
+                         * off-centre, wrongly-zoomed picture in the corner of
+                         * the frame (reported 2026-10-05). Nothing under this
+                         * cover is ever worth seeing, so it hides all of it.
+                         *
+                         * With a hand-over still from the light check, that
+                         * still IS the cover — see `handoverStill`.
+                         */
+                        <span className="verdict-layer pointer-events-none absolute inset-0 bg-black">
+                            {handoverStill ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                    src={handoverStill}
+                                    alt=""
+                                    aria-hidden
+                                    className="h-full w-full object-cover"
+                                    style={probeMirror ? { transform: 'scaleX(-1)' } : undefined}
+                                />
+                            ) : (
+                                <VerdictMark phase="preparing" />
+                            )}
                         </span>
                     )}
 
@@ -1463,6 +1521,9 @@ export function FaceLivenessScreen({
                 cameraLive={phase === 'preparing' || phase === 'ready'}
                 onPhaseChange={setHandoffPhase}
                 onLive={() => {
+                    // A phone took over the frame: the light check's last frame
+                    // is not this camera's, and must not bridge to it.
+                    setHandoverStill(null);
                     setSnapshot(null);
                     setStreamLive(false);
                     setPhase('preparing');
