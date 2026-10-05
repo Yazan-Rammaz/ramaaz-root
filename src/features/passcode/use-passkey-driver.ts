@@ -55,7 +55,21 @@ async function register(
   // not be mistaken for a lapsed activation.
   if (credential === "exists") return "exists";
   if (!("refused" in credential)) return credential;
-  return performance.now() - startedAt < BLOCKED_MS ? "blocked" : `failed:${credential.refused}`;
+  /*
+   * ⚠️ ONLY NotAllowedError can be "blocked". Speed alone is not the tell.
+   *
+   * A lapsed activation is refused instantly AS NotAllowedError — that is the
+   * one case a fresh tap fixes. Everything else that fails instantly
+   * (SecurityError for an RP ID that does not match the page, a TypeError on
+   * options the browser cannot parse) was being called "blocked" too, so the
+   * screen asked for a "tap to finish" that failed the same way, then printed
+   * a bare "That didn't work" with the real reason thrown away (reported
+   * 2026-10-05 on a new device). Those now fail at once, with their name.
+   */
+  const fast = performance.now() - startedAt < BLOCKED_MS;
+  return fast && credential.refused === "NotAllowedError"
+    ? "blocked"
+    : `failed:${credential.refused}`;
 }
 
 /**

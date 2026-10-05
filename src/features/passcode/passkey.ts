@@ -441,8 +441,16 @@ export type PasskeyDriver = {
 /** What a passkey setup came to — see `PasskeyDriver.enrol.finish`. */
 export type PasskeySetupOutcome = "ok" | "blocked" | "exists" | `failed:${string}`;
 
-/** The reason inside a `failed:…` outcome, for the screen. */
+/**
+ * The reason inside an outcome, for the screen.
+ *
+ * `blocked` has one too: it is a NotAllowedError the browser raised without
+ * showing anything. Reaching the screen as a failure means it happened even
+ * on the "finish" tap — the one case where a missing gesture is not the
+ * explanation, so the name is worth showing.
+ */
 export function setupFailureReason(outcome: PasskeySetupOutcome): string | undefined {
+  if (outcome === "blocked") return "NotAllowedError (no prompt)";
   return outcome.startsWith("failed:") ? outcome.slice("failed:".length) : undefined;
 }
 
