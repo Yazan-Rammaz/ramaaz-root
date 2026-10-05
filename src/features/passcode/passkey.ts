@@ -255,6 +255,50 @@ function checkRpId(publicKey: Record<string, unknown>): void {
 }
 
 /**
+ * On Android, ask for a key bound to THIS phone rather than a synced passkey.
+ *
+ * ── Why ─────────────────────────────────────────────────────────────────────
+ * The backend sends `residentKey: "preferred"`. On Android that sends Chrome
+ * to Google Password Manager for a SYNCED passkey — which hangs the whole setup
+ * on the phone's Google account and Play services being in order. On a new
+ * Android 10 device it failed outright with NotReadableError, "An unknown
+ * error occurred while talking to the credential manager" (Observe, 2026-10-05).
+ *
+ * "discouraged" makes Chrome create a device-bound key in the phone's own
+ * keystore instead: needs a screen lock, nothing else. That is also exactly
+ * what Add device means — this device, its own key.
+ *
+ * ── Why it is safe ──────────────────────────────────────────────────────────
+ *   - The backend allows it: its options say `requireResidentKey: false`, so a
+ *     non-discoverable credential passes its verification. Only `residentKey`
+ *     changes; the challenge and everything signed are untouched.
+ *   - Every sign-in names the allowed credentials (`allowCredentials`), so a
+ *     key that is not discoverable is still found.
+ *
+ * The one thing it costs on Android: the keyboard autofill offer lists only
+ * discoverable passkeys, so it will not show this one. The prompt that opens
+ * with the lock — the main path — is unaffected.
+ *
+ * Android only. An iPhone makes an iCloud passkey whatever is asked, and the
+ * desktop path has given no trouble, so neither is touched.
+ */
+function deviceBoundOnAndroid(publicKey: Record<string, unknown>): Record<string, unknown> {
+  if (typeof navigator === "undefined" || !/Android/i.test(navigator.userAgent)) {
+    return publicKey;
+  }
+  const selection = (publicKey.authenticatorSelection ?? {}) as Record<string, unknown>;
+  // A backend that REQUIRES a discoverable credential would reject the result,
+  // so its word wins.
+  if (selection.requireResidentKey === true || selection.residentKey === "required") {
+    return publicKey;
+  }
+  return {
+    ...publicKey,
+    authenticatorSelection: { ...selection, residentKey: "discouraged", requireResidentKey: false },
+  };
+}
+
+/**
  * Run a REGISTRATION ceremony on the server's options (`mode: "register"`).
  *
  * Needs user activation behind it: browsers require it for `create()`, and
@@ -275,7 +319,10 @@ export async function runRegistration(
   checkRpId(publicKey);
   try {
     const credential = (await navigator.credentials.create({
-      publicKey: toPublicKeyOptions(publicKey, "register") as PublicKeyCredentialCreationOptions,
+      publicKey: toPublicKeyOptions(
+        deviceBoundOnAndroid(publicKey),
+        "register",
+      ) as PublicKeyCredentialCreationOptions,
     })) as PublicKeyCredential | null;
     if (!credential) return { refused: "NoCredential" };
     const json = credentialToJSON(credential);
