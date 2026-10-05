@@ -10,7 +10,25 @@ import { PasscodeBoxes } from '@/features/auth/components/PasscodeBoxes';
 import { useCodeFeedback } from '@/features/auth/use-code-feedback';
 import { PASSCODE_LENGTH } from '../schema';
 import { sweepLegacyStorage } from '../store';
-import { passkeyLabel, type PasskeyDriver } from '../passkey';
+import {
+    passkeyLabel,
+    setupFailureReason,
+    type PasskeyDriver,
+    type PasskeySetupOutcome,
+} from '../passkey';
+
+/**
+ * The sentence, with WHY beside it — "That didn't work · NotAllowedError".
+ *
+ * A setup that fails on somebody's phone leaves nothing to read: the console
+ * is on the device, not here. The short reason is what turns "it says try
+ * again" into something that can be fixed, the same way the session path puts
+ * the backend's code beside `passkeySetupFailed`.
+ */
+function withReason(sentence: string, outcome: PasskeySetupOutcome): string {
+    const reason = setupFailureReason(outcome);
+    return reason ? `${sentence} · ${reason}` : sentence;
+}
 import { PasskeyUnlock } from './PasskeyUnlock';
 import { UserAvatar } from './UserAvatar';
 
@@ -183,7 +201,7 @@ export function PasscodeLockGate({
                      * cleared, and the next PIN typed unlocks as usual.
                      */
                     setArmed(false);
-                    return { ok: false, error: t('passkeyFailed') };
+                    return { ok: false, error: withReason(t('passkeyFailed'), outcome) };
                 })
               : verify
                 ? verify(value)
@@ -417,12 +435,16 @@ export function PasscodeLockGate({
                             onArm={() => setArmed(true)}
                             deviceHasPasskey={deviceHasPasskey}
                             enrolOptions={enrolOptions}
-                            onEnrolFailed={() => {
+                            onEnrolFailed={(outcome) => {
                                 // The "finish" tap's prompt failed too. Same as
                                 // above: not let in — disarm and back to the row.
                                 setArmed(false);
                                 setEnrolOptions(null);
-                                fail(t('passkeyFailed'));
+                                // `exists` is handled by the control itself and
+                                // is not an error worth a red line.
+                                if (outcome !== 'exists') {
+                                    fail(withReason(t('passkeyFailed'), outcome));
+                                }
                             }}
                         />
                     ) : null}

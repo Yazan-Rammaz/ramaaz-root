@@ -15,6 +15,7 @@ import {
     type PasskeyDriver,
     type PasskeyKind,
     type PasskeyOutcome,
+    type PasskeySetupOutcome,
 } from '../passkey';
 import { waitForSplash } from '@/features/splash/timing';
 
@@ -98,8 +99,11 @@ export function PasskeyUnlock({
     armed: boolean;
     /** Setup was pressed: the gate should send the next PIN to `driver.enrol`. */
     onArm: () => void;
-    /** The "finish" tap's prompt failed — the gate disarms and clears the row. */
-    onEnrolFailed: () => void;
+    /**
+     * The "finish" tap's prompt failed — the gate disarms and clears the row,
+     * and prints the reason inside `outcome` (see `PasskeySetupOutcome`).
+     */
+    onEnrolFailed: (outcome: PasskeySetupOutcome) => void;
     /** The registration options, once the PIN opened one. */
     enrolOptions: Record<string, unknown> | null;
     /**
@@ -329,7 +333,7 @@ export function PasskeyUnlock({
             // Already on this device (another browser made it): use it, on
             // this same tap, instead of a setup that can never succeed.
             if (outcome === 'exists') {
-                onEnrolFailed();
+                onEnrolFailed(outcome);
                 await unlockWithThisDevice();
                 return;
             }
@@ -337,7 +341,7 @@ export function PasskeyUnlock({
             // credential is what signs in or unlocks. The reason is in the
             // console (see `runRegistration`); the gate disarms and the row is
             // the way on.
-            onEnrolFailed();
+            onEnrolFailed(outcome);
             return;
         }
 

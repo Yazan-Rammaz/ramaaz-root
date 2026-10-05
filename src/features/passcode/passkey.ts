@@ -265,19 +265,19 @@ function checkRpId(publicKey: Record<string, unknown>): void {
  * back to a "finish" tap.
  *
  * @returns the credential as JSON for the server; `"exists"` when this device
- * already holds a passkey for the account; null if refused for any other
- * reason.
+ * already holds a passkey for the account; otherwise `{ refused }` with the
+ * browser's error name, which the screen shows beside its sentence.
  */
 export async function runRegistration(
   publicKey: Record<string, unknown>,
-): Promise<Record<string, unknown> | "exists" | null> {
-  if (!isWebAuthnAvailable()) return null;
+): Promise<Record<string, unknown> | "exists" | { refused: string }> {
+  if (!isWebAuthnAvailable()) return { refused: "NoWebAuthn" };
   checkRpId(publicKey);
   try {
     const credential = (await navigator.credentials.create({
       publicKey: toPublicKeyOptions(publicKey, "register") as PublicKeyCredentialCreationOptions,
     })) as PublicKeyCredential | null;
-    if (!credential) return null;
+    if (!credential) return { refused: "NoCredential" };
     const json = credentialToJSON(credential);
     rememberLocalId(json.id);
     return json;
@@ -304,7 +304,7 @@ export async function runRegistration(
      * cannot work; using the passkey that is there does.
      */
     if (name === "InvalidStateError") return "exists";
-    return null;
+    return { refused: name || "Error" };
   }
 }
 
@@ -426,14 +426,25 @@ export type PasskeyDriver = {
      *   exists   this device already holds one of the link's passkeys (another
      *            browser on it made it). Use it — `authenticate` with
      *            `requireLocal: false` — rather than set up again.
-     *   failed   dismissed, or refused by the server. Details in the console.
+     *   failed   dismissed, or refused by the browser or the server — with a
+     *            short reason (`failed:NotAllowedError`, `failed:server 401
+     *            CHALLENGE_INVALID`) the screen prints beside its sentence, so a
+     *            failure on a phone with no console can still be read.
      */
     finish: (
       publicKey: Record<string, unknown>,
       label: string,
-    ) => Promise<"ok" | "blocked" | "exists" | "failed">;
+    ) => Promise<PasskeySetupOutcome>;
   };
 };
+
+/** What a passkey setup came to — see `PasskeyDriver.enrol.finish`. */
+export type PasskeySetupOutcome = "ok" | "blocked" | "exists" | `failed:${string}`;
+
+/** The reason inside a `failed:…` outcome, for the screen. */
+export function setupFailureReason(outcome: PasskeySetupOutcome): string | undefined {
+  return outcome.startsWith("failed:") ? outcome.slice("failed:".length) : undefined;
+}
 
 /** A name for the credential, shown in the device's own passkey list. */
 export function passkeyLabel(name?: string): string {

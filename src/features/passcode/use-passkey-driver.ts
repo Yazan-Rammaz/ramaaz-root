@@ -20,6 +20,7 @@ import {
   runAssertion,
   runRegistration,
   type PasskeyDriver,
+  type PasskeySetupOutcome,
 } from "./passkey";
 
 /**
@@ -47,14 +48,14 @@ const BLOCKED_MS = 250;
  */
 async function register(
   publicKey: Record<string, unknown>,
-): Promise<Record<string, unknown> | "blocked" | "exists" | "failed"> {
+): Promise<Record<string, unknown> | Exclude<PasskeySetupOutcome, "ok">> {
   const startedAt = performance.now();
   const credential = await runRegistration(publicKey);
   // Checked before the clock: "already here" can come back fast, and must
   // not be mistaken for a lapsed activation.
   if (credential === "exists") return "exists";
-  if (credential) return credential;
-  return performance.now() - startedAt < BLOCKED_MS ? "blocked" : "failed";
+  if (!("refused" in credential)) return credential;
+  return performance.now() - startedAt < BLOCKED_MS ? "blocked" : `failed:${credential.refused}`;
 }
 
 /**
@@ -117,7 +118,7 @@ export function useSessionPasskey({ bound, rpId }: { bound: boolean; rpId?: stri
         const result = await registerNewDeviceAction(credential, label);
         if (!result.ok) {
           console.warn(`[passkey] add device refused: ${result.reason}`);
-          return "failed";
+          return `failed:server ${result.reason}`;
         }
         setDocumentUnlocked(true);
         return "ok";
@@ -190,7 +191,8 @@ export function useSignInPasskey({
             // attempt; starting again means the options call — the PIN again.
             if (result.restart) await expireSignInAction();
             console.warn(`[passkey] add device refused: ${result.error}`);
-            return "failed";
+            const why = [result.diag?.status, result.diag?.code].filter(Boolean).join(" ");
+            return `failed:server ${why || "refused"}`;
           },
         }
       : undefined,
