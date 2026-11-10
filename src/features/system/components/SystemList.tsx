@@ -28,7 +28,8 @@ export const connectHref = (id: string) =>
  * the "light" category line is weight 300, not a gray color.
  *
  * Only a card the backend calls `selectable` (ACTIVE + CONNECTED) can be
- * selected: clicking it is a submit (Server Action → httpOnly cookie). Any
+ * selected: clicking it is a submit (Server Action → httpOnly cookie), and
+ * clicking the selected one again unselects it. Any
  * other card is greyed out with its state in the corner; one that isn't
  * connected yet opens the connect step instead, because connecting can happen
  * days after creating (the project team installs the verifier in between).

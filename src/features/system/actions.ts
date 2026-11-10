@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
-import { setSelectedSystemCookie } from "@/lib/api/backend";
+import { clearSelectedSystemCookie, getSelectedSystemId, setSelectedSystemCookie } from "@/lib/api/backend";
 import { ApiError, SessionLockedError } from "@/lib/api/server";
 import { apiErrorSchema } from "@/lib/auth/endpoints";
 import { correlationId, errorCode, retryAfterSeconds } from "@/lib/auth/errors";
@@ -19,6 +19,15 @@ import {
  * through the selected system via `backendFetch`.
  */
 export async function selectSystem(id: string): Promise<void> {
+  // Pressing the system that is already selected unselects it: the shell goes
+  // back to the systems list alone, as before anything was picked.
+  if ((await getSelectedSystemId()) === id) {
+    await clearSelectedSystemCookie();
+    revalidatePath("/", "layout");
+    return;
+  }
+
+
   // Resolve against the registry first — an unknown id (stale UI, tampering)
   // must not land in the cookie.
   //

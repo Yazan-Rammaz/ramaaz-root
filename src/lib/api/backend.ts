@@ -115,6 +115,11 @@ export async function setSelectedSystemCookie(id: string) {
   });
 }
 
+/** Cookie delete — nothing selected any more. Server Actions only, like the write. */
+export async function clearSelectedSystemCookie() {
+  (await cookies()).delete(SELECTED_SYSTEM);
+}
+
 /**
  * The selected system's registry entry (id, code, name, baseUrl), or null when
  * nothing is selected. Deleted system → null too (stale cookie), so callers
