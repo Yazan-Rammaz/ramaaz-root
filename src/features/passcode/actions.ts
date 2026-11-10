@@ -1,7 +1,6 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { getTranslations } from "next-intl/server";
 import { api, callerHeaders } from "@/lib/api/server";
 import { env } from "@/lib/env";
 import {
@@ -11,7 +10,7 @@ import {
   setAuthCookies,
   setDeviceHint,
 } from "@/lib/auth/cookies";
-import { clearChallenge, setSignInError } from "@/lib/auth/challenge";
+import { clearChallenge, setSessionEnded } from "@/lib/auth/challenge";
 import {
   AUTH_PATHS,
   deviceOptionsResponseSchema,
@@ -66,11 +65,24 @@ export async function unlockWithDeviceAction(
   return unlockWith({ device: credential });
 }
 
+/**
+ * A lock-screen action found no refresh token: the session ended while the
+ * screen sat locked — signed out in another tab, or the middleware's own
+ * refresh on THIS request came back dead and cleared the cookies (it logs why).
+ * The way forward is the access link, so say that. Going through "/" landed on
+ * /login and its "your sign-in didn't carry over", which isn't what happened.
+ */
+async function sessionAlreadyEnded(): Promise<never> {
+  console.warn("[auth] lock screen found no refresh token — sent to /no-access");
+  await clearChallenge();
+  await setSessionEnded();
+  redirect("/no-access");
+}
+
 async function unlockWith(proof: RefreshProof): Promise<UnlockResult> {
   const refreshToken = await getRefreshToken();
-  // Nothing to unlock — signed out in another tab while this one sat on the
-  // lock. The splash re-checks and lands on /login.
-  if (!refreshToken) redirect("/");
+  // Nothing to unlock — see sessionAlreadyEnded.
+  if (!refreshToken) return sessionAlreadyEnded();
 
   const base = env.NEST_API_URL;
   if (!base) return { ok: false, reason: "unavailable" };
@@ -95,6 +107,10 @@ async function unlockWith(proof: RefreshProof): Promise<UnlockResult> {
         reason: "rateLimited",
         retryAfterSeconds: outcome.retryAfterSeconds,
       };
+    // The backend could not be reached — the PIN was never checked and the
+    // token is unspent. Stay on the lock; the next try sends it again.
+    case "unreachable":
+      return { ok: false, reason: "unavailable" };
     case "dead":
       break;
   }
@@ -103,10 +119,11 @@ async function unlockWith(proof: RefreshProof): Promise<UnlockResult> {
   // (the setting was switched on after this session began and the account has
   // no PIN yet — the sign-in sequence is what sets it). Either way the way
   // forward is the access link, and /no-access is the screen that offers it.
-  const t = await getTranslations("passcode");
+  // Logged like middleware's: this sign-out is otherwise invisible.
+  console.warn(`[auth] unlock refresh failed (${outcome.reason}) — session cleared`);
   await clearAuthCookies();
   await clearChallenge();
-  await setSignInError(outcome.message || t("sessionEnded"));
+  await setSessionEnded(outcome.message);
   redirect("/no-access");
 }
 
@@ -123,7 +140,7 @@ async function unlockWith(proof: RefreshProof): Promise<UnlockResult> {
  */
 export async function refreshDeviceOptionsAction(): Promise<DeviceOptionsResult> {
   const cookieToken = await getRefreshToken();
-  if (!cookieToken) redirect("/");
+  if (!cookieToken) return sessionAlreadyEnded();
 
   const { token, rotated } = await settledRefreshToken(cookieToken);
   if (rotated) await setAuthCookies(rotated);
@@ -159,7 +176,7 @@ export async function newDeviceOptionsAction(code: string): Promise<DeviceOption
     return { ok: false, reason: "wrong" };
   }
   const cookieToken = await getRefreshToken();
-  if (!cookieToken) redirect("/");
+  if (!cookieToken) return sessionAlreadyEnded();
 
   const { token, rotated } = await settledRefreshToken(cookieToken);
   if (rotated) await setAuthCookies(rotated);

@@ -2,8 +2,7 @@ import type { ReactNode } from 'react';
 
 import { Screen } from '@/components/ui/Screen';
 import { AddActionProvider } from '@/features/shell/add-action';
-import { Sidebar } from '@/features/shell/components/Sidebar';
-import { Navbar } from '@/features/shell/components/Navbar';
+import { Shell } from '@/features/shell/components/Shell';
 import { Icon } from '@/components/ui/Icon';
 
 import { PrivateCodeScreen } from '@/features/auth/components/PrivateCodeScreen';
@@ -67,20 +66,13 @@ function AuthShell({ children }: { children: ReactNode }) {
 /**
  * The `(dashboard)` layout without `requireSession()`. Everything else — the
  * rail, the navbar, the scroll region — is the same tree the real layout builds,
- * from the same components.
+ * from the same components. Shown with a system selected ("rdb"), since every
+ * screen here but /systems is a project page.
  */
 function DashboardShell({ children }: { children: ReactNode }) {
     return (
         <AddActionProvider>
-            <div className="flex h-full w-full overflow-hidden">
-                <Sidebar />
-                <div className="flex min-w-0 flex-1 flex-col">
-                    <Navbar />
-                    <main className="thin-scroll relative min-h-0 flex-1 overflow-auto">
-                        {children}
-                    </main>
-                </div>
-            </div>
+            <Shell systemCode="rdb">{children}</Shell>
         </AddActionProvider>
     );
 }
@@ -209,9 +201,8 @@ export const SCREENS: Record<string, () => ReactNode> = {
             <DashboardPage />
         </DashboardShell>
     ),
-    // Not the real page: `listSystems()` reads the registry that lived in the
-    // deleted root-backend, so it throws rather than returning rows. The list
-    // component itself IS the real one.
+    // Not the real page (that needs a session to read /v1/me); the list
+    // component itself IS the real one. Add ?add=project for the drawer.
     systems: () => (
         <DashboardShell>
             <SystemList items={FIXTURE_SYSTEMS} selectedId="rdb" />

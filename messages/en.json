@@ -13,6 +13,9 @@
     "noAccessBody": "This link can’t be opened. It may have expired, been used already, or never been valid. Ask a root administrator to issue you a new one — there is no other way in.",
     "noSessionTitle": "Your sign-in didn’t carry over",
     "noSessionBody": "This browser has no sign-in in progress. If you opened your link in one app and then switched browsers, it was left behind — open the access link again, and stay in the browser it opens.",
+    "sessionEndedTitle": "Your session ended",
+    "sessionEndedBody": "This wasn't something you did. Open your access link again to sign back in. If it no longer opens, ask a root administrator for a new one.",
+    "sessionEndedNoLink": "Open the access link from your WhatsApp message to sign back in.",
     "reenterPrompt": "Refreshing this page won’t help — there is nothing here to reload.",
     "reenterCta": "Open your access link again",
     "identityTitle": "Identity Verification !",
@@ -71,7 +74,10 @@
     "matchReview": "Match accepted with low confidence — your verification will be reviewed by our team. Continuing to the next step…",
     "matchFailed": "We noticed a discrepancy in the image and there is an issue with your verification.",
     "matchTryAgain": "Try Again With The Correction",
-    "matchRetry": "Rematch"
+    "matchRetry": "Rematch",
+    "idMissingName": "We couldn't read your full name. Move away from glare on the name and try again.",
+    "idMissingBirthday": "We couldn't read your date of birth. Keep that part of the card free of glare.",
+    "idMissingDocumentNumber": "We couldn't read your ID number. Keep that part of the card free of glare."
   },
   "passcode": {
     "title": "Set Passcode !",
@@ -87,7 +93,6 @@
     "rateLimited": "Too many tries — wait {seconds} seconds",
     "rateLimitedUnknown": "Too many tries — wait a minute",
     "unavailable": "Unlock is unavailable right now",
-    "sessionEnded": "Your session has ended. Open your access link to sign in again.",
     "passkeyFailed": "That didn’t work — tap to try again",
     "passkeyExists": "This device already has a passkey — tap the icon to use it",
     "passkeyWaiting": "Waiting for your device…",
@@ -134,12 +139,15 @@
       "translate": "System Languages",
       "currencies": "Currencies",
       "countries": "Countries",
-      "database": "Database",
+      "database": "Dashboard Types",
       "hierarchy": "Hierarchy",
       "search": "Search",
       "close": "Close",
       "add": "Add",
-      "lock": "Lock"
+      "lock": "Lock",
+      "business": "Business Types",
+      "workStructure": "Business Work Structure",
+      "hide": "Hide"
     },
     "side": {
       "avatar": "Profile",
@@ -147,16 +155,132 @@
       "chat": "Chat",
       "settings": "Settings",
       "systems": "Systems",
-      "logout": "Sign out"
+      "logout": "Sign out",
+      "workStructure": "Business Work Structure"
     }
   },
   "system": {
     "title": "System Projects",
-    "empty": "No system projects yet."
+    "empty": "No system projects yet.",
+    "status": {
+      "notConnected": "Not connected",
+      "failed": "Connection failed",
+      "suspended": "Suspended",
+      "unavailable": "Unavailable"
+    },
+    "form": {
+      "createTitle": "Add project",
+      "stepCreate": "1 · Details",
+      "stepConnect": "2 · Connect",
+      "code": "Short name (code)",
+      "codeHint": "2–20: a–z, 0–9, -",
+      "name": "Full name",
+      "nameAr": "Arabic name",
+      "optional": "Optional",
+      "description": "Description",
+      "descriptionHint": "e.g. Payment Services Provider",
+      "codeForever": "The short name can never be changed or reused, even after the project is archived.",
+      "create": "Create project",
+      "creating": "Creating…",
+      "invalid": {
+        "code": "2–20 lowercase letters, digits or -, not starting or ending with -.",
+        "name": "Required, up to 100 characters.",
+        "name_ar": "Up to 100 characters.",
+        "description": "Required, up to 150 characters.",
+        "base_url": "Enter a full https:// address."
+      }
+    },
+    "connection": {
+      "title": "Connect project",
+      "instructions": "Ask the project team to install the root verifier with project code <b>{code}</b>, then enter the project backend's address below.",
+      "baseUrl": "Base URL",
+      "connect": "Connect",
+      "connecting": "Connecting…",
+      "connected": "Connected. The project is active and can be selected.",
+      "failed": "Connection failed",
+      "done": "Done",
+      "errors": {
+        "PROJECT_UNREACHABLE": "We couldn't reach it (DNS, timeout, TLS or connection refused). Check the address and that the server is up.",
+        "PROJECT_REJECTED_TOKEN": "It refused our token: the root verifier isn't installed there, or is misconfigured.",
+        "PROJECT_CODE_MISMATCH": "It answered as a different project. Its PROJECT_CODE must match this project's short name.",
+        "PROJECT_BAD_MANIFEST": "Its manifest is missing or invalid.",
+        "PROJECT_CONTRACT_UNSUPPORTED": "It speaks a contract version we don't support.",
+        "PROJECT_ERROR": "It answered with a server error or a redirect.",
+        "BASE_URL_NOT_ALLOWED": "That address resolves to a network we're not allowed to call."
+      }
+    },
+    "errors": {
+      "codeTaken": "This short name is taken, possibly by an archived project.",
+      "suspended": "This project is suspended.",
+      "forbidden": "Only a root administrator can do this.",
+      "rateLimited": "Too many attempts. Try again in {seconds} seconds.",
+      "generic": "Something went wrong. Reference: {ref}"
+    }
   },
   "language": {
     "title": "System Languages",
-    "empty": "No system languages yet."
+    "empty": "No system languages yet.",
+    "fallsBack": "Falls back to {code}",
+    "required": "Required",
+    "isDefault": "Default",
+    "ltr": "LTR",
+    "rtl": "RTL",
+    "status": {
+      "DRAFT": "Draft",
+      "ACTIVE": "Active",
+      "INACTIVE": "Inactive"
+    },
+    "coverage": {
+      "title": "Names translated",
+      "line": "{percent}% · {missing} of {total} have no text"
+    },
+    "kinds": {
+      "countries": "{count, plural, one {# country} other {# countries}}",
+      "regions": "{count, plural, one {# region} other {# regions}}",
+      "branches": "{count, plural, one {# branch} other {# branches}}",
+      "regionTypes": "{count, plural, one {# region type} other {# region types}}",
+      "branchTypes": "{count, plural, one {# branch type} other {# branch types}}",
+      "currencies": "{count, plural, one {# currency} other {# currencies}}"
+    },
+    "form": {
+      "addTitle": "Add a language",
+      "editTitle": "Edit {name}",
+      "code": "Code",
+      "codeHint": "tr, ckb, zh-Hant",
+      "codeInvalid": "A BCP 47 code in its usual casing: tr, ku, ckb, zh-Hant, pt-BR.",
+      "codeConfirm": "The code {code} can never change once added. Check it, then add.",
+      "nameEn": "Name in English",
+      "nameHint": "Type it, e.g. Turkish",
+      "nameAr": "Name in Arabic",
+      "nativeName": "Name in the language itself",
+      "direction": "Direction",
+      "fallback": "Fallback",
+      "fallbackNote": "Shown where a text is missing, and for system messages.",
+      "sortOrder": "Order",
+      "sortHint": "0–10000, optional",
+      "kurdish": "Kurdish: ku is Kurmanji (Latin script, left to right, falls back to English) and ckb is Sorani (Arabic script, right to left, falls back to Arabic). Add the one you mean, or both.",
+      "startsDraft": "A new language starts as Draft: customers see nothing until it is made Active.",
+      "requiredLocked": "English and Arabic always keep their direction and fallback.",
+      "add": "Add",
+      "confirmAdd": "Yes, add {code}",
+      "save": "Save changes",
+      "cancel": "Cancel"
+    },
+    "change": {
+      "title": "Status",
+      "locked": "English and Arabic always stay Active.",
+      "reason": "Reason (required)",
+      "confirm": "Make it {status}",
+      "cancel": "Cancel",
+      "activeLead": "Customers will see {name} within a minute.",
+      "missing": "{kinds} have no text in it yet. Those names will show {fallback} instead.",
+      "complete": "Every name has a text in it.",
+      "unchecked": "Coverage could not be checked, so it is not known whether every name has a text.",
+      "messages": "System messages (errors, notifications) will be in {fallback}.",
+      "inactive": "Customers stop seeing it within a minute, and name forms stop offering it. Texts already written are kept.",
+      "draftFromActive": "Customers stop seeing it within a minute. Names can still be written in it.",
+      "draftFromInactive": "Name forms offer it again. Customers still do not see it."
+    }
   },
   "region": {
     "title": "System Geographic Regions",
@@ -167,7 +291,83 @@
       "admin": "Administrative Divisions"
     },
     "addTitle": "Add Countries",
-    "level": "Level {n}"
+    "level": "Level {n}",
+    "flag": {
+      "label": "Flag",
+      "pick": "Choose a flag — SVG, PNG or WebP, up to 256 KB",
+      "upload": "Upload this flag to RDB",
+      "uploading": "Uploading…",
+      "uploaded": "Flag saved in RDB",
+      "problem": {
+        "type": "SVG, PNG or WebP only",
+        "size": "Larger than 256 KB",
+        "missing": "Choose a flag first"
+      }
+    },
+    "map": {
+      "label": "SVG Map",
+      "pick": "Choose a map — SVG only, up to 256 KB",
+      "problem": {
+        "type": "SVG only",
+        "size": "Larger than 256 KB"
+      }
+    },
+    "errors": {
+      "generic": "That didn't go through. Reference: {ref}",
+      "invalid": "Some details are missing or not in the right format: {fields}",
+      "pending": "We couldn't confirm the change yet. Press again to check — it won't be made twice.",
+      "retryExpired": "This change can no longer be confirmed from here. Check in the system whether it was made.",
+      "retryFinished": "This change has already finished. Reload the page to see where it stands.",
+      "rateLimited": "Too many requests. Try again in {seconds} seconds.",
+      "stale": "Someone changed this since you opened it, so nothing was saved. Reload the page to see their change, then save again.",
+      "codeInUse": "Change or clear the ISO codes of this country's regions first; they still start with the old code.",
+      "hasChildren": "Close what is inside it first: closing goes from the bottom up.",
+      "regionNotEmpty": "A region's type can only change while nothing is below it.",
+      "countryClosed": "This country was closed meanwhile, so nothing was saved.",
+      "staleReloaded": "Someone changed this since you opened it, so nothing was saved. Their values are shown now: check them and save again.",
+      "languageExists": "That language is already in the list. Change its status instead.",
+      "languageRequired": "English and Arabic always stay Active and keep their direction and fallback.",
+      "languageFallback": "The fallback must be English or Arabic, and not the language itself.",
+      "languageNotFound": "That language is no longer in the list. Reload the page."
+    },
+    "currency": {
+      "missing": "{code} · {name} is not in this system yet.",
+      "arName": "Arabic name",
+      "add": "Add {code} to the system",
+      "adding": "Adding…"
+    },
+    "close": {
+      "country": "Close this country",
+      "region": "Close this {level}",
+      "reason": "Reason (required)",
+      "confirm": "Close {name}",
+      "cancel": "Cancel",
+      "blocked": "Close what is inside it first: {count, plural, one {# region is} other {# regions are}} still open. Closing goes from the bottom up.",
+      "note": "A closed country or region stays in RDB with its history. A closed country stays here, greyed, and can be reopened."
+    },
+    "reopen": {
+      "closed": "This country is closed: nothing in it can be changed. Reopen it first.",
+      "country": "Reopen this country",
+      "reason": "Reason (required)",
+      "confirm": "Reopen {name}",
+      "cancel": "Cancel",
+      "note": "Reopening brings back its currencies, levels and branch types. What was closed inside it stays closed."
+    },
+    "names": {
+      "draft": "Draft — not shown to customers yet",
+      "inactive": "Inactive",
+      "remove": "Remove",
+      "removed": "Removed when you save",
+      "translateAll": "Translate every language again",
+      "translateOne": "Translate {code} again"
+    },
+    "edit": {
+      "codeMoved": "RDB keeps two-letter codes: {from} opens as {to}. Save to move it over.",
+      "codeInvalid": "The short name must be two capital letters (ISO 3166-1), e.g. JO.",
+      "namesMissing": "English and Arabic names are required.",
+      "levelsIncomplete": "Pick a division for every level.",
+      "isoInvalid": "The ISO code must be 1–3 letters or digits."
+    }
   },
   "currency": {
     "title": "System Currencies",
@@ -177,6 +377,301 @@
       "crypto": "Crypto",
       "gold": "Gold",
       "silver": "Silver"
+    },
+    "edit": {
+      "title": "Edit {name}",
+      "code": "Currency Code",
+      "codeHint": "USD",
+      "codeInvalid": "Three capital letters, the ISO 4217 code (USD, TRY, SAR).",
+      "name": "Currency Name",
+      "translations": "Currency Name \"System Languages\"",
+      "active": "Active",
+      "inactive": "Inactive",
+      "save": "Save Changes",
+      "cancel": "Cancel"
+    }
+  },
+  "rbac": {
+    "title": "System RBAC",
+    "tabs": {
+      "roles": "Roles",
+      "permissions": "Permissions"
+    },
+    "empty": "No roles yet. Add the first one with +.",
+    "newRole": "New Role",
+    "heldBy": "{count, plural, =0 {Held by nobody} one {Held by 1 person} other {Held by # people}}",
+    "panel": {
+      "info": "Information",
+      "permissions": "Permissions"
+    },
+    "availability": {
+      "title": "Roles Availability",
+      "all": "Availability For Countries | All",
+      "enable": "Enable",
+      "disable": "Disable",
+      "none": "No country is selected, so the role can be used nowhere.",
+      "closed": "{name} (closed)"
+    },
+    "name": {
+      "title": "Add Roles Name",
+      "short": "Roles Short Name",
+      "shortHint": "Max 4/4",
+      "label": "Roles Name",
+      "translation": "Roles Name Translation \"System Languages\""
+    },
+    "save": {
+      "add": "↳ Add & Save",
+      "edit": "↳ Save Changes",
+      "held": "{count, plural, one {This role is held by 1 person.} other {This role is held by # people.}} The change reaches all of them. Save?",
+      "confirm": "Save",
+      "cancel": "Cancel"
+    },
+    "sort": {
+      "changed": "The order changed",
+      "save": "Save order",
+      "undo": "Undo",
+      "confirm": "Changing the order changes who can appoint whom. Save?"
+    },
+    "remove": {
+      "label": "Delete role",
+      "held": "{count, plural, one {Held by 1 person.} other {Held by # people.}} Remove it from them first.",
+      "confirm": "Delete {name} ({short})? This cannot be undone.",
+      "yes": "Delete"
+    },
+    "perm": {
+      "deprecated": "being withdrawn",
+      "sensitive": "sensitive",
+      "where": "{places} only",
+      "retired": "retired, no longer granted",
+      "empty": "This project publishes no permissions yet.",
+      "place": {
+        "project": "the whole project",
+        "country": "countries",
+        "region": "regions",
+        "branch": "branches"
+      }
+    },
+    "errors": {
+      "generic": "That didn't go through. Reference: {ref}",
+      "invalid": "Give the role a short name (1–4 letters or digits) and a name.",
+      "forbidden": "Only Root can change roles.",
+      "gone": "This role no longer exists. The list has been reloaded.",
+      "orderChanged": "Someone added or deleted a role meanwhile. The list has been reloaded; sort again.",
+      "rateLimited": "Too many requests. Try again in {seconds} seconds."
+    },
+    "catalog": {
+      "readOnly": "Published by the project",
+      "active": "Active",
+      "key": "Permission Key",
+      "label": "Permission Name \"System Languages\"",
+      "where": "Takes Effect At",
+      "anywhere": "Anywhere",
+      "details": "Details",
+      "rootOnly": "Root only",
+      "inRoles": "Roles That Hold It",
+      "noRoles": "No role holds this permission yet.",
+      "rootOnlyRoles": "Root only: it can never be in a role.",
+      "empty": "This project publishes no permissions yet."
+    }
+  },
+  "businessType": {
+    "title": "System Business Type",
+    "tabs": {
+      "individual": "Individual",
+      "corporate": "Corporate",
+      "work": "Business Work Type"
+    },
+    "empty": "No business types yet.",
+    "newType": "New business type",
+    "panel": {
+      "title": "Business Type",
+      "info": "Information",
+      "settings": "Settings",
+      "settingsSoon": "Settings arrive with the backend."
+    },
+    "availability": {
+      "title": "Business Type Availability",
+      "all": "Availability For Countries | All",
+      "enable": "Enable",
+      "disable": "Disable",
+      "pick": "Pick at least one country above."
+    },
+    "name": {
+      "title": "Add Business Type Name",
+      "short": "BT Short Name",
+      "shortHint": "Max 4/4",
+      "label": "Business Type Name",
+      "translation": "Business Type Name Translation \"System Languages\""
+    },
+    "save": {
+      "add": "Add & Save",
+      "edit": "Save Changes"
+    }
+  },
+  "work": {
+    "tabs": {
+      "info": "Information",
+      "settings": "Settings",
+      "login": "Login Info",
+      "data": "Data Setting"
+    },
+    "header": {
+      "settings": "Setting",
+      "login": "Login Info",
+      "data": "Data Setting",
+      "all": "All"
+    },
+    "info": {
+      "availability": "Dashboard Availability",
+      "countries": "Availability For Countries | All",
+      "enable": "Enable",
+      "disable": "Disable",
+      "seats": "Availability For Business Admins",
+      "type": "Dashboard Type",
+      "workType": "Business Work Type",
+      "language": "Dashboard Language \"{count}\""
+    },
+    "access": {
+      "title": "Dashboard Access Settings",
+      "method": "Access Method",
+      "browser": "Browser",
+      "application": "Application",
+      "model": "Access Model",
+      "desktop": "Desktop Web",
+      "mobile": "Mobile Web",
+      "chrome": "Chrome",
+      "safari": "Safari",
+      "conditions": "Access Conditions",
+      "noConditions": "No Conditions",
+      "conditionsCount": "{count, plural, one {# Condition} other {# Conditions}}",
+      "condition": {
+        "regions": "Specific Geographic Regions",
+        "ip": "Specific IP",
+        "mac": "Specific MAC Address",
+        "device": "Specific Device",
+        "timeframe": "Specific Timeframe"
+      },
+      "ipAccess": "IP Access :",
+      "linkType": "Dashboard Link Type",
+      "permalink": "Permalink",
+      "type2": "Type 2",
+      "type3": "Type 3",
+      "firstLogin": "Dashboard First Login Setting",
+      "contract": "Dashboard Request Contract \"First Login\"",
+      "contract1": "Contract 1",
+      "contract2": "Contract 2",
+      "verification": "Dashboard Verification User",
+      "type1": "Type 1",
+      "beforeLogin": "Dashboard Before Login Setting",
+      "loginType": "Dashboard Login Type",
+      "root": "Root Type",
+      "management": "Management Type",
+      "approveType": "Approve Type",
+      "yes": "Yes",
+      "no": "No",
+      "afterLogin": "Dashboard After Login Setting",
+      "timeframeAfter": "Timeframe After Login",
+      "timeframeSignOut": "Timeframe Sign Out"
+    },
+    "admins": {
+      "loginInfo": "Dashboard Login Information",
+      "link": "Dashboard Link",
+      "list": "Dashboard Login Business Admins",
+      "add": "Add Business Admin",
+      "log": "Progress",
+      "showFile": "Show The File",
+      "duration": "Full Duration {full}",
+      "durationSplit": "User Side {user} Minute · System Side {system} Minute · Approval Side {approval} Minute",
+      "stage": {
+        "approval": "Waiting For The Second Root Admin’s Approval",
+        "send": "Send Login Info To Business Admin",
+        "login": "Sent & Waiting Business Admin Login",
+        "review": "Waiting Reviewing The Files And Approving"
+      },
+      "sheet": {
+        "title": "Business Admin",
+        "addPhoto": "Add Business Admin Photo",
+        "editPhoto": "Edit Business Admin Photo",
+        "name": "Add Business Admin Name \"Exact Id\"",
+        "phone": "Add Business Admin Phone Number",
+        "ips": "Add Business Admin IPs",
+        "mac": "Add Business Admin Mac Address",
+        "device": "Add Business Admin Device",
+        "secret": "Add Business Admin Secret Words"
+      }
+    },
+    "kyc": {
+      "idType": "ID Type",
+      "country": "Country",
+      "name": "Name",
+      "nationalNumber": "National Number",
+      "birthday": "Birthday",
+      "approve": "Approve",
+      "entered": "System Entered",
+      "detected": "Face Detection"
+    },
+    "admin": {
+      "tabs": {
+        "info": "Information",
+        "settings": "Settings",
+        "log": "User Log",
+        "files": "Files"
+      },
+      "info": "{name} User Info",
+      "availability": "{name} Dashboard Availability",
+      "log": "{name} User Log",
+      "edit": "Edit",
+      "name": "Business Admin Name \"Exact Id\"",
+      "phone": "Business Admin Phone Number",
+      "secret": "Business Admin Secret Words",
+      "addedBy": "Business Admin Added By",
+      "approvedBy": "Business Admin Approved By",
+      "addedAt": "Business Admin Added On",
+      "countries": "Availability For Countries | All",
+      "enable": "Enable",
+      "disable": "Disable"
+    },
+    "data": {
+      "title": "Dashboard Data Setting",
+      "tabs": {
+        "regions": "Geographic Regions",
+        "currencies": "Currencies",
+        "structure": "Administrative Structure",
+        "rbac": "System RBAC",
+        "business": "Business Types",
+        "legal": "The Legal Entity"
+      },
+      "update": "Update"
+    }
+  },
+  "dashboardType": {
+    "title": "System Dashboards Type",
+    "empty": "No dashboard types yet.",
+    "newType": "New dashboard type",
+    "panel": {
+      "info": "Information",
+      "settings": "Settings",
+      "settingsSoon": "Settings arrive with the backend."
+    },
+    "availability": {
+      "title": "Dashboard Type Availability",
+      "all": "Availability For Countries | All",
+      "enable": "Enable",
+      "disable": "Disable"
+    },
+    "logo": {
+      "title": "Add Dashboard Type Logo \"SVG Format Only\"",
+      "pick": "Pick an SVG file"
+    },
+    "name": {
+      "title": "Add Dashboard Type Name",
+      "label": "Dashboard Type Name",
+      "translation": "Dashboard Type Name Translation \"System Languages\""
+    },
+    "language": "Dashboard Type Language \"{count}\"",
+    "save": {
+      "add": "Add & Save",
+      "edit": "Save Changes"
     }
   }
 }

@@ -4,7 +4,7 @@
 three settings and a path. All of it is needed before anyone can sign in, and
 two of them are expensive to change later.
 
-The endpoint contract itself is in `root-enrollment.md`. This is only the part
+The endpoint contract itself is in `2026-09-30-root-first-sign-in.md`. This is only the part
 that depends on *where the console is running*.
 
 ---

@@ -37,7 +37,16 @@
     // Keep it equal to the backend's RP ID, or the ceremony fails with a
     // SecurityError.
     // Local tunnels override it in .dev.vars / .env.local, never here.
-    "WEBAUTHN_RP_ID": "canroot.yazan-adnof.workers.dev"
+    "WEBAUTHN_RP_ID": "canroot.yazan-adnof.workers.dev",
+    // The region drawers' AI pass: Workers AI through our Cloudflare AI Gateway
+    // `ramaaz` (OpenAI itself refuses calls from Syria). Not credentials — the
+    // gateway is an Authenticated Gateway, and its token is the SECRET
+    // AI_GATEWAY_TOKEN (`npx wrangler secret put AI_GATEWAY_TOKEN`), never a var
+    // here. Without that secret the AI is off and every field is filled by hand.
+    // Full notes in src/lib/ai/openai.ts.
+    "AI_BASE_URL": "https://gateway.ai.cloudflare.com/v1/725421c06cddc0ed4694b7cd177ae60e/ramaaz/workers-ai/v1",
+    "AI_MODEL": "@cf/openai/gpt-oss-120b",
+    "AI_REASONING_EFFORT": "low"
   },
   // Service binding to the KYC Worker.
   //

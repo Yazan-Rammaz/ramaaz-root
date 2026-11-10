@@ -86,11 +86,30 @@ sample").
   can only disagree, and it disagrees by refusing somebody the server would have
   let through. Same rule for 429: show `Retry-After` and let the person decide;
   never retry on a timer.
-- **Project data** (regions, currencies, languages, …) lives in the SELECTED
-  system's own backend: `src/lib/api/backend.ts` (`backendFetch.get/post/...`)
-  resolves the `rdb_sys` cookie against the registry and routes to that
-  system's `baseUrl`. Selecting happens on /systems (`selectSystem` action).
+- **Project data** (regions, currencies, languages, …) belongs to the SELECTED
+  system, but we never call a project backend: the root backend proxies.
+  `src/lib/api/backend.ts` (`backendFetch.get/post/...`) reads the `root_sys`
+  cookie and prefixes the path — `/v1/projects/{id}/…` on the root backend.
+  The registry is `projects` on `GET /v1/me`. Selecting happens on /systems
+  (`selectSystem` action); until something is selected the shell shows only
+  the systems list (the dashboard layout passes the selection to it).
 - Mutations from the browser → **Server Actions** (`features/*/actions.ts`).
+    - **A locked session is not an error.** When the backend wants the PIN,
+      middleware redirects page loads to /unlock, but a Server Action can't
+      follow a redirect: it runs on with no access token, and `api` throws
+      `SessionLockedError` before calling anything. Every action maps that to
+      `{ locked: true }`, and its component calls `useLockWhenLocked(state)`
+      (`features/auth/use-lock-when-locked.ts`), which raises the PIN overlay.
+      Inputs keep their values, so the same button works after unlocking.
+    - **A 401 is branched on its code, never read as "signed out"**
+      (`backend docs/sign-in-and-sessions/from-backend/2026-10-21-token-handling.md` §5). `api` turns
+      `PASS_CODE_REQUIRED` into `SessionLockedError`, and in a Server Action
+      refreshes once on `TOKEN_EXPIRED`. A page render that gets a 401 goes
+      through `requireSession` to `/api/auth/recover`, which retries if the
+      token rotated underneath the call, refreshes on `TOKEN_EXPIRED`, locks on
+      `PASS_CODE_REQUIRED`, and signs out only for the rest. Only a refresh that
+      came back `dead` may clear cookies; one that never reached the backend
+      (DNS, refused, TLS) is `unreachable` and keeps them.
 - Data for Server Components → a feature **api module** (`features/*/api.ts`).
 - UI components calling `fetch` directly is a lint error.
 
@@ -124,6 +143,16 @@ sample").
   server.
 - API responses are parsed with the schema in `api.ts` so backend drift fails
   loud.
+- **Showing an error: `<FormError>`** (`components/ui/FormError.tsx`), the
+  only way. Plain red text, centered, no box, no heading.
+    - It belongs to the attempt that produced it: don't show a stored failure
+      when a screen opens, and clear it (pass no `message`) as soon as the
+      input that caused it changes.
+    - `hideAfterMs` for a passing notice (rate limit, dropped request); leave it
+      off for an error the person has to act on.
+    - `attempt={state}` so the same message twice in a row shows again.
+    - Per-field errors stay under their field; `<FormError>` is the line for
+      the whole action.
 
 ## 5. Icons & animation
 
@@ -360,18 +389,19 @@ Open items, in priority order:
       for those — a new device gets Add device, never a QR code. RP ID comes
       from the backend's `PUBLIC_URL`; `WEBAUTHN_RP_ID` here must match it.
 
-    - name and photo (backend docs/frontend-admin-name-and-photo.md):
+    - name and photo (backend docs/sign-in-and-sessions/from-backend/2026-10-03-admin-name-and-photo.md):
       `full_name` / `photo_url` on `PASS_CODE_REQUIRED` ride in the challenge
       cookie; `photo_url` on the user object comes from `/v1/me`. The browser
       gets the picture only through `/api/admin-photo` (`UserAvatar`), which
       picks the current source. The localStorage portrait is gone;
       `store.ts` only sweeps the old keys at sign-out.
 
-   Left: `/unlock` after a reload has no access token, so its photo URL is the
-   sign-in snapshot's — expired after 15 minutes, so it shows the glyph. The
-   backend offered to put the user on the `401 PASS_CODE_REQUIRED` refusal
-   (that doc, §4); when it does, middleware's `locked` branch should write it
-   to the snapshot. The SET screen has no name or photo in its design.
+   `/unlock` after a reload: the `401 PASS_CODE_REQUIRED` refusal now carries
+   `full_name`, `photo_url` and `pass_code_length` (console-api.md §3).
+   Middleware's `locked` branch keeps the first two in `root_lock` (14 minutes,
+   inside the photo's signature) and the length in `root_pin_len`; /unlock
+   and `/api/admin-photo` read them. Past 14 minutes the photo falls back to
+   the glyph. The SET screen has no name or photo in its design.
 
 3. **Build real screens from XD.** Translate frames using the XD-pixel utilities
    (section 1). Each new domain area = `npm run gen` then wire pages under

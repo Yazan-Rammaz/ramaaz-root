@@ -17,7 +17,7 @@ import {
   STAGE_ROUTES,
   type LinkRequest,
 } from "@/lib/auth/endpoints";
-import { correlationId, signInError } from "@/lib/auth/errors";
+import { correlationId, errorCode, signInError } from "@/lib/auth/errors";
 
 /**
  * Step 1 — open the access link.
@@ -122,11 +122,11 @@ export async function openLink(rawToken: string): Promise<{ error: string }> {
     // record of WHICH refusal this was — the screen deliberately cannot say,
     // and the correlation id is what support traces backend-side. Without this
     // a failed sign-in leaves no evidence anywhere that anyone can read.
-    console.warn("[auth/link] refused", {
-      correlation_id: correlationId(error),
-      status: error instanceof ApiError ? error.status : undefined,
-      detail: error instanceof Error ? error.message : String(error),
-    });
+    // One flat line, not an object: the dev log flattened the object to `{}`,
+    // losing the correlation id that was the whole point.
+    console.warn(
+      `[auth/link] refused status=${error instanceof ApiError ? error.status : "-"} code=${errorCode(error) ?? "-"} correlation_id=${correlationId(error) ?? "-"} detail=${error instanceof Error ? error.message : String(error)}`,
+    );
 
     // Every refusal here answers UNAUTHENTICATED and they are deliberately
     // indistinguishable — unknown link, revoked, expired, out of its address

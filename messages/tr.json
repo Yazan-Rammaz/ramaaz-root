@@ -13,6 +13,9 @@
         "noAccessBody": "Bu bağlantı açılamıyor. Süresi dolmuş, daha önce kullanılmış veya hiç geçerli olmamış olabilir. Bir kök yöneticiden yeni bir bağlantı isteyin — başka bir yol yok.",
         "noSessionTitle": "Oturum açma işleminiz taşınmadı",
         "noSessionBody": "Bu tarayıcıda devam eden bir oturum açma işlemi yok. Bağlantıyı başka bir uygulama içinde açıp sonra tarayıcı değiştirdiyseniz geride kalmıştır — erişim bağlantısını yeniden açın ve açıldığı tarayıcıda kalın.",
+        "sessionEndedTitle": "Oturumunuz sona erdi",
+        "sessionEndedBody": "Bu sizin yaptığınız bir şey değildi. Yeniden giriş yapmak için erişim bağlantınızı tekrar açın. Artık açılmıyorsa bir kök yöneticiden yenisini isteyin.",
+        "sessionEndedNoLink": "Yeniden giriş yapmak için WhatsApp mesajınızdaki erişim bağlantısını açın.",
         "reenterPrompt": "Bu sayfayı yenilemek işe yaramaz — burada yeniden yüklenecek bir şey yok.",
         "reenterCta": "Erişim bağlantınızı yeniden açın",
         "identityTitle": "Kimlik Doğrulama !",
@@ -71,7 +74,10 @@
         "matchReview": "Eşleşme düşük güvenle kabul edildi — doğrulamanız ekibimiz tarafından incelenecek. Sonraki adıma geçiliyor…",
         "matchFailed": "Görüntüde bir tutarsızlık fark ettik ve doğrulamanızda bir sorun var.",
         "matchTryAgain": "Düzelterek tekrar deneyin",
-        "matchRetry": "Yeniden eşleştir"
+        "matchRetry": "Yeniden eşleştir",
+        "idMissingName": "Tam adınızı okuyamadık. İsim alanındaki parlamayı giderip tekrar deneyin.",
+        "idMissingBirthday": "Doğum tarihinizi okuyamadık. Kartın bu kısmında parlama olmamasına dikkat edin.",
+        "idMissingDocumentNumber": "Kimlik numaranızı okuyamadık. Kartın bu kısmında parlama olmamasına dikkat edin."
     },
     "passcode": {
         "title": "Şifre Belirle !",
@@ -87,7 +93,6 @@
         "rateLimited": "Çok fazla deneme — {seconds} saniye bekleyin",
         "rateLimitedUnknown": "Çok fazla deneme — bir dakika bekleyin",
         "unavailable": "Kilit açma şu anda kullanılamıyor",
-        "sessionEnded": "Oturumunuz sona erdi. Tekrar giriş yapmak için erişim bağlantınızı açın.",
         "passkeyFailed": "Bu işe yaramadı — tekrar denemek için dokunun",
         "passkeyExists": "Bu cihazda zaten bir geçiş anahtarı var — kullanmak için simgeye dokunun",
         "passkeyWaiting": "Cihazınız bekleniyor…",
@@ -134,12 +139,15 @@
             "translate": "Sistem Dilleri",
             "currencies": "Para Birimleri",
             "countries": "Ülkeler",
-            "database": "Veritabanı",
+            "database": "Panel Türleri",
             "hierarchy": "Hiyerarşi",
             "search": "Ara",
             "close": "Kapat",
             "add": "Ekle",
-            "lock": "Kilitle"
+            "lock": "Kilitle",
+            "business": "İşletme Türleri",
+            "workStructure": "İş Çalışma Yapısı",
+            "hide": "Gizle"
         },
         "side": {
             "avatar": "Profil",
@@ -147,16 +155,132 @@
             "chat": "Sohbet",
             "settings": "Ayarlar",
             "systems": "Sistemler",
-            "logout": "Çıkış yap"
+            "logout": "Çıkış yap",
+            "workStructure": "İş Çalışma Yapısı"
         }
     },
     "system": {
         "title": "Sistem Projeleri",
-        "empty": "Henüz sistem projesi yok."
+        "empty": "Henüz sistem projesi yok.",
+        "status": {
+            "notConnected": "Bağlı değil",
+            "failed": "Bağlantı başarısız",
+            "suspended": "Askıya alındı",
+            "unavailable": "Kullanılamıyor"
+        },
+        "form": {
+            "createTitle": "Proje ekle",
+            "stepCreate": "1 · Bilgiler",
+            "stepConnect": "2 · Bağlan",
+            "code": "Kısa ad (kod)",
+            "codeHint": "2–20: a–z, 0–9, -",
+            "name": "Tam ad",
+            "nameAr": "Arapça ad",
+            "optional": "İsteğe bağlı",
+            "description": "Açıklama",
+            "descriptionHint": "ör. Ödeme Hizmetleri Sağlayıcısı",
+            "codeForever": "Kısa ad, proje arşivlendikten sonra bile asla değiştirilemez ve yeniden kullanılamaz.",
+            "create": "Proje oluştur",
+            "creating": "Oluşturuluyor…",
+            "invalid": {
+                "code": "2–20 küçük harf, rakam veya -; - ile başlayamaz veya bitemez.",
+                "name": "Zorunlu, en fazla 100 karakter.",
+                "name_ar": "En fazla 100 karakter.",
+                "description": "Zorunlu, en fazla 150 karakter.",
+                "base_url": "https:// ile başlayan tam bir adres girin."
+            }
+        },
+        "connection": {
+            "title": "Projeyi bağla",
+            "instructions": "Proje ekibinden kök doğrulayıcıyı <b>{code}</b> proje koduyla kurmasını isteyin, ardından projenin arka uç adresini aşağıya girin.",
+            "baseUrl": "Temel URL",
+            "connect": "Bağlan",
+            "connecting": "Bağlanıyor…",
+            "connected": "Bağlandı. Proje etkin ve seçilebilir.",
+            "failed": "Bağlantı başarısız",
+            "done": "Tamam",
+            "errors": {
+                "PROJECT_UNREACHABLE": "Ulaşılamadı (DNS, zaman aşımı, TLS veya bağlantı reddi). Adresi ve sunucunun çalıştığını kontrol edin.",
+                "PROJECT_REJECTED_TOKEN": "Belirtecimizi reddetti: kök doğrulayıcı kurulu değil veya yanlış yapılandırılmış.",
+                "PROJECT_CODE_MISMATCH": "Farklı bir proje olarak yanıt verdi. PROJECT_CODE bu projenin kısa adıyla eşleşmeli.",
+                "PROJECT_BAD_MANIFEST": "Manifest eksik veya geçersiz.",
+                "PROJECT_CONTRACT_UNSUPPORTED": "Desteklemediğimiz bir sözleşme sürümü kullanıyor.",
+                "PROJECT_ERROR": "Sunucu hatası veya yönlendirme ile yanıt verdi.",
+                "BASE_URL_NOT_ALLOWED": "Bu adres, çağırmamıza izin verilmeyen bir ağa çözümleniyor."
+            }
+        },
+        "errors": {
+            "codeTaken": "Bu kısa ad kullanılıyor, belki arşivlenmiş bir proje tarafından.",
+            "suspended": "Bu proje askıya alındı.",
+            "forbidden": "Bunu yalnızca kök yönetici yapabilir.",
+            "rateLimited": "Çok fazla deneme. {seconds} saniye sonra tekrar deneyin.",
+            "generic": "Bir şeyler ters gitti. Referans: {ref}"
+        }
     },
     "language": {
         "title": "Sistem Dilleri",
-        "empty": "Henüz sistem dili yok."
+        "empty": "Henüz sistem dili yok.",
+        "fallsBack": "Yedek dil {code}",
+        "required": "Zorunlu",
+        "isDefault": "Varsayılan",
+        "ltr": "LTR",
+        "rtl": "RTL",
+        "status": {
+            "DRAFT": "Taslak",
+            "ACTIVE": "Etkin",
+            "INACTIVE": "Devre dışı"
+        },
+        "coverage": {
+            "title": "Çevrilen adlar",
+            "line": "%{percent} · {total} addan {missing} tanesinin metni yok"
+        },
+        "kinds": {
+            "countries": "{count, plural, one {# ülke} other {# ülke}}",
+            "regions": "{count, plural, one {# bölge} other {# bölge}}",
+            "branches": "{count, plural, one {# şube} other {# şube}}",
+            "regionTypes": "{count, plural, one {# bölge türü} other {# bölge türü}}",
+            "branchTypes": "{count, plural, one {# şube türü} other {# şube türü}}",
+            "currencies": "{count, plural, one {# para birimi} other {# para birimi}}"
+        },
+        "form": {
+            "addTitle": "Dil ekle",
+            "editTitle": "{name} düzenle",
+            "code": "Kod",
+            "codeHint": "tr, ckb, zh-Hant",
+            "codeInvalid": "Olağan yazımıyla bir BCP 47 kodu: tr, ku, ckb, zh-Hant, pt-BR.",
+            "codeConfirm": "{code} kodu eklendikten sonra hiç değiştirilemez. Kontrol edip ekleyin.",
+            "nameEn": "İngilizce adı",
+            "nameHint": "Yazın, örn. Türkçe",
+            "nameAr": "Arapça adı",
+            "nativeName": "Kendi dilindeki adı",
+            "direction": "Yön",
+            "fallback": "Yedek dil",
+            "fallbackNote": "Metin olmayan yerlerde ve sistem mesajlarında gösterilir.",
+            "sortOrder": "Sıra",
+            "sortHint": "0–10000, isteğe bağlı",
+            "kurdish": "Kürtçe: ku Kurmancîdir (Latin alfabesi, soldan sağa, yedek dili İngilizce), ckb Soranîdir (Arap alfabesi, sağdan sola, yedek dili Arapça). Kastettiğinizi ya da ikisini birden ekleyin.",
+            "startsDraft": "Yeni bir dil Taslak olarak başlar: Etkin yapılana kadar müşteriler hiçbir şey görmez.",
+            "requiredLocked": "İngilizce ve Arapça yönlerini ve yedek dillerini her zaman korur.",
+            "add": "Ekle",
+            "confirmAdd": "Evet, {code} ekle",
+            "save": "Değişiklikleri kaydet",
+            "cancel": "İptal"
+        },
+        "change": {
+            "title": "Durum",
+            "locked": "İngilizce ve Arapça her zaman Etkin kalır.",
+            "reason": "Gerekçe (zorunlu)",
+            "confirm": "{status} yap",
+            "cancel": "İptal",
+            "activeLead": "Müşteriler {name} dilini bir dakika içinde görecek.",
+            "missing": "{kinds} için bu dilde henüz metin yok. Bu adlar yerine {fallback} gösterilecek.",
+            "complete": "Her adın bu dilde bir metni var.",
+            "unchecked": "Kapsam kontrol edilemedi; her adın metni olup olmadığı bilinmiyor.",
+            "messages": "Sistem mesajları (hatalar, bildirimler) {fallback} olacak.",
+            "inactive": "Müşteriler bir dakika içinde görmez olur ve ad formları artık sunmaz. Yazılmış metinler korunur.",
+            "draftFromActive": "Müşteriler bir dakika içinde görmez olur. Adlar bu dilde yazılmaya devam edebilir.",
+            "draftFromInactive": "Ad formları yeniden sunar. Müşteriler hâlâ görmez."
+        }
     },
     "region": {
         "title": "Sistem Coğrafi Bölgeleri",
@@ -167,7 +291,83 @@
             "admin": "İdari Bölümler"
         },
         "addTitle": "Ülke Ekle",
-        "level": "Seviye {n}"
+        "level": "Seviye {n}",
+        "flag": {
+            "label": "Bayrak",
+            "pick": "Bir bayrak seçin — SVG, PNG veya WebP, en fazla 256 KB",
+            "upload": "Bu bayrağı RDB'ye yükle",
+            "uploading": "Yükleniyor…",
+            "uploaded": "Bayrak RDB'ye kaydedildi",
+            "problem": {
+                "type": "Yalnızca SVG, PNG veya WebP",
+                "size": "256 KB'tan büyük",
+                "missing": "Önce bir bayrak seçin"
+            }
+        },
+        "map": {
+            "label": "SVG Harita",
+            "pick": "Bir harita seçin — yalnızca SVG, en fazla 256 KB",
+            "problem": {
+                "type": "Yalnızca SVG",
+                "size": "256 KB'tan büyük"
+            }
+        },
+        "errors": {
+            "generic": "İşlem tamamlanamadı. Referans: {ref}",
+            "invalid": "Bazı bilgiler eksik veya hatalı biçimde: {fields}",
+            "pending": "Değişiklik henüz doğrulanamadı. Kontrol etmek için tekrar basın — iki kez yapılmaz.",
+            "retryExpired": "Bu değişiklik artık buradan doğrulanamıyor. Sistemde yapılıp yapılmadığını kontrol edin.",
+            "retryFinished": "Bu değişiklik zaten tamamlandı. Durumunu görmek için sayfayı yenileyin.",
+            "rateLimited": "Çok fazla istek. {seconds} saniye sonra tekrar deneyin.",
+            "stale": "Siz açtıktan sonra başka biri bunu değiştirdi, bu yüzden hiçbir şey kaydedilmedi. Değişikliği görmek için sayfayı yenileyin ve tekrar kaydedin.",
+            "codeInUse": "Önce bu ülkenin bölgelerinin ISO kodlarını değiştirin veya temizleyin; hâlâ eski kodla başlıyorlar.",
+            "hasChildren": "Önce içindekileri kapatın: kapatma aşağıdan yukarıya yapılır.",
+            "regionNotEmpty": "Bir bölgenin türü yalnızca altında hiçbir şey yokken değiştirilebilir.",
+            "countryClosed": "Bu ülke bu arada kapatıldı, bu yüzden hiçbir şey kaydedilmedi.",
+            "staleReloaded": "Siz açtıktan sonra biri bunu değiştirdi, bu yüzden hiçbir şey kaydedilmedi. Şimdi onların değerleri gösteriliyor: kontrol edip yeniden kaydedin.",
+            "languageExists": "Bu dil zaten listede. Bunun yerine durumunu değiştirin.",
+            "languageRequired": "İngilizce ve Arapça her zaman Etkin kalır, yönlerini ve yedek dillerini korur.",
+            "languageFallback": "Yedek dil İngilizce ya da Arapça olmalı ve dilin kendisi olmamalı.",
+            "languageNotFound": "Bu dil artık listede değil. Sayfayı yenileyin."
+        },
+        "currency": {
+            "missing": "{code} · {name} bu sistemde henüz yok.",
+            "arName": "Arapça adı",
+            "add": "{code} sisteme ekle",
+            "adding": "Ekleniyor…"
+        },
+        "close": {
+            "country": "Bu ülkeyi kapat",
+            "region": "Bu {level} kapat",
+            "reason": "Neden (zorunlu)",
+            "confirm": "{name} kapat",
+            "cancel": "İptal",
+            "blocked": "Önce içindekileri kapatın: {count, plural, one {# bölge} other {# bölge}} hâlâ açık. Kapatma aşağıdan yukarı yapılır.",
+            "note": "Kapatılan ülke ya da bölge geçmişiyle birlikte RDB'de kalır. Kapatılan ülke burada gri görünür ve yeniden açılabilir."
+        },
+        "reopen": {
+            "closed": "Bu ülke kapalı: içindeki hiçbir şey değiştirilemez. Önce yeniden açın.",
+            "country": "Bu ülkeyi yeniden aç",
+            "reason": "Gerekçe (zorunlu)",
+            "confirm": "{name} yeniden aç",
+            "cancel": "İptal",
+            "note": "Yeniden açmak para birimlerini, seviyelerini ve şube türlerini geri getirir. İçinde kapatılanlar kapalı kalır."
+        },
+        "names": {
+            "draft": "Taslak — müşterilere henüz gösterilmiyor",
+            "inactive": "Devre dışı",
+            "remove": "Kaldır",
+            "removed": "Kaydettiğinizde kaldırılır",
+            "translateAll": "Tüm dilleri yeniden çevir",
+            "translateOne": "{code} dilini yeniden çevir"
+        },
+        "edit": {
+            "codeMoved": "RDB yalnızca iki harfli kodları tutar: {from}, {to} olarak açılır. Taşımak için kaydedin.",
+            "codeInvalid": "Kısa ad iki büyük harf olmalı (ISO 3166-1), örn. JO.",
+            "namesMissing": "İngilizce ve Arapça adlar zorunludur.",
+            "levelsIncomplete": "Her seviye için bir bölüm seçin.",
+            "isoInvalid": "ISO kodu 1–3 harf ya da rakam olmalı."
+        }
     },
     "currency": {
         "title": "Sistem Para Birimleri",
@@ -177,6 +377,301 @@
             "crypto": "Kripto",
             "gold": "Altın",
             "silver": "Gümüş"
+        },
+        "edit": {
+            "title": "{name} düzenle",
+            "code": "Para Birimi Kodu",
+            "codeHint": "USD",
+            "codeInvalid": "Üç büyük harf, ISO 4217 kodu (USD, TRY, SAR).",
+            "name": "Para Birimi Adı",
+            "translations": "Para Birimi Adı \"Sistem Dilleri\"",
+            "active": "Etkin",
+            "inactive": "Devre dışı",
+            "save": "Değişiklikleri Kaydet",
+            "cancel": "İptal"
+        }
+    },
+    "rbac": {
+        "title": "Sistem RBAC",
+        "tabs": {
+            "roles": "Roller",
+            "permissions": "İzinler"
+        },
+        "empty": "Henüz rol yok. İlkini + ile ekleyin.",
+        "newRole": "Yeni Rol",
+        "heldBy": "{count, plural, =0 {Kimsede yok} one {1 kişide} other {# kişide}}",
+        "panel": {
+            "info": "Bilgi",
+            "permissions": "İzinler"
+        },
+        "availability": {
+            "title": "Rol Kullanılabilirliği",
+            "all": "Ülkelerde Kullanılabilirlik | Tümü",
+            "enable": "Etkin",
+            "disable": "Devre dışı",
+            "none": "Hiçbir ülke seçilmedi, bu yüzden rol hiçbir yerde kullanılamaz.",
+            "closed": "{name} (kapalı)"
+        },
+        "name": {
+            "title": "Rol Adı Ekle",
+            "short": "Rol Kısa Adı",
+            "shortHint": "En fazla 4/4",
+            "label": "Rol Adı",
+            "translation": "Rol Adı Çevirisi \"Sistem Dilleri\""
+        },
+        "save": {
+            "add": "↳ Ekle ve Kaydet",
+            "edit": "↳ Değişiklikleri Kaydet",
+            "held": "{count, plural, one {Bu rol 1 kişide.} other {Bu rol # kişide.}} Değişiklik hepsine ulaşır. Kaydedilsin mi?",
+            "confirm": "Kaydet",
+            "cancel": "İptal"
+        },
+        "sort": {
+            "changed": "Sıralama değişti",
+            "save": "Sıralamayı kaydet",
+            "undo": "Geri al",
+            "confirm": "Sıralamayı değiştirmek kimin kimi atayabileceğini değiştirir. Kaydedilsin mi?"
+        },
+        "remove": {
+            "label": "Rolü sil",
+            "held": "{count, plural, one {1 kişide.} other {# kişide.}} Önce onlardan kaldırın.",
+            "confirm": "{name} ({short}) silinsin mi? Bu geri alınamaz.",
+            "yes": "Sil"
+        },
+        "perm": {
+            "deprecated": "kaldırılıyor",
+            "sensitive": "hassas",
+            "where": "yalnızca {places}",
+            "retired": "kullanımdan kalktı, artık verilmiyor",
+            "empty": "Bu proje henüz izin yayınlamıyor.",
+            "place": {
+                "project": "tüm proje",
+                "country": "ülkeler",
+                "region": "bölgeler",
+                "branch": "şubeler"
+            }
+        },
+        "errors": {
+            "generic": "İşlem tamamlanamadı. Referans: {ref}",
+            "invalid": "Role bir kısa ad (1–4 harf veya rakam) ve bir ad verin.",
+            "forbidden": "Rolleri yalnızca Root değiştirebilir.",
+            "gone": "Bu rol artık yok. Liste yeniden yüklendi.",
+            "orderChanged": "Bu arada biri bir rol ekledi veya sildi. Liste yeniden yüklendi; tekrar sıralayın.",
+            "rateLimited": "Çok fazla istek. {seconds} saniye sonra tekrar deneyin."
+        },
+        "catalog": {
+            "readOnly": "Proje tarafından yayınlanır",
+            "active": "Etkin",
+            "key": "İzin Anahtarı",
+            "label": "İzin Adı \"Sistem Dilleri\"",
+            "where": "Geçerli Olduğu Yer",
+            "anywhere": "Her yerde",
+            "details": "Ayrıntılar",
+            "rootOnly": "Yalnızca Root",
+            "inRoles": "Bu İzne Sahip Roller",
+            "noRoles": "Henüz hiçbir rol bu izne sahip değil.",
+            "rootOnlyRoles": "Yalnızca Root: hiçbir rolde olamaz.",
+            "empty": "Bu proje henüz izin yayınlamıyor."
+        }
+    },
+    "businessType": {
+        "title": "Sistem İşletme Türü",
+        "tabs": {
+            "individual": "Bireysel",
+            "corporate": "Kurumsal",
+            "work": "İş Çalışma Türü"
+        },
+        "empty": "Henüz işletme türü yok.",
+        "newType": "Yeni işletme türü",
+        "panel": {
+            "title": "İşletme Türü",
+            "info": "Bilgi",
+            "settings": "Ayarlar",
+            "settingsSoon": "Ayarlar arka uçla birlikte gelecek."
+        },
+        "availability": {
+            "title": "İşletme Türü Kullanılabilirliği",
+            "all": "Ülkelerde Kullanılabilirlik | Tümü",
+            "enable": "Etkin",
+            "disable": "Devre dışı",
+            "pick": "Yukarıdan en az bir ülke seçin."
+        },
+        "name": {
+            "title": "İşletme Türü Adı Ekle",
+            "short": "Kısa Ad",
+            "shortHint": "En fazla 4/4",
+            "label": "İşletme Türü Adı",
+            "translation": "İşletme Türü Adı Çevirisi \"Sistem Dilleri\""
+        },
+        "save": {
+            "add": "Ekle ve Kaydet",
+            "edit": "Değişiklikleri Kaydet"
+        }
+    },
+    "work": {
+        "tabs": {
+            "info": "Bilgi",
+            "settings": "Ayarlar",
+            "login": "Giriş Bilgisi",
+            "data": "Veri Ayarı"
+        },
+        "header": {
+            "settings": "Ayarlar",
+            "login": "Giriş Bilgisi",
+            "data": "Veri Ayarı",
+            "all": "Tümü"
+        },
+        "info": {
+            "availability": "Panel Kullanılabilirliği",
+            "countries": "Ülkelerde Kullanılabilirlik | Tümü",
+            "enable": "Etkin",
+            "disable": "Devre dışı",
+            "seats": "İşletme Yöneticisi Sayısı",
+            "type": "Panel Türü",
+            "workType": "İş Çalışma Türü",
+            "language": "Panel Dili \"{count}\""
+        },
+        "access": {
+            "title": "Panel Erişim Ayarları",
+            "method": "Erişim Yöntemi",
+            "browser": "Tarayıcı",
+            "application": "Uygulama",
+            "model": "Erişim Modeli",
+            "desktop": "Masaüstü Web",
+            "mobile": "Mobil Web",
+            "chrome": "Chrome",
+            "safari": "Safari",
+            "conditions": "Erişim Koşulları",
+            "noConditions": "Koşul Yok",
+            "conditionsCount": "{count, plural, one {# Koşul} other {# Koşul}}",
+            "condition": {
+                "regions": "Belirli Coğrafi Bölgeler",
+                "ip": "Belirli IP",
+                "mac": "Belirli MAC Adresi",
+                "device": "Belirli Cihaz",
+                "timeframe": "Belirli Zaman Aralığı"
+            },
+            "ipAccess": "İzinli IP'ler:",
+            "linkType": "Panel Bağlantı Türü",
+            "permalink": "Kalıcı Bağlantı",
+            "type2": "Tür 2",
+            "type3": "Tür 3",
+            "firstLogin": "İlk Giriş Ayarı",
+            "contract": "Sözleşme İste \"İlk Giriş\"",
+            "contract1": "Sözleşme 1",
+            "contract2": "Sözleşme 2",
+            "verification": "Kullanıcı Doğrulama",
+            "type1": "Tür 1",
+            "beforeLogin": "Giriş Öncesi Ayar",
+            "loginType": "Giriş Türü",
+            "root": "Root Türü",
+            "management": "Yönetim Türü",
+            "approveType": "Onay Türü",
+            "yes": "Evet",
+            "no": "Hayır",
+            "afterLogin": "Giriş Sonrası Ayar",
+            "timeframeAfter": "Giriş Sonrası Zaman Aralığı",
+            "timeframeSignOut": "Çıkış Zaman Aralığı"
+        },
+        "admins": {
+            "loginInfo": "Panel Giriş Bilgisi",
+            "link": "Panel Bağlantısı",
+            "list": "Panele Giriş Yapan İşletme Yöneticileri",
+            "add": "İşletme Yöneticisi Ekle",
+            "log": "İlerleme",
+            "showFile": "Dosyayı Göster",
+            "duration": "Toplam Süre {full}",
+            "durationSplit": "Kullanıcı Tarafı {user} Dakika · Sistem Tarafı {system} Dakika · Onay Tarafı {approval} Dakika",
+            "stage": {
+                "approval": "İkinci Root Yöneticisinin Onayı Bekleniyor",
+                "send": "Giriş Bilgisini İşletme Yöneticisine Gönder",
+                "login": "Gönderildi, İşletme Yöneticisinin Girişi Bekleniyor",
+                "review": "Dosyaların İncelenmesi ve Onay Bekleniyor"
+            },
+            "sheet": {
+                "title": "İşletme Yöneticisi",
+                "addPhoto": "İşletme Yöneticisi Fotoğrafı Ekle",
+                "editPhoto": "İşletme Yöneticisi Fotoğrafını Düzenle",
+                "name": "İşletme Yöneticisi Adı \"Kimlikteki Gibi\"",
+                "phone": "İşletme Yöneticisi Telefon Numarası",
+                "ips": "İşletme Yöneticisi IP'leri",
+                "mac": "İşletme Yöneticisi MAC Adresi",
+                "device": "İşletme Yöneticisi Cihazı",
+                "secret": "İşletme Yöneticisi Gizli Kelimeleri"
+            }
+        },
+        "kyc": {
+            "idType": "Kimlik Türü",
+            "country": "Ülke",
+            "name": "Ad",
+            "nationalNumber": "Kimlik Numarası",
+            "birthday": "Doğum Tarihi",
+            "approve": "Onayla",
+            "entered": "Sisteme Girilen",
+            "detected": "Yüz Algılama"
+        },
+        "admin": {
+            "tabs": {
+                "info": "Bilgi",
+                "settings": "Ayarlar",
+                "log": "Kullanıcı Kaydı",
+                "files": "Dosyalar"
+            },
+            "info": "{name} Kullanıcı Bilgisi",
+            "availability": "{name} Panel Kullanılabilirliği",
+            "log": "{name} Kullanıcı Kaydı",
+            "edit": "Düzenle",
+            "name": "İşletme Yöneticisi Adı \"Kimlikteki Gibi\"",
+            "phone": "İşletme Yöneticisi Telefon Numarası",
+            "secret": "İşletme Yöneticisi Gizli Kelimeleri",
+            "addedBy": "Ekleyen",
+            "approvedBy": "Onaylayan",
+            "addedAt": "Eklenme Tarihi",
+            "countries": "Ülkelerde Kullanılabilirlik | Tümü",
+            "enable": "Etkin",
+            "disable": "Devre dışı"
+        },
+        "data": {
+            "title": "Panel Veri Ayarı",
+            "tabs": {
+                "regions": "Coğrafi Bölgeler",
+                "currencies": "Para Birimleri",
+                "structure": "İdari Yapı",
+                "rbac": "Sistem Rolleri",
+                "business": "İşletme Türleri",
+                "legal": "Tüzel Kişilik"
+            },
+            "update": "Güncelle"
+        }
+    },
+    "dashboardType": {
+        "title": "Sistem Panel Türleri",
+        "empty": "Henüz panel türü yok.",
+        "newType": "Yeni panel türü",
+        "panel": {
+            "info": "Bilgi",
+            "settings": "Ayarlar",
+            "settingsSoon": "Ayarlar arka uçla birlikte gelecek."
+        },
+        "availability": {
+            "title": "Panel Türü Kullanılabilirliği",
+            "all": "Ülkelerde Kullanılabilirlik | Tümü",
+            "enable": "Etkin",
+            "disable": "Devre dışı"
+        },
+        "logo": {
+            "title": "Panel Türü Logosu Ekle \"Yalnızca SVG\"",
+            "pick": "Bir SVG dosyası seçin"
+        },
+        "name": {
+            "title": "Panel Türü Adı Ekle",
+            "label": "Panel Türü Adı",
+            "translation": "Panel Türü Adı Çevirisi \"Sistem Dilleri\""
+        },
+        "language": "Panel Türü Dili \"{count}\"",
+        "save": {
+            "add": "Ekle ve Kaydet",
+            "edit": "Değişiklikleri Kaydet"
         }
     }
 }

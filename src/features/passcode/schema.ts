@@ -31,7 +31,9 @@ export type PasscodeInput = z.infer<ReturnType<typeof passcodeSchema>>;
  *                 so the boxes simply reset. Also what the account's PIN
  *                 lockout answers — told apart by nobody here, on purpose.
  *   rateLimited   429. Show the wait; never retry on a timer.
- *   unavailable   no backend configured. Nothing the person can fix.
+ *   unavailable   no backend configured, or it could not be reached (the
+ *                 network is not back yet). The token is unspent; trying
+ *                 again later is safe.
  */
 export type UnlockResult =
   | { ok: true }

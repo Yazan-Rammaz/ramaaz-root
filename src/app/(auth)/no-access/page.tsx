@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { Icon } from '@/components/ui/Icon';
-import { readLastLink, readSignInError } from '@/lib/auth/challenge';
+import { readLastLink, readSessionEnded, readSignInError } from '@/lib/auth/challenge';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -43,15 +43,26 @@ const rem = (px: number) => `${px * 0.0625}rem`;
 export default async function NoAccessPage() {
     const t = await getTranslations('auth');
 
+    // A session ENDED (see setSessionEnded) — checked first, because it is the
+    // one most likely to be our fault, and the refusal wording ("you don't have
+    // access", "ask for a new link") would blame the administrator for it.
+    const ended = await readSessionEnded();
+
     // Absent means nothing was refused — see case 2 above.
-    const refusal = await readSignInError();
+    const refusal = ended ? null : await readSignInError();
 
     // The link this browser last tried, when one is known. Absent for every
     // arrival that never had a link to begin with.
     const lastLink = await readLastLink();
 
-    const title = refusal ? t('noAccessTitle') : t('noSessionTitle');
-    const body = refusal ?? t('noSessionBody');
+    const title = ended
+        ? t('sessionEndedTitle')
+        : refusal
+          ? t('noAccessTitle')
+          : t('noSessionTitle');
+    const body = ended
+        ? (ended.message ?? t('sessionEndedBody'))
+        : (refusal ?? t('noSessionBody'));
 
     return (
         <main className="flex h-full flex-col items-center justify-center px-20">
@@ -113,6 +124,15 @@ export default async function NoAccessPage() {
                         {t('reenterCta')}
                     </a>
                 </>
+            ) : ended ? (
+                // A session ended but this browser no longer knows the link:
+                // point at where it lives instead of leaving nothing.
+                <p
+                    className="fz-14 text-ink/70 max-w-360 text-center leading-normal font-normal"
+                    style={{ marginTop: rem(40) }}
+                >
+                    {t('sessionEndedNoLink')}
+                </p>
             ) : null}
         </main>
     );

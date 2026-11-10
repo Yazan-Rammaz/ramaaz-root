@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 
@@ -15,6 +16,7 @@ export function SideBox({
   indicator,
   empty,
   onClick,
+  href,
 }: {
   icon?: string;
   label?: string;
@@ -22,22 +24,32 @@ export function SideBox({
   empty?: boolean;
   /** Optional handler — slots without one are inert placeholders. */
   onClick?: () => void;
+  /** A section of its own: the cell is a link to it. */
+  href?: string;
 }) {
+  const className = cn(
+    "hairline bg-background rad-12 flex h-50 w-50 items-center justify-center",
+    empty && "cursor-default",
+  );
+  const style = { "--hairline-radius": "0.75rem" } as CSSProperties;
   return (
     <div className="relative">
-      <button
-        type="button"
-        aria-label={label}
-        disabled={empty}
-        onClick={onClick}
-        className={cn(
-          "hairline bg-background rad-12 flex h-50 w-50 items-center justify-center",
-          empty && "cursor-default",
-        )}
-        style={{ "--hairline-radius": "0.75rem" } as CSSProperties}
-      >
-        {icon && <Icon name={icon} size={26} />}
-      </button>
+      {href ? (
+        <Link href={href} aria-label={label} className={className} style={style}>
+          {icon && <Icon name={icon} size={26} />}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          aria-label={label}
+          disabled={empty}
+          onClick={onClick}
+          className={className}
+          style={style}
+        >
+          {icon && <Icon name={icon} size={26} />}
+        </button>
+      )}
       {indicator && (
         <span
           aria-hidden

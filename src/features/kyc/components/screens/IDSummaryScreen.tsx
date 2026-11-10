@@ -9,6 +9,7 @@ import ExitConfirmDialog from '../ExitConfirmDialog';
 import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
 import shieldSvg from '@/features/kyc/assets/shield.svg';
 import { FlexSpace } from '@/components/ui/FlexSpace';
+import { FormError } from '@/components/ui/FormError';
 
 export default function IDSummaryScreen() {
     const {
@@ -234,9 +235,7 @@ export default function IDSummaryScreen() {
                 </div>
 
                 {/* Submission error */}
-                {submitError && (
-                    <p className="fz-12 text-[#E53E3E] text-center mb-12 px-8">{submitError}</p>
-                )}
+                <FormError message={submitError} className="mb-12 px-8" />
 
                 {/* CTAs */}
                 <button

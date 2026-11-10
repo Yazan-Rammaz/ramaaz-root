@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
+import { FormError } from '@/components/ui/FormError';
 import { CornerBrackets } from '@/features/kyc/components/CornerBrackets';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useFaceGate } from '@/features/kyc/hooks/useFaceGate';
@@ -521,12 +522,10 @@ export function FaceScanScreen({ onCapture, verified = false }: Props) {
                         className="absolute inset-x-0 flex flex-col items-center gap-12"
                         style={{ top: rem(16) }}
                     >
-                        <p
-                            role="alert"
-                            className="fz-12 px-20 text-center leading-normal font-medium text-[#FF3B30]"
-                        >
-                            {cameraError ? t('faceCameraBlocked') : t('faceSetupFailed')}
-                        </p>
+                        <FormError
+                            message={cameraError ? t('faceCameraBlocked') : t('faceSetupFailed')}
+                            className="px-20 font-medium"
+                        />
                         <button
                             type="button"
                             className="fz-14 text-primary leading-none font-semibold underline"

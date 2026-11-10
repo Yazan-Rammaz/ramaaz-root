@@ -5,11 +5,18 @@ import { isProd } from '@/lib/env';
 import {
     CHALLENGE_MAX_AGE,
     REFRESH_MAX_AGE,
+    accessCookieMaxAge,
     STAGES,
     STAGE_ROUTES,
     type StepResponse,
 } from '@/lib/auth/endpoints';
-import { setAuthCookies, setDeviceHint, setPinLength, setSessionUser } from '@/lib/auth/cookies';
+import {
+    setAuthCookies,
+    setDeviceHint,
+    setEnrolHint,
+    setPinLength,
+    setSessionUser,
+} from '@/lib/auth/cookies';
 
 /**
  * The sign-in challenge — the whole client side of the auth state machine.
@@ -268,7 +275,7 @@ export async function completeSignIn(result: StepResponse): Promise<void> {
     await setAuthCookies({
         accessToken: access_token,
         refreshToken: refresh_token,
-        accessMaxAge: expires_in,
+        accessMaxAge: accessCookieMaxAge(expires_in),
         // The refresh token never expires; only the cookie ceiling applies.
         refreshMaxAge: REFRESH_MAX_AGE,
     });
@@ -281,11 +288,15 @@ export async function completeSignIn(result: StepResponse): Promise<void> {
     await setSessionUser(fits ? user : { ...user, photo_url: undefined }, REFRESH_MAX_AGE);
     // Read before the challenge is cleared: the length arrived on the
     // PASS_CODE_REQUIRED response, one step before this one.
-    const { passCodeLength, passCodeDeviceAvailable } = await readChallenge();
+    const { passCodeLength, passCodeDeviceAvailable, passCodeDeviceEnrolAvailable } =
+        await readChallenge();
     if (passCodeLength) await setPinLength(passCodeLength, REFRESH_MAX_AGE);
     // Whether the PIN step offered the link's passkey — the lock screens lead
     // with it when it did. See DEVICE in cookies.ts.
     await setDeviceHint(passCodeDeviceAvailable === true, REFRESH_MAX_AGE);
+    // And whether it offered Add device — the lock screens offer it on the same
+    // word. Unsaid (a SET step) leaves the hint alone. See DEVICE_ENROL.
+    await setEnrolHint(passCodeDeviceEnrolAvailable, REFRESH_MAX_AGE);
     await clearChallenge();
 }
 
@@ -363,6 +374,14 @@ export async function applyStage(
         photoUrl: result.photo_url,
     });
 
+    // The backend documents `photo_url` on every response that lands on the PIN
+    // step (omitted only when the account has no stored photograph). Without
+    // this line a missing one surfaced only as a 404 from /api/admin-photo,
+    // with nothing saying the photo never arrived in the first place.
+    if (result.stage === STAGES.passCode && !result.photo_url) {
+        console.warn('[auth] PASS_CODE_REQUIRED arrived without photo_url');
+    }
+
     redirect(next);
 }
 
@@ -417,6 +436,41 @@ export async function readSignInError(): Promise<string | null> {
 }
 
 /**
+ * A SESSION ended, as opposed to a link being refused — the third reason to be
+ * on /no-access, and the one most likely to be our fault rather than the
+ * administrator's: a refresh that got no answer, an expired session, a lock
+ * screen that found its cookies already gone.
+ *
+ * Kept apart from the error cookie so the page can say the honest thing ("your
+ * session ended, open your link again") instead of "you don't have access" and
+ * "ask for a new link", which is false while the link still works.
+ *
+ * Value: the backend's own sentence when it gave one (e.g. "Sign in again to
+ * set your PIN."), else "1". Middleware writes it too, under the same name, on
+ * a dead refresh (`SESSION_ENDED` there). Not cleared on read, for the same
+ * reason as the error cookie; the short life retires it.
+ */
+const SESSION_ENDED_COOKIE = 'root_session_ended';
+export const SESSION_ENDED_MAX_AGE = 5 * 60;
+
+export async function setSessionEnded(message?: string) {
+    (await cookies()).set(SESSION_ENDED_COOKIE, message || '1', {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: SESSION_ENDED_MAX_AGE,
+    });
+}
+
+/** Null when no session ended; otherwise the backend's sentence, if it gave one. */
+export async function readSessionEnded(): Promise<{ message: string | null } | null> {
+    const value = (await cookies()).get(SESSION_ENDED_COOKIE)?.value;
+    if (!value) return null;
+    return { message: value === '1' ? null : value };
+}
+
+/**
  * The link token of the attempt that just failed, so /no-access can offer the
  * one thing that could help: opening it again.
  *
@@ -449,14 +503,22 @@ const LAST_LINK_COOKIE = 'root_last_link';
  * The link token does not expire with the challenge. It is valid for the life
  * of the LINK — the backend decides that, and it outlasts any one attempt by a
  * long way. Re-opening it is the correct recovery from every failure in this
- * flow, so the only question is how long somebody might plausibly come back,
- * and the answer is "later today".
+ * flow, so the only question is how long somebody might plausibly come back.
+ *
+ * It was "later today" (24 hours), and that was the same mistake a third time:
+ * the failure that needs it most is a SESSION ending — days into one, on a lock
+ * screen whose refresh got no answer — and by then a day-long memory was gone,
+ * leaving /no-access with no way back. So it lives as long as the session it
+ * opened can (REFRESH_MAX_AGE).
  *
  * The exposure is a link token in an httpOnly, Secure, SameSite=lax cookie —
  * on a device that already holds the same token in its history, from a message
- * still sitting in WhatsApp. It is never read back out to the client.
+ * still sitting in WhatsApp, and beside a refresh cookie of the same lifetime
+ * that is a far stronger credential. It is never read back out to the client,
+ * and opening the link alone signs nobody in: the private code and the face
+ * still stand between it and a session.
  */
-const LAST_LINK_MAX_AGE = 60 * 60 * 24;
+const LAST_LINK_MAX_AGE = REFRESH_MAX_AGE;
 
 export async function setLastLink(token: string) {
     (await cookies()).set(LAST_LINK_COOKIE, token, {

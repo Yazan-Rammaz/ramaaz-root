@@ -59,6 +59,32 @@ const PIN_LENGTH = "root_pin_len";
  * a stale "not bound" offers setup and the server answers 409.
  */
 const DEVICE = "root_device";
+/**
+ * "The server said a NEW passkey may be added here" — `device_enrol_available`,
+ * the hint that decides whether the lock screens offer Add device
+ * (console-api.md §3: it and `device_available` "say which buttons to offer").
+ *
+ * Three states, because the server does not always say: "1" offer it, "0"
+ * don't, absent = never told, which offers it as before (the backend still
+ * refuses a setup it does not allow). Written from the sign-in PIN step and
+ * from every `401 PASS_CODE_REQUIRED` refusal on refresh.
+ */
+const DEVICE_ENROL = "root_device_enrol";
+/**
+ * Whose lock /unlock is showing — `{ name, photoUrl }` from the
+ * `401 PASS_CODE_REQUIRED` refusal, written by middleware when it sends a page
+ * there (console-api.md §3, "The lock screen"). That screen has no access token
+ * to ask `/v1/me` with, so without this its photo was the sign-in snapshot's,
+ * long expired.
+ *
+ * Short-lived on purpose: `photo_url` is presigned for ~15 minutes and the
+ * backend says not to store it, so this only carries it from the redirect to
+ * the two requests that show it (/unlock and /api/admin-photo), and dies
+ * before the signature does. Removed as soon as a new pair is stored.
+ */
+const LOCK = "root_lock";
+/** A minute inside the photo's ~15-minute signature. */
+export const LOCK_MAX_AGE = 14 * 60;
 
 const base = {
   httpOnly: true,
@@ -78,6 +104,23 @@ export async function setAuthCookies(opts: {
   const store = await cookies();
   store.set(ACCESS, opts.accessToken, { ...base, maxAge: opts.accessMaxAge });
   store.set(REFRESH, opts.refreshToken, { ...base, maxAge: opts.refreshMaxAge });
+  // A new pair means the session is unlocked — the lock's details are stale.
+  store.delete(LOCK);
+}
+
+/** The lock's holder from the refusal, or null when no lock put it there. */
+export async function readLockHolder(): Promise<{ name?: string; photoUrl?: string } | null> {
+  const raw = (await cookies()).get(LOCK)?.value;
+  if (!raw) return null;
+  try {
+    const { name, photoUrl } = JSON.parse(raw) as { name?: unknown; photoUrl?: unknown };
+    return {
+      name: typeof name === "string" ? name : undefined,
+      photoUrl: typeof photoUrl === "string" ? photoUrl : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -119,6 +162,17 @@ export async function setDeviceHint(bound: boolean, maxAge: number) {
   else store.delete(DEVICE);
 }
 
+/** Undefined (the server did not say) leaves the hint as it was. */
+export async function setEnrolHint(available: boolean | undefined, maxAge: number) {
+  if (available === undefined) return;
+  (await cookies()).set(DEVICE_ENROL, available ? "1" : "0", { ...base, maxAge });
+}
+
+/** False only when the server last said no — see DEVICE_ENROL. */
+export async function readEnrolHint(): Promise<boolean> {
+  return (await cookies()).get(DEVICE_ENROL)?.value !== "0";
+}
+
 export async function readDeviceHint(): Promise<boolean> {
   return (await cookies()).get(DEVICE)?.value === "1";
 }
@@ -130,6 +184,28 @@ export async function clearAuthCookies() {
   store.delete(USER);
   store.delete(PIN_LENGTH);
   store.delete(DEVICE);
+  store.delete(DEVICE_ENROL);
+  store.delete(LOCK);
+}
+
+/**
+ * Drop the access token only, keeping the refresh token — so the next request's
+ * middleware refreshes (or, while the PIN is wanted, /unlock asks for it).
+ */
+export async function dropAccessToken() {
+  (await cookies()).delete(ACCESS);
+}
+
+/**
+ * A short, one-way name for an access token — enough to tell two tokens apart,
+ * useless for anything else. What travels in /api/auth/recover's query string
+ * instead of the token.
+ */
+export async function tokenFingerprint(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest).slice(0, 12), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export async function getAccessToken() {
@@ -140,4 +216,4 @@ export async function getRefreshToken() {
   return (await cookies()).get(REFRESH)?.value ?? null;
 }
 
-export const AUTH_COOKIE_NAMES = { ACCESS, REFRESH, USER, PIN_LENGTH, DEVICE } as const;
+export const AUTH_COOKIE_NAMES = { ACCESS, REFRESH, USER, PIN_LENGTH, DEVICE, DEVICE_ENROL, LOCK } as const;

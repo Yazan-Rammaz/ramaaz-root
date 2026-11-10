@@ -1,9 +1,10 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 // `ApiError` is no longer thrown here — `api` raises it, with the backend's own
 // error envelope and Retry-After already read off the response.
 import { api } from "./server";
-import { AUTH_PATHS, meResponseSchema } from "@/lib/auth/endpoints";
+import { AUTH_PATHS, meResponseSchema, type WireProject } from "@/lib/auth/endpoints";
 
 /**
  * THE single way to read a PROJECT's data (RDB, Trydos, …). Server-only.
@@ -23,15 +24,11 @@ import { AUTH_PATHS, meResponseSchema } from "@/lib/auth/endpoints";
  * every project-data page reads through `backendFetch` — but the selection is
  * now a PATH SEGMENT rather than a host.
  *
- * ── What exists today ───────────────────────────────────────────────────────
- *   currencies          GET …/connection/manifest → `currencies`
- *   regions, branches   GET …/org-units  (the unit's `type` says which)
- *   unit types          GET …/unit-types
- *   employees           GET …/employees
- *
- * ⚠️ Languages does NOT exist yet, and the exact response shapes for the other
- * two are still unconfirmed — which is why the feature api modules are still
- * mocked. See `backend docs/frontend-project-data-needs.md`.
+ * ── What goes through it ────────────────────────────────────────────────────
+ *   project data        POST …/operations/{name} — currencies, countries,
+ *                       regions, languages, … (`./operations.ts`)
+ *   what it offers      GET …/operations, …/permissions, …/unit-types
+ *   roles               …/roles (the console's own routes)
  *
  * Same BFF rules as `src/lib/api/server.ts`: the browser never calls a backend
  * directly; Server Components read via features' api.ts, browser mutations go
@@ -55,9 +52,38 @@ export type RegistryEntry = {
   id: string;
   code: string;
   name: string;
-  /** The backend's own category for the project, when it sent one. */
-  projectType?: string;
+  nameAr?: string;
+  /** Line 3 of the card; older builds sent only `project_type`. */
+  description?: string;
+  status?: string;
+  connectionStatus?: string;
+  connectionError?: { code: string; message?: string };
+  healthStatus?: string;
+  /**
+   * The backend's own "ACTIVE and CONNECTED". Missing (an older build) reads as
+   * selectable: the backend refuses a call to an unavailable project anyway,
+   * and locking everybody out of a list that never sent the field is worse.
+   */
+  selectable: boolean;
+  myPermissions: string[];
 };
+
+/** The wire shape → our registry entry. Shared by `/v1/me` and the Systems routes. */
+export function toRegistryEntry(p: WireProject): RegistryEntry {
+  return {
+    id: p.id,
+    code: p.code ?? p.id,
+    name: p.name ?? p.code ?? p.id,
+    nameAr: p.name_ar,
+    description: p.description ?? p.project_type,
+    status: p.status,
+    connectionStatus: p.connection_status,
+    connectionError: p.connection_error,
+    healthStatus: p.health_status,
+    selectable: p.selectable ?? true,
+    myPermissions: p.my_permissions ?? [],
+  };
+}
 
 /** Thrown when no system is selected — pages can catch it and prompt. */
 export class NoSystemSelectedError extends Error {
@@ -109,22 +135,30 @@ export async function listRegistry(): Promise<RegistryEntry[]> {
   const raw = await api.get<unknown>(AUTH_PATHS.me);
   const projects = meResponseSchema.parse(raw).projects ?? [];
 
-  return projects.map((p) => ({
-    id: p.id,
-    code: p.code ?? p.id,
-    name: p.name ?? p.code ?? p.id,
-    projectType: p.project_type,
-  }));
+  return projects.map(toRegistryEntry);
 }
 
 export async function getSelectedSystem(): Promise<RegistryEntry | null> {
   const id = await getSelectedSystemId();
   if (!id) return null;
-
-  // A system that has since been removed resolves to null (stale cookie), so
-  // callers degrade to the "pick a system" state rather than erroring.
-  return (await listRegistry()).find((s) => s.id === id) ?? null;
+  return selectableEntry(id);
 }
+
+/**
+ * The registry lookup behind `getSelectedSystem`, memoised for one request and
+ * keyed on the selected id. Every project call resolves the selection, and one
+ * screen makes dozens of them (every page of a list, every country's regions);
+ * without this each was its own `GET /v1/me`. Keyed on the id, so selecting
+ * another system inside a request still looks it up afresh.
+ */
+const selectableEntry = cache(async (id: string): Promise<RegistryEntry | null> => {
+  // A system that has since been removed resolves to null (stale cookie), so
+  // callers degrade to the "pick a system" state rather than erroring. So does
+  // one that is no longer `selectable` (its connection failed, it was
+  // suspended, or the cookie predates the rule): every data call to it is
+  // refused, so the shell must not open its pages.
+  return (await listRegistry()).find((s) => s.id === id && s.selectable) ?? null;
+});
 
 /**
  * Prefix a project-scoped path with the selected system.

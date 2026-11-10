@@ -146,13 +146,13 @@ export function verifyBackMatchesFront(
     const backLastName = normalizeName(backExtracted.lastName ?? mrz.lastName ?? '');
     const frontLastName = normalizeName(frontData.lastName ?? '');
 
-    // ── Debug log: all fields side-by-side before decision ────────────────
+    // ── Debug log: which fields each side had — never the values, which are
+    // national numbers and names, in a console anything on the page can read.
     console.log(
-        '[backSideVerifier] ── cross-side comparison ──────────────────────\n' +
-        `  nationalNumber  front=${frontNatNum || '(none)'}  back=${backNatNum || '(none)'}  ${backNatNum.length >= 8 && frontNatNum.length >= 8 ? (backNatNum === frontNatNum ? '✓ exact' : `levenshtein=${levenshtein(backNatNum, frontNatNum)}`) : '— skip (too short)'}\n` +
-        `  documentNumber  front=${frontDocNum || '(none)'}  back=${backDocNum || '(none)'}  ${backDocNum.length >= 6 && frontDocNum.length >= 6 ? (backDocNum === frontDocNum ? '✓ exact' : `levenshtein=${levenshtein(backDocNum, frontDocNum)}`) : '— skip (too short)'}\n` +
-        `  lastName        front=${frontLastName || '(none)'}  back=${backLastName || '(none)'}  ${backLastName.length >= 2 && frontLastName.length >= 2 ? (backLastName === frontLastName ? '✓ exact' : `levenshtein=${levenshtein(backLastName, frontLastName)}`) : '— skip (too short)'}\n` +
-        `  MRZ parsed      natNum=${mrz.nationalNumber ?? '—'}  docNum=${mrz.documentNumber ?? '—'}  lastName=${mrz.lastName ?? '—'}  firstName=${mrz.firstName ?? '—'}`
+        '[backSideVerifier] cross-side comparison: ' +
+        `nationalNumber front=${frontNatNum ? 'yes' : 'no'} back=${backNatNum ? 'yes' : 'no'} · ` +
+        `documentNumber front=${frontDocNum ? 'yes' : 'no'} back=${backDocNum ? 'yes' : 'no'} · ` +
+        `lastName front=${frontLastName ? 'yes' : 'no'} back=${backLastName ? 'yes' : 'no'}`
     );
 
     if (backNatNum.length >= 8 && frontNatNum.length >= 8) {

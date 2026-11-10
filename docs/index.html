@@ -235,7 +235,7 @@ X1D3P12</code></pre>
   </header>
   <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li class="lvl-2"><a href="#1-the-three-settings">1. The three settings</a></li><li class="lvl-2"><a href="#2-the-link-path-changed">2. The link path changed</a></li><li class="lvl-2"><a href="#3-rpid-must-not-carry-a-port">3. `rp.id` must not carry a port</a></li><li class="lvl-2"><a href="#4-pick-the-production-domain-before-the-first-real-enrolment">4. ⚠️ Pick the production domain before the first real enrolment</a></li><li class="lvl-2"><a href="#5-what-we-cannot-test-until-this-is-set">5. What we cannot test until this is set</a></li></ul></nav>
   <p><strong>For the root backend developer.</strong> Everything here is configuration, not code: three settings and a path. All of it is needed before anyone can sign in, and two of them are expensive to change later.</p>
-<p>The endpoint contract itself is in <code>root-enrollment.md</code>. This is only the part that depends on <em>where the console is running</em>.</p>
+<p>The endpoint contract itself is in <code>backend docs/sign-in-and-sessions/from-backend/2026-09-30-root-first-sign-in.md</code>. This is only the part that depends on <em>where the console is running</em>.</p>
 <hr>
 <h2 id="1-the-three-settings">1. The three settings</h2>
 <p>They look related and are not the same shape — one is a full URL, the other a bare domain. That is the easy mistake.</p>
@@ -389,7 +389,7 @@ X-Step-Token: &lt;opaque token&gt;   → 401, rejected before the backend was co
 <p><strong>7. ✅ AGREED — collapse ID_DOCUMENT and ID_INFO into one stage.</strong></p>
 <p>One <code>/v1/kyc/submit</code>, one stage, one step token. Drop <code>ID_INFO_REQUIRED</code>.</p>
 <p>A stage exists to say "the server is blocked until you send something". There is no second user interaction here: the Worker OCRs the document, the summary screen shows the extracted fields, the person confirms them, and ONE submit carries images and fields together. Nothing is left for <code>ID_INFO</code> to gate — keeping it would mean the dashboard auto-posting a second token representing no user action at all.</p>
-<p>The original split came from <code>root-enrollment.md</code>, where both steps were stubs and the administrator was expected to TYPE their ID details. OCR removed that step, and that document already said those evidence shapes were "a suggestion, not a contract".</p>
+<p>The original split came from <code>backend docs/sign-in-and-sessions/from-backend/2026-09-30-root-first-sign-in.md</code>, where both steps were stubs and the administrator was expected to TYPE their ID details. OCR removed that step, and that document already said those evidence shapes were "a suggestion, not a contract".</p>
 <p><strong>Do not let <code>/kyc/submit</code> advance the challenge itself.</strong> <code>/v1/auth/*</code> is the single door into the state machine; a second path mutating it means two authorities on flow position. It would also teach the Worker about auth stages, which is the coupling the signed-result design note argues for removing.</p>
 <p>Accepted consequence: you can no longer reject the DETAILS separately from the DOCUMENT. The summary screen already covers that with "Incorrect, Try Again", which is a client-side retry before submitting, not a stage.</p>
 <p>On our side this is one line — <code>STAGE_ROUTES</code> already routes both stages to the same screen. <strong>5. ✅ SETTLED — "is this a first login?" is the STAGE, not a flag.</strong></p>

@@ -427,6 +427,7 @@ export async function restartSignInAction(): Promise<void> {
 }
 
 export async function logoutAction() {
+  console.warn("[auth] signed out (logoutAction)");
   try {
     await api.post(AUTH_PATHS.logout);
   } catch {

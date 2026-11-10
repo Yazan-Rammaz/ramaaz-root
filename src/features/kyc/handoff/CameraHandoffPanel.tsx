@@ -11,6 +11,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/ui/Icon';
 import { CustomQRCode } from '@/components/ui/CustomQR';
+import { FormError } from '@/components/ui/FormError';
 import {
     useCameraHandoff,
     type HandoffFacing,
@@ -351,9 +352,7 @@ export function CameraHandoffPanel({
 
                       {phase === 'failed' && (
                           <>
-                              <p className="fz-12 max-w-300 text-center leading-normal font-medium text-red-500">
-                                  {error}
-                              </p>
+                              <FormError message={error} className="max-w-300 font-medium" />
                               <button
                                   type="button"
                                   onClick={() => void start(facing)}

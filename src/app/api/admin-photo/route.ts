@@ -1,6 +1,6 @@
 import { proxyImage } from "@/lib/api/proxy-image";
 import { readChallenge } from "@/lib/auth/challenge";
-import { getRefreshToken } from "@/lib/auth/cookies";
+import { getRefreshToken, readLockHolder } from "@/lib/auth/cookies";
 import { getSession, sessionFromCookie } from "@/lib/auth/session";
 
 /**
@@ -15,12 +15,12 @@ import { getSession, sessionFromCookie } from "@/lib/auth/session";
  *   mid sign-in       the challenge cookie — `photo_url` from PASS_CODE_REQUIRED
  *   signed in         `GET /v1/me`, through `getSession()` — a new signature on
  *                     every call, so the dashboard lock never shows a dead one
- *   locked (/unlock)  the user snapshot from sign-in. There is no access token
- *                     to ask `/v1/me` with, so this URL is as old as the
- *                     sign-in and is usually expired by now — a 404, and the
- *                     screen shows the avatar glyph. Fixing that needs the
- *                     backend to put the user on the `401 PASS_CODE_REQUIRED`
- *                     refusal (offered in frontend-admin-name-and-photo.md §4).
+ *   locked (/unlock)  the `photo_url` on the `401 PASS_CODE_REQUIRED` refusal
+ *                     that raised the lock — freshly signed, kept by middleware
+ *                     in `root_lock` (console-api.md §3). Only when there is
+ *                     none (a lock raised another way, or left open past 14
+ *                     minutes) the sign-in snapshot, usually expired by then:
+ *                     a 404, and the screen shows the avatar glyph.
  *
  * A challenge in progress wins outright, even without a photo: whoever is
  * signing in is not necessarily whoever this browser's older session belonged
@@ -33,19 +33,27 @@ import { getSession, sessionFromCookie } from "@/lib/auth/session";
 // A per-request read of httpOnly cookies — never prerendered, never cached.
 export const dynamic = "force-dynamic";
 
-async function photoUrl(): Promise<string | undefined> {
+/** The URL, and which source answered — the source is only for the log line. */
+async function photoUrl(): Promise<{ url?: string; source: string }> {
   const challenge = await readChallenge();
-  if (challenge.challengeToken) return challenge.photoUrl;
+  if (challenge.challengeToken) return { url: challenge.photoUrl, source: "challenge" };
 
   const session = await getSession();
-  if (session) return session.photoUrl;
+  if (session) return { url: session.photoUrl, source: "session (/v1/me)" };
 
   // No access token. Only a refresh token makes the snapshot this browser's
   // live (locked) session rather than a leftover.
-  if (!(await getRefreshToken())) return undefined;
-  return (await sessionFromCookie())?.photoUrl;
+  if (!(await getRefreshToken())) return { source: "none (signed out)" };
+  // The refusal that put up the lock carries a freshly signed photo.
+  const lock = await readLockHolder();
+  if (lock?.photoUrl) return { url: lock.photoUrl, source: "lock refusal (locked)" };
+  return { url: (await sessionFromCookie())?.photoUrl, source: "sign-in snapshot (locked)" };
 }
 
 export async function GET() {
-  return proxyImage(await photoUrl(), "admin-photo");
+  const { url, source } = await photoUrl();
+  // A miss with no URL used to be silent, which left a 404 with no way to tell
+  // WHICH source came back empty. Upstream failures log in proxyImage.
+  if (!url) console.warn(`[admin-photo] no photo_url from ${source}`);
+  return proxyImage(url, "admin-photo");
 }

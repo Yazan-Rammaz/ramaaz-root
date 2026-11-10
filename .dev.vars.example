@@ -65,3 +65,19 @@ DESIGN_GALLERY_KEY=""
 # over. Must match LIVENESS_LAB_SECRET on the ramaaz-kyc worker. Unset on both
 # sides = the routes 404 and the bench is gone. Each run costs one check.
 LIVENESS_LAB_SECRET=""
+
+# AI — the region drawers' AI pass (translations into every system language,
+# and a country's ISO code, dial code, currency, …). Server-only; full notes in
+# src/lib/ai/openai.ts. Unset = no AI: every field comes back empty and is
+# filled in by hand.
+#
+# OpenAI refuses calls from Syria, so this runs on Workers AI through our
+# Cloudflare AI Gateway `ramaaz` (an Authenticated Gateway). One Cloudflare API
+# token — Account · AI Gateway · Run — opens the gateway and is the model key.
+# On Cloudflare: AI_GATEWAY_TOKEN via `wrangler secret put`, the rest as vars.
+AI_BASE_URL="https://gateway.ai.cloudflare.com/v1/725421c06cddc0ed4694b7cd177ae60e/ramaaz/workers-ai/v1"
+AI_MODEL="@cf/openai/gpt-oss-120b"
+AI_REASONING_EFFORT="low"
+AI_GATEWAY_TOKEN=""
+# OpenAI directly instead: leave the four above empty and set
+# AI_API_KEY=""

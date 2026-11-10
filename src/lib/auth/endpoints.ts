@@ -18,7 +18,7 @@ import { z } from "zod";
  * notices, which is rule 2 below doing its job.
  *
  * ⚠️ DEVICE VERIFICATION IS OFF (`ROOT_REQUIRE_DEVICE=false` — see
- * `backend docs/frontend-security-changes.md` §0), which is why neither path
+ * `backend docs/sign-in-and-sessions/from-backend/2026-09-30-security-changes-v2.md` §0), which is why neither path
  * ends at a passkey. Nothing here was deleted: DEVICE_REQUIRED simply never
  * arrives, `/login/device` is never routed to, and the two device endpoints
  * answer 412 PRECONDITION_FAILED if called. The setting is reversible in one
@@ -29,8 +29,8 @@ import { z } from "zod";
  * `/v1/auth/identity-document`. That call returns COMPLETED with the token
  * pair, where it used to return DEVICE_REQUIRED.
  *
- * See `backend docs/root-enrollment.md` for the authoritative writeup, and
- * `backend docs/frontend-security-changes.md` for the current change notes —
+ * See `backend docs/sign-in-and-sessions/from-backend/2026-09-30-root-first-sign-in.md` for the authoritative writeup, and
+ * `backend docs/sign-in-and-sessions/from-backend/2026-09-30-security-changes-v2.md` for the current change notes —
  * the latter wins where the two disagree, and they do (see rule 3).
  *
  * ── Four rules that hold for every step ─────────────────────────────────────
@@ -53,7 +53,7 @@ import { z } from "zod";
  *     failure charges both counters.
  *
  *     ⚠️ THE NUMBERS ARE DISPUTED. The change notes say 20 attempts per sign-in
- *     and a 500-second private code; `root-enrollment.md` still says 5 and 50.
+ *     and a 500-second private code; `2026-09-30-root-first-sign-in.md` still says 5 and 50.
  *     Open with the backend — and the reason nothing here hard-codes either.
  *
  *     ⚠️ NEVER COUNT ATTEMPTS HERE. The server charges them and says on every
@@ -359,6 +359,24 @@ export const apiErrorSchema = z.object({
         device_available: z.boolean().optional(),
         /** Same refusal: a new passkey may be bound here (Add device). */
         device_enrol_available: z.boolean().optional(),
+        /**
+         * Same refusal — whose lock it is, for the lock screen after a reload,
+         * which has no access token to ask `/v1/me` with (console-api.md §3,
+         * "The lock screen"). `pass_code_length` is to be taken from here, not
+         * from the sign-in step. `photo_url` is presigned for ~15 minutes and
+         * fresh on every refusal; `full_name_ar` / `photo_url` are omitted
+         * when empty.
+         */
+        pass_code_length: z.number().int().positive().optional(),
+        full_name: z.string().optional(),
+        full_name_ar: z.string().optional(),
+        photo_url: z.string().optional(),
+        /**
+         * On `422 BASE_URL_NOT_ALLOWED` (connecting a project): why the URL
+         * was refused, keyed by field — `{ base_url: "must use https" }`.
+         * Every other validation failure puts this at the top-level `fields`.
+         */
+        fields: z.record(z.string(), z.string()).optional(),
       })
       .loose()
       .optional(),
@@ -458,12 +476,11 @@ export const ERROR_CODES = {
    * with device verification off no session has one. The backend refuses to
    * start with step-up enabled in that combination.
    *
-   * Listed anyway because it is a 401, and a 401 that reaches a generic handler
-   * gets a refresh and then a sign-out. If it ever arrives, pressing "Issue
-   * link" would sign the administrator out instead of prompting them. Branching
-   * on it costs two lines now and saves a bug hunt later. See §2 of
-   * `backend docs/frontend-security-changes.md` for the ceremony, which we
-   * deliberately have NOT built.
+   * The backend's rule (console-api.md §0): treat it like `UNAUTHENTICATED`.
+   * On an API call `/api/auth/recover` signs out; on a sign-in step it shows the
+   * backend's own message, as `UNAUTHENTICATED` does. The ceremony (§2 of
+   * `backend docs/sign-in-and-sessions/from-backend/2026-09-30-security-changes-v2.md`) stays
+   * deliberately unbuilt.
    */
   mfaRequired: "MFA_REQUIRED",
   /**
@@ -691,7 +708,7 @@ export const wireUserSchema = z.object({
 
   /**
    * The admin's stored photo — on `tokens.user` (COMPLETED), `/v1/auth/refresh`
-   * and `/v1/me` only (backend docs/frontend-admin-name-and-photo.md). The
+   * and `/v1/me` only (backend docs/sign-in-and-sessions/from-backend/2026-10-03-admin-name-and-photo.md). The
    * original, unblurred; the glass is ours.
    *
    * ⚠️ A SIGNED URL that dies after `S3_PRESIGN_TTL` (15 min by default), and
@@ -851,31 +868,46 @@ export type PassCodeRequest = {
 /* ────────────────────── GET /v1/me ────────────────────── */
 
 /**
- * One managed system — this IS the registry the dashboard lost when
- * `root-backend` was deleted, confirmed by the backend 2026-09-22. For a root
- * administrator `projects` is every registered system, so an empty array means
- * none is registered yet rather than none is visible.
+ * One project, as `projects[]` on `GET /v1/me` and every Systems-page route
+ * returns it (console-api.md §4, §5). For a root administrator the list is
+ * every non-archived project, so an empty array means none is registered yet.
  *
- * ⚠️ NO BASE URL. `lib/api/backend.ts` needs one per system to route project
- * data (regions, currencies, …) to that project's own backend, and nothing here
- * carries it. So this unblocks the /systems LIST and nothing downstream of it.
- * Open with the backend.
+ * There is no base URL here and there never will be: the root backend proxies
+ * every project call (`/v1/projects/{id}/…`), so the id IS the routing.
  *
- * Only `id` is required: the backend documents the rest as present but
- * `connection_status` and `health_status` are explicitly omitted until a
- * connection exists, and a registry entry that fails to parse would take the
- * whole session read down with it.
+ * Only `id` is required. A registry entry that fails to parse would take the
+ * whole session read down with it, and older builds sent none of the newer
+ * fields.
  */
 export const wireProjectSchema = z.object({
   id: z.string(),
+  /** Lowercase, 2–20 characters, never changes. Line 1 of the card. */
+  code: z.string().optional(),
   name: z.string().optional(),
   name_ar: z.string().optional(),
-  /** e.g. "TRYDOS" — the stable handle, and what a per-system API key keys on. */
-  code: z.string().optional(),
+  /** Line 3 of the card. */
+  description: z.string().optional(),
+  /** `DRAFT | ACTIVE | SUSPENDED` (an archived project is never listed). */
   status: z.string().optional(),
+  /** Older builds only; superseded by `description`. */
   project_type: z.string().optional(),
+  /** `NOT_CONNECTED | CONNECTED | FAILED`. */
   connection_status: z.string().optional(),
+  /** Only while `connection_status` is FAILED. */
+  connection_error: z
+    .object({
+      code: z.string(),
+      message: z.string().optional(),
+      at: z.string().optional(),
+    })
+    .optional(),
+  /** `UNKNOWN | UP | DEGRADED | DOWN`, as of `health_checked_at`. */
   health_status: z.string().optional(),
+  health_checked_at: z.string().optional(),
+  /** ACTIVE and CONNECTED: the backend's own answer to "may this be picked". */
+  selectable: z.boolean().optional(),
+  /** What the caller may do there (everything, for Root). Rendering only. */
+  my_permissions: z.array(z.string()).optional(),
 });
 export type WireProject = z.infer<typeof wireProjectSchema>;
 
@@ -929,6 +961,24 @@ export type RefreshProof =
  * AUTH_PATHS.refresh), or the browser dropping the cookie.
  */
 export const REFRESH_MAX_AGE = 60 * 60 * 24 * 400;
+
+/**
+ * The access COOKIE's lifetime for a token the backend says lives `expiresIn`
+ * seconds: a minute shorter.
+ *
+ * Refreshing is lazy — middleware does it when a request arrives and the access
+ * cookie is gone — and there is deliberately no timer (a timer refreshes idle
+ * tabs forever, defeating the idle lock, and two tabs' timers replay one
+ * single-use token into TOKEN_REUSED). With the cookie living exactly as long
+ * as the token, a request in the token's last seconds still carried it and
+ * reached the backend already expired (`401 TOKEN_EXPIRED`), which nothing here
+ * retries. Ending the cookie early makes any request in that last minute
+ * refresh first instead. Never below half the token's life, for very short ones.
+ */
+export function accessCookieMaxAge(expiresIn: number): number {
+  const ACCESS_EARLY_REFRESH_SECONDS = 60;
+  return Math.max(Math.floor(expiresIn / 2), expiresIn - ACCESS_EARLY_REFRESH_SECONDS);
+}
 
 /**
  * How long the whole challenge lives, per `AUTH_CHALLENGE_TTL` backend-side.

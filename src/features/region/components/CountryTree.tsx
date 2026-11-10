@@ -3,6 +3,7 @@
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { flagEmoji, type GeoNode } from "../mock-geo";
+import { GeoThumb } from "./GeoThumb";
 
 type Cell = { node: GeoNode; row: number; col: number; depth: number };
 
@@ -98,7 +99,8 @@ function GeoRow({
 
   return (
     <div
-      className="flex items-center gap-4"
+      // A closed country stays listed, greyed: it can still be opened (read-only, Reopen).
+      className={cn("flex items-center gap-4", node.closed && "opacity-40 grayscale")}
       style={{ gridRow: cell.row + 1, gridColumn: cell.col + 1 }}
     >
       {/* Country: flag chip. */}
@@ -132,7 +134,7 @@ function GeoRow({
         )}
       >
         {node.map && (
-          <Icon name={node.map.icon} width={node.map.w} height={node.map.h} />
+          <GeoThumb image={node.map} />
         )}
       </span>
 

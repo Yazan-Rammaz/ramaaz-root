@@ -1,5 +1,6 @@
 'use client';
 
+import { traceFaceStartup } from '@/features/kyc/debug/startupTrace';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
@@ -262,6 +263,13 @@ type Credentials = {
  * carries on in the background, so the NEXT attempt is likely to have it.
  */
 const MESH_MODEL_TIMEOUT_MS = 120_000;
+
+/**
+ * How long the light-check camera waits for the face-mesh model before opening
+ * anyway. See the probe effect: a black frame with the standby mark is the
+ * right wait while the model compiles, not for two minutes on a slow line.
+ */
+const PROBE_MODEL_WAIT_MS = 20_000;
 
 export function FaceLivenessScreen({
     challengeId,
@@ -527,16 +535,40 @@ export function FaceLivenessScreen({
             // they refuse, and a refusal sticks to the origin.
             await waitForSplash();
             if (cancelled) return;
+            /*
+             * The face-mesh model FIRST, the camera after it.
+             *
+             * ⚠️ This used to be the other way round — camera, then the model in
+             * the background — and the camera froze. Loading the model is not
+             * just a download: compiling ~12MB of WebAssembly and setting up
+             * the GPU graph run on the main thread, and for a few seconds the
+             * page cannot paint. With the camera already showing, that read as
+             * a live picture locking up.
+             *
+             * Now the frame stays black with the Face ID standby mark (the
+             * standby cover below, which holds until `probeLive`) while the
+             * model loads, and the camera opens once the stall is over — so it
+             * is live from its first frame. The session effect awaits the same
+             * shared promise, so AWS's camera never waits for the model twice.
+             *
+             * A model that fails or times out is not a reason to stop: the mesh
+             * is a drawing over the check, not part of it. `ensureLandmarker`
+             * resolves false and the camera opens anyway.
+             *
+             * Capped well below the model's own timeout: only the COMPILE
+             * stalls the page, not the download, so on a slow connection the
+             * camera opens after PROBE_MODEL_WAIT_MS and the model finishes in
+             * the background (the session effect still waits for it in full).
+             */
+            traceFaceStartup('splash done — loading face model (probe)');
+            if (CAPTURE_LIVE_MESH.enabled) {
+                const ok = await ensureLandmarker(PROBE_MODEL_WAIT_MS);
+                traceFaceStartup(`face model ready=${ok} — opening light-check camera`);
+                if (cancelled) return;
+            }
             // Never throws — a refusal arrives as `probeError` below.
             await startProbe();
-            /*
-             * Start the face-mesh model download NOW, while the person is
-             * still lining up their light. It costs nothing (no AWS session is
-             * open), and the session effect awaits the same shared download —
-             * so the gap between this camera closing and AWS's opening is the
-             * session call alone, not the session plus ~15MB of model.
-             */
-            if (CAPTURE_LIVE_MESH.enabled) void ensureLandmarker(MESH_MODEL_TIMEOUT_MS);
+            traceFaceStartup('light-check camera started');
         })();
 
         return () => {
@@ -582,6 +614,7 @@ export function FaceLivenessScreen({
             }
         }
         stopProbe();
+        traceFaceStartup('light check passed — light-check camera stopped');
         setLightCleared(true);
     }, [lightReady, lightCleared, stopProbe, probeVideoRef]);
 
@@ -718,7 +751,9 @@ export function FaceLivenessScreen({
             }
 
             try {
+                traceFaceStartup('starting AWS session');
                 const started = await createKycService().startReverify(challengeId);
+                traceFaceStartup('AWS session started — mounting AWS camera');
                 if (cancelled) return;
                 if (!started?.sessionId) throw new Error('no session id');
                 setSession(started);

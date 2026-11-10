@@ -70,8 +70,7 @@ export function retryAfterSeconds(error: unknown): number | undefined {
  * the ten link-opens a minute to rebuild what was already there.
  *
  * ⚠️ Read the CODE, never the status. Distinct 401s exist and most do not mean
- * "this sign-in is over": `MFA_REQUIRED` means "prove yourself and retry",
- * `TOKEN_EXPIRED` means "refresh", `UNAUTHENTICATED` means four different things
+ * "this sign-in is over": `TOKEN_EXPIRED` means "refresh", `UNAUTHENTICATED` means four different things
  * depending on which call returned it (see ERROR_CODES). Widening this to
  * `error.status === 401` turns all of them into a sign-out.
  */
@@ -149,12 +148,9 @@ export function signInError(error: unknown, fallback: string): string {
       // Say the SERVICE is down. Never imply the code was wrong: it may have
       // been perfect and simply never delivered.
       return "The verification service is unavailable. Please try again.";
-    case ERROR_CODES.mfaRequired:
-      // Not reachable today (no session holds a passkey while device
-      // verification is off), and we have deliberately not built the ceremony.
-      // Here so it lands as its own sentence rather than falling through to a
-      // generic 401 path that would sign the administrator out.
-      return "This action needs an extra security check that is not available yet.";
+    // MFA_REQUIRED has no case of its own: console-api.md §0 says treat it like
+    // UNAUTHENTICATED (it is unreachable while the device step is off), so it
+    // takes the same path below — the backend's own sentence.
     case ERROR_CODES.validationFailed: {
       // The generic sentence names nothing; the per-field reasons do — e.g. a
       // PIN the backend refuses as too simple. Show them when there are any.

@@ -1,11 +1,15 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
+import type { NameLanguage } from "@/features/language/names";
+import { useAddAction } from "@/features/shell/add-action";
 import type { Currency, CurrencyCategory } from "../schema";
+import { CurrencyEditDrawer } from "./CurrencyEditDrawer";
 
 const rem = (px: number) => `${px * 0.0625}rem`;
 
@@ -27,15 +31,41 @@ const FILTERS: { category: CurrencyCategory; x: number }[] = [
  * category (cash → USD/YTL/SYP/IQD/LBP, crypto → USDT, gold, silver); click it
  * again to show all. Each row's leading box holds the fiat code (14/Medium) or a
  * full-color icon; the card holds the name (14/Regular).
+ *
+ * With `editable` (RDB offers `currency.update`, `currencies:write` held) a
+ * row opens the edit sheet on the end side (`CurrencyEditDrawer`); the
+ * navbar's Close closes it. An inactive currency's row is dimmed.
  */
-export function CurrencyList({ items }: { items: Currency[] }) {
+export function CurrencyList({
+  items: initialItems,
+  languages,
+  editable,
+}: {
+  items: Currency[];
+  /** The project's languages — the edit sheet's name rows. */
+  languages: NameLanguage[];
+  editable: boolean;
+}) {
   const t = useTranslations("currency");
   const [active, setActive] = useState<CurrencyCategory | null>(null);
+  // The list as RDB holds it; an edit RDB accepted updates its row here.
+  const [items, setItems] = useState(initialItems);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedId ? items.find((c) => c.id === selectedId) : undefined;
+
+  // The sheet has no X of its own: while it is open, the navbar's Close closes it.
+  const { setOnClose } = useAddAction();
+  useEffect(() => {
+    if (!selectedId) return;
+    setOnClose(() => setSelectedId(null));
+    return () => setOnClose(null);
+  }, [selectedId, setOnClose]);
 
   const shown = active ? items.filter((c) => c.category === active) : items;
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full">
+    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       {/* Header — tall icon box + [category filter strip over title]. */}
       <header className="flex items-stretch gap-4 ps-12 pe-12">
         <span
@@ -101,7 +131,10 @@ export function CurrencyList({ items }: { items: Currency[] }) {
       ) : (
         <ul className="mt-12 flex flex-col gap-4 ps-12">
           {shown.map((item) => (
-            <li key={item.id} className="flex gap-4">
+            <li
+              key={item.id}
+              className={cn("flex gap-4", item.isActive === false && "opacity-50")}
+            >
               {/* Leading box — colorful icon if present, else the fiat code. */}
               <span className="bg-surface rad-12 fz-14 text-ink flex h-50 w-50 shrink-0 items-center justify-center font-medium">
                 {item.icon ? (
@@ -110,14 +143,46 @@ export function CurrencyList({ items }: { items: Currency[] }) {
                   item.code
                 )}
               </span>
-              {/* Content card — the currency name. */}
-              <div className="bg-surface rad-12 flex h-50 w-352 max-w-full items-center ps-12">
-                <span className="fz-14 text-ink">{item.name}</span>
-              </div>
+              {/* Content card — the currency name; opens the edit sheet. */}
+              {editable ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(item.id)}
+                  aria-pressed={selectedId === item.id}
+                  className={cn(
+                    "bg-surface rad-12 flex h-50 w-352 max-w-full items-center ps-12 text-start",
+                    selectedId === item.id && "hairline",
+                  )}
+                  style={
+                    {
+                      "--hairline-radius": "0.75rem",
+                      "--hairline-color": "#388cff",
+                    } as CSSProperties
+                  }
+                >
+                  <span className="fz-14 text-ink">{item.name}</span>
+                </button>
+              ) : (
+                <div className="bg-surface rad-12 flex h-50 w-352 max-w-full items-center ps-12">
+                  <span className="fz-14 text-ink">{item.name}</span>
+                </div>
+              )}
             </li>
           ))}
         </ul>
       )}
+    </div>
+
+      <AnimatePresence>
+        {selected && (
+          <CurrencyEditDrawer
+            key={selected.id}
+            currency={selected}
+            languages={languages}
+            onSaved={(next) => setItems((prev) => prev.map((c) => (c.id === next.id ? next : c)))}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

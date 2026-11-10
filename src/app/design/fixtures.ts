@@ -92,9 +92,9 @@ export const FIXTURE_KYC_USER: KycUser = {
 };
 
 /**
- * The systems registry, which currently has no backend to come from — the
- * registry lived in the deleted `root-backend`, so `listSystems()` throws
- * rather than returning rows. Shaped to `systemSchema`.
+ * The systems registry as the backend sends it (`projects` on /v1/me): two
+ * connected projects and one just created, still DRAFT and not connected, so
+ * the greyed-out card shows too. Shaped to `systemSchema`.
  */
 export const FIXTURE_SYSTEMS: System[] = [
     {
@@ -102,11 +102,26 @@ export const FIXTURE_SYSTEMS: System[] = [
         code: 'rdb',
         name: 'Ramaaz Digital Banking',
         description: 'Payment Services Provider',
+        status: 'ACTIVE',
+        connectionStatus: 'CONNECTED',
+        selectable: true,
     },
     {
         id: 'trydos',
         code: 'trydos',
         name: 'Try Direct Online Shopping',
-        description: 'E-commerce Marketplace',
+        description: 'Online Shopping Platform',
+        status: 'ACTIVE',
+        connectionStatus: 'CONNECTED',
+        selectable: true,
+    },
+    {
+        id: 'shamify',
+        code: 'shamify',
+        name: 'Shamify',
+        description: 'Business Platform',
+        status: 'DRAFT',
+        connectionStatus: 'NOT_CONNECTED',
+        selectable: false,
     },
 ];

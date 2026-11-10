@@ -1,43 +1,69 @@
 import "server-only";
-import { languageSchema, type Language } from "./schema";
+import { cache } from "react";
+import { activeOperations, readOperation } from "@/lib/api/operations";
+import { chipOf, type NameLanguage } from "./names";
+import { coverageSchema, languageSchema, type Coverage, type Language } from "./schema";
 
 /**
- * Single place language endpoints are read. Server-only.
+ * Single place a project's languages are read. Server-only.
  *
- * Languages are PROJECT data — scoped to the system selected on /systems, and
- * served by the root backend on that project's behalf.
+ * They belong to the SELECTED project and come from its own operations
+ * (`backend docs/project-data/from-backend/2026-11-08-languages-screen-and-names.md`):
  *
- * ⚠️ THERE IS NO ENDPOINT. Not "not wired yet" — it does not exist on the
- * backend at all, confirmed round 2 §2, which lists what does: the connection
- * manifest, org-units, unit-types and employees. Languages is not among them.
+ *   language.list       every language, every status, already in display order
+ *   language.coverage   how many names still have no text, per language
  *
- * We have asked for `GET /v1/projects/{id}/languages` (a read; this page has no
- * create or edit), and flagged that if it turns out to be a large piece of work
- * we would rather leave this mocked than block on it. Until that answer lands
- * this mock is the screen, and that is a deliberate hold rather than an
- * oversight. See `backend docs/frontend-project-data-needs.md`.
- *
- * When it exists, the swap keeps the schema.parse boundary exactly:
- *   const data = await backendFetch.get<unknown>("/languages");
- *   return languageSchema.array().parse(data);
- * (import { backendFetch } from "@/lib/api/backend" — it prefixes
- * `/v1/projects/{selected}` for you.)
+ * Read again on every request, so selecting another system shows its own
+ * languages. The fixed `en / ar / tr / ku` list that stood here is gone.
  */
-const MOCK_LANGUAGES: unknown[] = [
-  { id: "en", code: "EN", name: "English" },
-  { id: "ar", code: "AR", name: "Arabic" },
-  { id: "tr", code: "TR", name: "Turkish" },
-  { id: "ku", code: "KU", name: "Kurdish" },
-];
+export const listLanguages = cache(async (): Promise<Language[]> => {
+  return languageSchema.array().parse(await readOperation("language.list"));
+});
 
-export async function listLanguages(): Promise<Language[]> {
-  return languageSchema.array().parse(MOCK_LANGUAGES);
+/**
+ * The languages as a name form needs them — every status: the form decides
+ * which get a row (`rowLanguages`). Labelled with each language's name in
+ * itself.
+ */
+export async function listNameLanguages(): Promise<NameLanguage[]> {
+  return (await listLanguages()).map((l) => ({
+    code: l.code,
+    chip: chipOf(l.code),
+    label: l.nativeName,
+    direction: l.direction,
+    status: l.status,
+    required: l.required ?? (l.code === "en" || l.code === "ar"),
+  }));
 }
 
-export async function getLanguage(id: string): Promise<Language> {
-  const found = MOCK_LANGUAGES.find(
-    (l): l is { id: string } =>
-      typeof l === "object" && l !== null && (l as { id?: unknown }).id === id,
-  );
-  return languageSchema.parse(found);
+/**
+ * Coverage across the whole project, or null when it can't be read. A caller
+ * whose reach is below the project gets `404 NOT_FOUND` — this console is
+ * Root's, which always reaches it, but a failed read must still leave the
+ * screen working, and the activation dialog then says coverage could not be
+ * checked rather than showing 100.
+ */
+export async function languageCoverage(): Promise<Coverage | null> {
+  try {
+    return coverageSchema.parse(await readOperation("language.coverage"));
+  } catch {
+    return null;
+  }
 }
+
+/**
+ * Which language commands this person can use: the operation must be `ACTIVE`
+ * in the project and they must hold `languages:write` (granted at the project
+ * only; Root holds it). A failed read of the operation list is "none".
+ */
+export async function languageAccess(myPermissions: string[]) {
+  const ops = myPermissions.includes("languages:write")
+    ? await activeOperations().catch(() => new Set<string>())
+    : new Set<string>();
+  return {
+    create: ops.has("language.create"),
+    update: ops.has("language.update"),
+    status: ops.has("language.status.update"),
+  };
+}
+export type LanguageAccess = Awaited<ReturnType<typeof languageAccess>>;

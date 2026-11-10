@@ -42,17 +42,20 @@ export function PasscodeLock({
   name,
   length,
   deviceBound,
+  enrolAvailable,
   rpId,
 }: {
   name?: string;
   length?: number;
   /** The server said a passkey is bound to this link — `root_device`. */
   deviceBound: boolean;
+  /** Offer Add device — `root_device_enrol` (DEVICE_ENROL in cookies.ts). */
+  enrolAvailable: boolean;
   /** `WEBAUTHN_RP_ID`. */
   rpId?: string;
 }) {
   const verify = useUnlockVerify();
-  const passkey = useSessionPasskey({ bound: deviceBound, rpId });
+  const passkey = useSessionPasskey({ bound: deviceBound, enrolAvailable, rpId });
 
   return (
     <IdleLock

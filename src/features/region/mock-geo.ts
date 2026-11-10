@@ -1,13 +1,26 @@
 /**
- * Mock geographic tree for the Countries tab (XD "Fixes" frame). A country
+ * The geographic tree's node shape for the Countries tab (XD "Fixes" frame),
+ * now filled from RDB by `api.ts`; the static XD tree that used to live here is
+ * gone. A country
  * expands its level-1 divisions inline below itself; every deeper level opens
  * as a new column toward the end side, starting at its parent's row. Bitmap
  * thumbnails are the XD exports in /public/icons/regions/geo, recorded at
  * their native XD pixel sizes.
  */
-import { generateCountry, type CountryDraft } from "./mock-ai";
+import type { LocalizedName } from "@/lib/i18n/localized";
+import { FLAG_CODES } from "./flag-codes";
+import { ALPHA3_TO_ALPHA2 } from "./iso-alpha3";
+import { MAP_SIZES } from "./map-sizes";
+import type { CountryDraft } from "./mock-ai";
 
-export type GeoImage = { icon: string; w: number; h: number };
+export type GeoImage = {
+  /** A file in /public/icons (`<Icon name>`). */
+  icon: string;
+  w: number;
+  h: number;
+  /** A picked file instead (`data:` URL), fitted inside w × h — see `GeoThumb`. */
+  src?: string;
+};
 
 export type GeoNode = {
   id: string;
@@ -26,6 +39,17 @@ export type GeoNode = {
    * source of the "Add {country} {level}" labels.
    */
   details?: CountryDraft;
+  /** Its name as RDB stores it, in every language it has — what Edit starts from. */
+  names?: LocalizedName;
+  /** RDB's `updatedAt` as read — sent back on an edit so a stale save is refused. */
+  updatedAt?: string;
+  /** A region's type key (`province`), which Edit can change. */
+  regionType?: string;
+  /**
+   * A closed country: greyed in the tree, read-only, and only Reopen is
+   * offered (2026-11-08 closed-country note). Closed regions are not listed.
+   */
+  closed?: boolean;
   children: GeoNode[];
 };
 
@@ -37,6 +61,26 @@ export function findPathById(nodes: GeoNode[], id: string): GeoNode[] | null {
     if (sub) return [n, ...sub];
   }
   return null;
+}
+
+/** Immutably change the node with the given id (an edit just saved). */
+export function updateById(
+  nodes: GeoNode[],
+  id: string,
+  patch: Partial<GeoNode>,
+): GeoNode[] {
+  return nodes.map((n) =>
+    n.id === id
+      ? { ...n, ...patch }
+      : { ...n, children: updateById(n.children, id, patch) },
+  );
+}
+
+/** Immutably drop the node with the given id (and what is below it) — a closed one. */
+export function removeById(nodes: GeoNode[], id: string): GeoNode[] {
+  return nodes
+    .filter((n) => n.id !== id)
+    .map((n) => ({ ...n, children: removeById(n.children, id) }));
 }
 
 /** Immutably append a child under the node with the given id. */
@@ -58,10 +102,22 @@ const geo = (file: string, w: number, h: number): GeoImage => ({
   h,
 });
 
-/** 2-letter code -> flag emoji (regional indicators); "" when not derivable. */
+/**
+ * A country's 2-letter ISO code, upper case, from either kind people type or
+ * save: `JO` stays `JO`, `JOR` becomes `JO`. "" for anything else — a
+ * 3-letter code is never cut to its first two letters (ARE is the Emirates,
+ * AR is Argentina).
+ */
+export function toAlpha2(code: string) {
+  const cc = code.trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(cc)) return cc;
+  return ALPHA3_TO_ALPHA2.get(cc) ?? "";
+}
+
+/** Country code -> flag emoji (regional indicators); "" when not derivable. */
 export function flagEmoji(code: string) {
-  const cc = code.trim().toUpperCase().slice(0, 2);
-  if (cc.length !== 2 || !/^[A-Z]{2}$/.test(cc)) return "";
+  const cc = toAlpha2(code);
+  if (!cc) return "";
   return String.fromCodePoint(
     ...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
   );
@@ -82,111 +138,30 @@ export const COUNTRY_FLAGS: Record<string, GeoImage> = {
   SY: geo("flag-sy.svg", 26, 18),
 };
 
-/** Resolve the real flag for a short code, or undefined (caller falls back
- *  to `flagEmoji`). */
+/**
+ * Resolve the flag for a short code: the XD bitmap where the design has one,
+ * else the bundled flag set (`/public/icons/flags`, every ISO country), else
+ * undefined (caller falls back to `flagEmoji`). Automatic for any country —
+ * nobody has to upload a flag.
+ */
 export function resolveFlag(code: string): GeoImage | undefined {
-  return COUNTRY_FLAGS[code.trim().toUpperCase()];
+  const cc = toAlpha2(code);
+  if (COUNTRY_FLAGS[cc]) return COUNTRY_FLAGS[cc];
+  const lower = cc.toLowerCase();
+  // 4:3 at the XD flag chip's 26px width.
+  return FLAG_CODES.has(lower) ? { icon: `flags/${lower}`, w: 26, h: 20 } : undefined;
 }
-
-const NEIGHBORHOOD = geo("chip-neighborhood.png", 20, 20);
-
-const PROVINCE_MAPS = [
-  geo("map-istanbul.png", 52, 26),
-  geo("map-mersin.png", 39, 26),
-  geo("map-ankara.png", 30, 26),
-  geo("map-gaziantep.png", 39, 26),
-];
-const DISTRICT_CHIPS = [
-  geo("chip-fatih.png", 25, 26),
-  geo("chip-sariyer.png", 25, 26),
-];
 
 /**
- * Auto-assign a map thumbnail to a manually added node so no box stays empty
- * (mock: cycles the XD exports). depth 0 = country, 1 = level 1, ….
+ * A country's map thumbnail by its 2-letter code: the XD export for Turkiye
+ * (it carries the province borders), else the generated set in
+ * `/public/icons/maps` (scripts/gen-country-maps.mjs, every ISO country, the
+ * same green). Undefined for a code with no map — the box stays empty rather
+ * than showing another country's outline.
  */
-export function placeholderMap(depth: number, index: number): GeoImage {
-  if (depth === 0) return geo("map-turkiye.png", 62, 26);
-  if (depth === 1) return PROVINCE_MAPS[index % PROVINCE_MAPS.length];
-  if (depth === 2) return DISTRICT_CHIPS[index % DISTRICT_CHIPS.length];
-  return NEIGHBORHOOD;
+export function countryMap(code: string): GeoImage | undefined {
+  const cc = toAlpha2(code).toLowerCase();
+  if (cc === "tr") return geo("map-turkiye.png", 62, 26);
+  const size = MAP_SIZES[cc];
+  return size ? { icon: `maps/${cc}`, w: size[0], h: size[1] } : undefined;
 }
-
-export const GEO_TREE: GeoNode[] = [
-  {
-    id: "tr",
-    code: "TR",
-    name: "Turkiye",
-    flag: COUNTRY_FLAGS.TR,
-    map: geo("map-turkiye.png", 62, 26),
-    details: generateCountry("TR", "Turkiye"),
-    children: [
-      {
-        id: "ist",
-        code: "IST",
-        plate: "34",
-        name: "Istanbul",
-        map: geo("map-istanbul.png", 52, 26),
-        children: [
-          {
-            id: "fatih",
-            name: "Fatih",
-            map: geo("chip-fatih.png", 25, 26),
-            children: [],
-          },
-          {
-            id: "sariyer",
-            name: "Sariyer",
-            map: geo("chip-sariyer.png", 25, 26),
-            children: [
-              { id: "vad-1", name: "Vadistanbul", map: NEIGHBORHOOD, children: [] },
-              { id: "vad-2", name: "Vadistanbul", map: NEIGHBORHOOD, children: [] },
-              { id: "vad-3", name: "Vadistanbul", map: NEIGHBORHOOD, children: [] },
-              { id: "vad-4", name: "Vadistanbul", map: NEIGHBORHOOD, children: [] },
-            ],
-          },
-        ],
-      },
-      {
-        id: "mer",
-        code: "MER",
-        plate: "33",
-        name: "Mersin",
-        map: geo("map-mersin.png", 39, 26),
-        children: [],
-      },
-      {
-        id: "ank",
-        code: "ANK",
-        plate: "06",
-        name: "Ankara",
-        map: geo("map-ankara.png", 30, 26),
-        children: [],
-      },
-      {
-        id: "gza",
-        code: "GZA",
-        plate: "27",
-        name: "Gaziantep",
-        map: geo("map-gaziantep.png", 39, 26),
-        children: [],
-      },
-    ],
-  },
-  {
-    id: "iq",
-    code: "IQ",
-    name: "Iraq",
-    flag: COUNTRY_FLAGS.IQ,
-    map: geo("map-turkiye.png", 62, 26),
-    children: [],
-  },
-  {
-    id: "lb",
-    code: "LB",
-    name: "Lebanon",
-    flag: COUNTRY_FLAGS.LB,
-    map: geo("map-turkiye.png", 62, 26),
-    children: [],
-  },
-];

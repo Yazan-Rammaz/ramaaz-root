@@ -58,7 +58,7 @@ export const PATHS = {
      * Document enrolment. NOT `submit` above — that is RDB's route, and it
      * needs a KYC session, a media-upload endpoint and a countries table, none
      * of which exist on root (all three answer 404). `enroll` sends the images
-     * inline in one call the Worker signs. See kyc-submit-contract.md.
+     * inline in one call the Worker signs. See backend docs/kyc/to-backend/2026-09-22-kyc-submit-request.md.
      */
     enroll: '/api/kyc/enroll',
 } as const;

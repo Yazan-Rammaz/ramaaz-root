@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE, matchLocale } from '@/lib/i18n/config';
-import { refreshTokens } from '@/lib/auth/refresh';
+import { refreshTokens, type LockHolder } from '@/lib/auth/refresh';
 import { edgeHeaders } from '@/lib/api/edge';
 
 /**
@@ -27,6 +27,17 @@ const UNLOCK_PATH = '/unlock';
 const ADMIN_PHOTO_PATH = '/api/admin-photo';
 /** The passkey hint — `DEVICE` in lib/auth/cookies.ts, which is server-only. */
 const DEVICE = 'root_device';
+/** The Add-device hint — `DEVICE_ENROL` in lib/auth/cookies.ts. */
+const DEVICE_ENROL = 'root_device_enrol';
+/** The PIN's length — `PIN_LENGTH` in lib/auth/cookies.ts. Present = this account has a PIN. */
+const PIN_LENGTH = 'root_pin_len';
+/** Whose lock /unlock shows — `LOCK` / `LOCK_MAX_AGE` in lib/auth/cookies.ts. */
+const LOCK = 'root_lock';
+const LOCK_MAX_AGE = 14 * 60;
+/** Same ceiling as COOKIE_BUDGET in lib/auth/challenge.ts. */
+const LOCK_BUDGET = 3800;
+// Same name as SESSION_ENDED_COOKIE in lib/auth/challenge.ts (server-only there).
+const SESSION_ENDED = 'root_session_ended';
 
 // Edge runtime may not expose a global `process`; read it defensively.
 const globalEnv =
@@ -278,12 +289,59 @@ async function tryRefresh(req: NextRequest) {
     );
 }
 
+/**
+ * Keep what the `PASS_CODE_REQUIRED` refusal said about whose lock this is, for
+ * /unlock — the name and photo it shows, and the PIN length, which is taken
+ * from this refusal rather than the sign-in step (console-api.md §3).
+ *
+ * The photo goes first if the cookie would be too big: a presigned URL runs
+ * over a kilobyte, and a cookie the browser drops loses the name with it.
+ */
+function writeLockHolder(res: NextResponse, holder: LockHolder) {
+    const opts = { httpOnly: true, secure: isProdEnv, sameSite: 'lax' as const, path: '/' };
+    if (holder.passCodeLength) {
+        res.cookies.set(PIN_LENGTH, String(holder.passCodeLength), {
+            ...opts,
+            maxAge: 60 * 60 * 24 * 400,
+        });
+    }
+    let value = JSON.stringify({ name: holder.name, photoUrl: holder.photoUrl });
+    if (encodeURIComponent(value).length > LOCK_BUDGET) value = JSON.stringify({ name: holder.name });
+    res.cookies.set(LOCK, value, { ...opts, maxAge: LOCK_MAX_AGE });
+}
+
+/** A page load sent to /unlock, to come back to where it was headed. */
+function unlockRedirect(req: NextRequest, detectedLocale: string | null) {
+    const unlock = req.nextUrl.clone();
+    unlock.pathname = UNLOCK_PATH;
+    unlock.search = '';
+    const back = req.nextUrl.clone();
+    // The RSC cache-buster is transport, not a destination.
+    back.searchParams.delete('_rsc');
+    unlock.searchParams.set('next', `${back.pathname}${back.search}`);
+    const redirect = NextResponse.redirect(unlock);
+    if (detectedLocale) {
+        redirect.cookies.set(LOCALE_COOKIE, detectedLocale, {
+            path: '/',
+            maxAge: LOCALE_COOKIE_MAX_AGE,
+            sameSite: 'lax',
+        });
+    }
+    return redirect;
+}
+
 export async function middleware(req: NextRequest) {
     const nonce = crypto.randomUUID().replace(/-/g, '');
 
     // Forward the nonce to the app so the document can tag inline scripts.
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set('x-nonce', nonce);
+    // Where this request was headed, for a render that has to leave and come
+    // back — `requireSession` after a 401 (REQUEST_PATH_HEADER in session.ts).
+    // The RSC cache-buster is transport, not a destination.
+    const requested = req.nextUrl.clone();
+    requested.searchParams.delete('_rsc');
+    requestHeaders.set('x-root-path', `${requested.pathname}${requested.search}`);
 
     // First-visit language auto-detection: if no language cookie yet, pick the
     // best match from Accept-Language (falls back to the default locale). We patch
@@ -358,21 +416,32 @@ export async function middleware(req: NextRequest) {
                 ...opts,
                 maxAge: outcome.tokens.refreshMaxAge,
             });
-        } else if (outcome?.status === 'deferred') {
-            // Rate limited, NOT signed out. Keep both cookies and let this
-            // request render unauthenticated — the next one retries, which is
-            // the administrator deciding rather than a timer deciding.
+            // Unlocked — a lock's holder is stale now (LOCK in cookies.ts).
+            if (req.cookies.has(LOCK)) res.cookies.delete(LOCK);
+        } else if (outcome?.status === 'deferred' || outcome?.status === 'unreachable') {
+            // Rate limited, or the backend could not be reached at all — NOT
+            // signed out either way: the token is unspent. Keep both cookies.
             //
-            // Clearing here is the bug this branch exists to prevent: the
-            // limiter is keyed on the caller's address and the caller is this
-            // Worker, so the 60/minute budget on /v1/auth/refresh is shared by
-            // every administrator at once. One busy minute would otherwise sign
-            // all of them out while their tokens were perfectly valid.
+            // Clearing here is the bug this branch exists to prevent. The
+            // limiter is keyed on the caller's address, so one busy minute
+            // would sign administrators out with valid tokens; and a laptop
+            // waking from sleep fails its first DNS lookup, which signed the
+            // administrator out overnight.
             console.warn(
-                `[auth] refresh rate limited${
-                    outcome.retryAfterSeconds ? `, retry after ${outcome.retryAfterSeconds}s` : ''
-                } — keeping cookies`,
+                outcome.status === 'deferred'
+                    ? `[auth] refresh rate limited${
+                          outcome.retryAfterSeconds ? `, retry after ${outcome.retryAfterSeconds}s` : ''
+                      } — keeping cookies`
+                    : `[auth] refresh never reached the backend (${outcome.reason}) — keeping cookies`,
             );
+            // An account with a PIN goes to the lock screen, as for `locked`:
+            // the PIN is what this session needs next anyway, and its unlock is
+            // the refresh retried — by the person, not by a timer. Without one
+            // there is nothing to type, so the request renders unauthenticated
+            // and the next one retries.
+            if (req.method === 'GET' && req.cookies.has(PIN_LENGTH)) {
+                return applySecurityHeaders(unlockRedirect(req, detectedLocale), nonce, false);
+            }
         } else if (outcome?.status === 'locked' || outcome?.status === 'rejected') {
             // `ROOT_REQUIRE_PASS_CODE`: the session is alive and wants the PIN.
             // KEEP both cookies — the token is unspent and the unlock retries
@@ -385,14 +454,7 @@ export async function middleware(req: NextRequest) {
             // follow; its own backend call fails, and the next navigation lands
             // on /unlock.
             if (req.method === 'GET') {
-                const unlock = req.nextUrl.clone();
-                unlock.pathname = UNLOCK_PATH;
-                unlock.search = '';
-                const back = req.nextUrl.clone();
-                // The RSC cache-buster is transport, not a destination.
-                back.searchParams.delete('_rsc');
-                unlock.searchParams.set('next', `${back.pathname}${back.search}`);
-                const redirect = NextResponse.redirect(unlock);
+                const redirect = unlockRedirect(req, detectedLocale);
                 // The refusal says whether the link's passkey may answer
                 // instead — keep that for /unlock (see DEVICE in cookies.ts).
                 if (outcome.status === 'locked' && outcome.deviceAvailable) {
@@ -406,13 +468,18 @@ export async function middleware(req: NextRequest) {
                 } else if (outcome.status === 'locked') {
                     redirect.cookies.delete(DEVICE);
                 }
-                if (detectedLocale) {
-                    redirect.cookies.set(LOCALE_COOKIE, detectedLocale, {
-                        path: '/',
-                        maxAge: LOCALE_COOKIE_MAX_AGE,
+                // And whether Add device may be offered (DEVICE_ENROL in
+                // cookies.ts) — left alone when the refusal does not say.
+                if (outcome.status === 'locked' && outcome.enrolAvailable !== undefined) {
+                    redirect.cookies.set(DEVICE_ENROL, outcome.enrolAvailable ? '1' : '0', {
+                        httpOnly: true,
+                        secure: isProdEnv,
                         sameSite: 'lax',
+                        path: '/',
+                        maxAge: 60 * 60 * 24 * 400,
                     });
                 }
+                if (outcome.status === 'locked') writeLockHolder(redirect, outcome.holder);
                 return applySecurityHeaders(redirect, nonce, false);
             }
         } else if (outcome?.status === 'dead') {
@@ -429,8 +496,25 @@ export async function middleware(req: NextRequest) {
             // Nothing else is kept alongside them: this app persists no
             // identity between sign-ins. The access link is the identity, and
             // the trusted device is stored backend-side.
+            //
+            // Logged, because this is a sign-out nobody asked for and the
+            // screen it ends on can't say why — the backend's code (or
+            // TRANSPORT: no answer at all) is the only trace of the cause.
+            console.warn(
+                `[auth] refresh failed (${outcome.reason}) on ${req.method} ${req.nextUrl.pathname} — session cleared`,
+            );
             res.cookies.delete(ACCESS);
             res.cookies.delete(REFRESH);
+            // So /no-access, wherever this request ends up, says "your session
+            // ended — open your link again" rather than "you don't have access"
+            // (see setSessionEnded in lib/auth/challenge.ts).
+            res.cookies.set(SESSION_ENDED, outcome.message || '1', {
+                httpOnly: true,
+                secure: isProdEnv,
+                sameSite: 'lax',
+                path: '/',
+                maxAge: 5 * 60,
+            });
         }
     }
 

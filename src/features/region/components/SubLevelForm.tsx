@@ -1,22 +1,32 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { motion } from 'motion/react';
 import { iosEase } from '@/components/motion/presets';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
-import { generateSubLevel, SYSTEM_LANGUAGES, type CountryDraft, type SubLevelDraft } from '../mock-ai';
+import { generateSubLevelDraftAction, translateNameAction } from '../ai';
+import type { MapProblem } from '../map-file';
+import { regionMapAction } from '../map-actions';
+import type { CountryDraft, SubLevelDraft } from '../mock-ai';
 import type { GeoImage } from '../mock-geo';
+import { titleCase } from '../names';
+import { requiredFilled, type NameLanguage } from '@/features/language/names';
 import {
     BADGE_STYLES,
-    ChipLine,
     Field,
     InfoBox,
     Section,
-    UploadBox,
+    emptyTranslations,
+    translationOf,
+    newName,
     shimmer,
     type Phase,
 } from './AddCountryDrawer';
+import { MapPicker } from './MapPicker';
+import { NameRows } from './NameRows';
+import { useAutoNames } from '../use-auto-names';
+import type { NameRow } from '@/features/language/names';
 
 /** What a completed sub-level form yields (fed to the host's Save button). */
 export type SubLevelPayload = {
@@ -24,15 +34,18 @@ export type SubLevelPayload = {
     plate: string;
     name: string;
     draft: SubLevelDraft;
+    /** Its map: the person's pick, else the generated one matched to it. */
+    map?: GeoImage;
 };
 
 /** The raw fields as typed, unrelated to the AI pass — for the host's live
  *  tree preview, which must track every keystroke, not wait on generation. */
-export type SubLevelLive = { code: string; plate: string; name: string };
+export type SubLevelLive = { code: string; plate: string; name: string; map?: GeoImage };
 
 /**
- * The "Add {Country} {Level}" sub-form (XD "Fixes/ADD_SUB", image 5): SVG-map
- * upload + AI badges, short-name / code / name, an AI name translation across
+ * The "Add {Country} {Level}" sub-form (XD "Fixes/ADD_SUB", image 5): the
+ * region's map (generated, matched after the AI pass — or the person's own
+ * SVG) + AI badges, short-name / code / name, an AI name translation across
  * the system languages, and general info — no currency / language / nested
  * levels. Self-contained: it reports its current savable payload (or null)
  * through `onChange`; the HOST renders the pinned button and the surrounding
@@ -41,13 +54,25 @@ export type SubLevelLive = { code: string; plate: string; name: string };
 export function SubLevelForm({
     parentName,
     levelName,
+    countryCode,
+    level,
+    parentMap,
     flag,
     countryDetails,
+    languages,
     onChange,
     onLiveChange,
 }: {
     parentName: string;
     levelName: string;
+    /** The country it is in (SY, or JOR) — for matching its map. */
+    countryCode: string;
+    /** 1 = directly under the country (a province), 2 = below that, … */
+    level: number;
+    /** The parent's map: a district is matched inside its province. */
+    parentMap?: GeoImage;
+    /** The project's languages — the name's translation rows. */
+    languages: NameLanguage[];
     flag?: GeoImage;
     countryDetails?: CountryDraft;
     onChange: (payload: SubLevelPayload | null) => void;
@@ -61,46 +86,123 @@ export function SubLevelForm({
     const [generating, setGenerating] = useState(false);
     const [draft, setDraft] = useState<SubLevelDraft | null>(null);
     const silenceTimer = useRef<number>(0);
-    const genTimer = useRef<number>(0);
+    // Each AI request's ticket: a late answer for an older name is dropped.
+    const genSeq = useRef(0);
+    // The codes the last AI answer filled in by itself (not typed) — cleared
+    // when the name changes, so one region's codes never stay on the next.
+    const aiFilled = useRef({ shortName: '', plate: '' });
+    // The map matched to the AI's answer, and one the person picked over it.
+    const [matchedMap, setMatchedMap] = useState<GeoImage | null>(null);
+    const [pickedMap, setPickedMap] = useState<GeoImage | null>(null);
+    const [mapProblem, setMapProblem] = useState<MapProblem | null>(null);
+    const map = pickedMap ?? matchedMap ?? undefined;
 
     // The "gen" animation is NOT shown while typing: every keystroke resets a
     // 3s silence timer, and only once that elapses does the animation start
     // (then runs its own beat before the draft reveals).
     function schedule(nm: string) {
         window.clearTimeout(silenceTimer.current);
-        window.clearTimeout(genTimer.current);
+        genSeq.current++;
         setGenerating(false);
         setDraft(null);
+        setMatchedMap(null);
+        const fromAi = aiFilled.current;
+        if (fromAi.shortName && shortName.trim() === fromAi.shortName) setShortName('');
+        if (fromAi.plate && plate.trim() === fromAi.plate) setPlate('');
+        aiFilled.current = { shortName: '', plate: '' };
         if (!nm.trim()) return;
         silenceTimer.current = window.setTimeout(() => {
             setGenerating(true);
-            genTimer.current = window.setTimeout(() => {
-                setDraft(generateSubLevel(shortName.trim(), nm.trim(), countryDetails));
-                setGenerating(false);
-            }, 900);
+            const ticket = ++genSeq.current;
+            const what = `a ${levelName.toLowerCase() || 'region'} in ${parentName}${
+                countryDetails && countryDetails.name !== parentName ? `, ${countryDetails.name}` : ''
+            }`;
+            // Where the AI has nothing, a region shares its country's dial code and time zone.
+            const inherited = {
+                phoneCode: countryDetails?.phoneCode ?? '',
+                gmt: countryDetails?.gmt ?? '',
+            };
+            generateSubLevelDraftAction(nm.trim(), what, inherited)
+                .catch(
+                    (): SubLevelDraft => ({
+                        shortName: '',
+                        plate: '',
+                        name: titleCase(nm),
+                        translations: emptyTranslations(languages, titleCase(nm)),
+                        postCode: '',
+                        ...inherited,
+                    }),
+                )
+                .then((d) => {
+                    if (ticket !== genSeq.current) return;
+                    setDraft(d);
+                    // The name as it should be written; set directly so it doesn't re-run the AI.
+                    setName(d.name);
+                    // The AI's codes fill the short name and code only where nothing
+                    // was typed — and it remembers that it did, for the next name.
+                    setShortName((s) => {
+                        if (s.trim()) return s;
+                        aiFilled.current.shortName = d.shortName;
+                        return d.shortName;
+                    });
+                    setPlate((p) => {
+                        if (p.trim()) return p;
+                        aiFilled.current.plate = d.plate;
+                        return d.plate;
+                    });
+                    // Its map, by the ISO code the AI gave (a province) or its
+                    // names in every language. No match leaves the box to pick.
+                    const short = shortName.trim() || d.shortName;
+                    regionMapAction({
+                        countryCode,
+                        level,
+                        parentMap,
+                        isoCode: short ? `${countryCode}-${short}` : undefined,
+                        names: [d.name, ...d.translations.map((t) => t.name)],
+                    })
+                        .catch(() => null)
+                        .then((m) => {
+                            if (ticket === genSeq.current) setMatchedMap(m);
+                        });
+                    setGenerating(false);
+                });
         }, 3000);
     }
 
     const phase: Phase = generating ? 'gen' : draft ? 'ready' : 'idle';
+    // "Re Translation": every row again from the English name. This drawer's
+    // own AI pass fills the name as it is typed, so the hook is the button only.
+    const setDraftRows: Dispatch<SetStateAction<NameRow[]>> = (u) =>
+        setDraft((d) => d && { ...d, translations: typeof u === 'function' ? u(d.translations) : u });
+    const auto = useAutoNames({
+        en: translationOf(draft?.translations, 'EN') || name.trim(),
+        rows: draft?.translations ?? [],
+        setRows: setDraftRows,
+        ask: async (text) => ({ translations: await translateNameAction(text, `a ${levelName.toLowerCase() || 'region'} in ${parentName}`) }),
+        auto: false,
+    });
     const code = shortName.trim().toUpperCase().slice(0, 4);
+    // Every generated field is a suggestion the person can correct before saving.
+    const editDraft = (patch: Partial<SubLevelDraft>) => setDraft((d) => d && { ...d, ...patch });
 
     // Report the savable payload live — null until the AI pass actually
     // finishes (not just once a name is typed), so "Add & Save" can't appear
     // mid-generation.
     useEffect(() => {
+        // English and Arabic are required: no payload (no Save) until both have text.
         onChange(
-            name.trim() && draft
-                ? { code, plate: plate.trim(), name: name.trim(), draft }
+            name.trim() && draft && requiredFilled(languages, newName(languages, draft.translations, name))
+                ? { code, plate: plate.trim(), name: name.trim(), draft, map }
                 : null,
         );
-    }, [plate, name, code, draft, onChange]);
+    }, [plate, name, code, draft, map, onChange, languages]);
     useEffect(() => () => onChange(null), [onChange]);
 
     // Live preview — unconditional, so the tree row exists (empty label)
     // from the moment the form mounts and fills in as the user types.
     useEffect(() => {
-        onLiveChange?.({ code, plate: plate.trim(), name: name.trim() });
-    }, [code, plate, name, onLiveChange]);
+        onLiveChange?.({ code, plate: plate.trim(), name: name.trim(), map });
+    }, [code, plate, name, map, onLiveChange]);
 
     return (
         <div className="thin-scroll flex flex-1 flex-col gap-24 overflow-y-auto px-12 py-24">
@@ -111,10 +213,23 @@ export function SubLevelForm({
                 {flag && <Icon name={flag.icon} width={flag.w} height={flag.h} />}
             </span>
 
-            {/* SVG map upload + AI badges. */}
-            <Section title={'Add Map "SVG Format Only"'}>
+            {/* Its map + the AI badges. The map is on the screen only until RDB
+                has a field for it (project-data/to-backend/2026-11-02-maps.md). */}
+            <Section title={`${levelName} Short Name`}>
                 <div className="flex items-center gap-8">
-                    <UploadBox label="SVG Map" />
+                    <MapPicker
+                        generated={matchedMap ?? undefined}
+                        picked={pickedMap}
+                        problem={mapProblem}
+                        onPick={(r) => {
+                            if (typeof r === 'string') {
+                                setMapProblem(r);
+                                return;
+                            }
+                            setPickedMap(r);
+                            setMapProblem(null);
+                        }}
+                    />
                     {BADGE_STYLES.map((cls, i) =>
                         phase === 'ready' ? (
                             <motion.span
@@ -144,7 +259,9 @@ export function SubLevelForm({
             <Section title={`Add ${levelName} Short Name & Name`}>
                 <div className="flex gap-4">
                     <Field
-                        className="w-120 shrink-0"
+                        // Generating too, when left empty: the AI fills these two.
+                        className={cn('w-120 shrink-0', !shortName.trim() && shimmer(phase))}
+                        aiPhase={shortName.trim() ? undefined : phase}
                         label={`${levelName} Short Name`}
                         hint="Max 4/4"
                         value={shortName}
@@ -152,7 +269,7 @@ export function SubLevelForm({
                         onChange={setShortName}
                     />
                     <Field
-                        className="w-56 shrink-0"
+                        className={cn('w-56 shrink-0', !plate.trim() && shimmer(phase))}
                         label="Code"
                         value={plate}
                         maxLength={4}
@@ -174,17 +291,18 @@ export function SubLevelForm({
             {/* AI name translation across the system languages. */}
             <Section
                 title={`${parentName} ${levelName} Translation "System Languages"`}
-                phase={phase}
+                onAi={draft ? auto.retranslate : undefined}
+                phase={draft ? auto.phase : phase}
                 ai
             >
-                {Array.from({ length: draft?.translations.length ?? SYSTEM_LANGUAGES.length }, (_, i) => (
-                    <ChipLine
-                        key={i}
-                        phase={phase}
-                        code={draft?.translations[i]?.code}
-                        value={draft?.translations[i]?.name}
-                    />
-                ))}
+                <NameRows
+                    languages={languages}
+                    rows={draft?.translations ?? null}
+                    phase={phase}
+                    filling={auto.filling}
+                    onRetranslate={auto.retranslateOne}
+                    onChange={(translations) => setDraft((d) => d && { ...d, translations })}
+                />
             </Section>
 
             {/* General info. */}
@@ -194,15 +312,29 @@ export function SubLevelForm({
                         phase={phase}
                         className="flex-1"
                         label={`${levelName} Phone Code`}
+                        hint="+90 212"
+                        maxLength={12}
                         value={draft?.phoneCode}
+                        onChange={(v) => editDraft({ phoneCode: v })}
                     />
                     <InfoBox
                         phase={phase}
                         className="flex-1"
                         label={`${levelName} Post Code`}
+                        hint="34000"
+                        maxLength={12}
                         value={draft?.postCode}
+                        onChange={(v) => editDraft({ postCode: v })}
                     />
-                    <InfoBox phase={phase} className="w-94 shrink-0" label="GMT" value={draft?.gmt} />
+                    <InfoBox
+                        phase={phase}
+                        className="w-94 shrink-0"
+                        label="GMT"
+                        hint="+3"
+                        maxLength={6}
+                        value={draft?.gmt}
+                        onChange={(v) => editDraft({ gmt: v })}
+                    />
                 </div>
             </Section>
         </div>

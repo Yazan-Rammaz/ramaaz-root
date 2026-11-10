@@ -13,7 +13,9 @@ import { fetchStoredFace } from '@/features/kyc/services/storedFace';
 import { useFacePhoto } from '@/features/kyc/hooks/useFacePhoto';
 import { PhotoGlass } from '@/features/kyc/components/PhotoGlass';
 import { SparkField } from '@/features/kyc/components/SparkField';
-import { MatchCelebration } from '@/features/kyc/components/MatchCelebration';
+import { VerdictMark } from '@/features/kyc/components/VerdictMark';
+import { VerdictMesh } from '@/features/kyc/components/VerdictMesh';
+import { useStillMesh } from '@/features/kyc/hooks/useStillMesh';
 import { MIRROR_CLASS } from '@/features/kyc/config/capture';
 import { Icon } from '@/components/ui/Icon';
 
@@ -252,7 +254,7 @@ export default function FaceMatchScreen({
                 //
                 // There is no KYC session to start at all: the challenge
                 // carries the flow, which is why nothing here fetches one.
-                // See `backend docs/root-enrollment.md` §5.
+                // See `backend docs/sign-in-and-sessions/from-backend/2026-09-30-root-first-sign-in.md` §5.
                 //
                 // The action redirects on success — applyStage() routes on
                 // whatever stage the backend named, so there is no navigation
@@ -570,6 +572,12 @@ export default function FaceMatchScreen({
      */
     const facePhoto = useFacePhoto(livenessResult, storedFaceSrc);
     const idImage = idDocument?.frontImageData || idDocument?.idFaceImageData;
+    /**
+     * The face as a wireframe, for the success moment — the same mark the face
+     * check's own pass wears. Read up front, while the comparison runs, so it
+     * is ready the instant acceptance lands rather than appearing a beat late.
+     */
+    const successMesh = useStillMesh(facePhoto ?? null);
 
     return (
         // `overflow-y-auto` is the last resort, the same one IDSummaryScreen
@@ -760,12 +768,32 @@ export default function FaceMatchScreen({
                     and a decoration the moment it is not. */}
                 {matchState === 'matching' && <SparkField />}
 
-                {/* The send-off. Above everything in the frame — the ID card,
-                    the scan line, the glass — because for these three seconds
-                    it IS the screen: the comparison is over and the things it
-                    was made of have nothing left to say. See MatchCelebration
-                    for why it only ever appears after acceptance. */}
-                {celebrating && <MatchCelebration />}
+                {/* The send-off — the SAME pass the face check shows (see
+                    LivenessVerdict): the mesh on the face turning green in one
+                    sweep, the green light out of the centre and the green edge
+                    on the frame, with the Face ID glyph only when no mesh could
+                    be built. One success animation for the whole identity flow;
+                    this screen's own double green wash and star burst were
+                    replaced by it.
+
+                    Above everything in the frame — the ID card, the scan line,
+                    the glass — because for these seconds it IS the screen.
+
+                    ⚠️ ONLY AFTER ACCEPTANCE (`celebrating` is set from the
+                    enrolment's `onAccepted`). A passing COMPARE is not a
+                    passing ENROLMENT — the comparison here runs at a threshold
+                    of zero and the Worker applies the real one — so showing a
+                    pass on the comparison would announce a result that can
+                    still be refused. */}
+                {celebrating && (
+                    <span aria-hidden className="pointer-events-none absolute inset-0 z-30">
+                        {successMesh.ready && <VerdictMesh phase="passed" mesh={successMesh} />}
+                        <VerdictMark
+                            phase="passed"
+                            glyph={successMesh.settled && !successMesh.ready}
+                        />
+                    </span>
+                )}
 
                 {/* AI scanning line over the face — moves while matching */}
                 {matchState === 'matching' && (

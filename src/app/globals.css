@@ -41,6 +41,10 @@ html {
     overflow: hidden;
 }
 
+/* `phone:` — the mobile canvas only (below the tablet rule below). Tailwind's
+   own `sm` sits at 640px and would disagree with the canvases by 40px. */
+@custom-variant phone (@media (max-width: 599.98px));
+
 /* Tablet canvas — reference 834px (iPad portrait) */
 @media (min-width: 600px) {
     html {
@@ -167,6 +171,18 @@ html body {
 .thin-scroll {
     scrollbar-width: none;
     scrollbar-gutter: stable;
+}
+/* The navbar's section strip on a phone: it scrolls sideways, and its trailing
+   edge fades so an icon cut by the edge reads as "swipe for more" rather than
+   as tucked under the control beside it. Physical gradient, so it is flipped
+   for RTL here — the one place direction is handled, in CSS. */
+@media (max-width: 599.98px) {
+    .nav-strip-fade {
+        mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+    }
+    [dir='rtl'] .nav-strip-fade {
+        mask-image: linear-gradient(to left, #000 calc(100% - 1.5rem), transparent);
+    }
 }
 .thin-scroll::-webkit-scrollbar {
     display: none;
@@ -731,53 +747,73 @@ body {
 }
 
 /* ── The lock's glass ───────────────────────────────────────────────────────
-   The passcode gate over the dashboard. Liquid glass at 50: the page behind
-   stays legible as shapes and unreadable as text, which is what a lock over
-   somebody's own workspace should look like — their work is still there, they
-   just cannot use it until they say who they are.
+   Every lock state — the overlay on idle, the lock button, a locked action,
+   and /unlock after a reload — is the page the person was on, under a pane of
+   liquid glass: the work is still there, unreadable, until they say who they
+   are. Same material as the glass over the user's photograph.
 
-   ── It filters a real BACKDROP, and it is the only thing here that does ─────
-   Every other pane in this app is `.verdict-glass`, which draws a filtered COPY
-   of the picture behind it and never touches `backdrop-filter` — for the good
-   reason written at length over there: `backdrop-filter` needs GPU compositing
-   and silently does nothing when the browser is not compositing on the GPU.
+   ── Two halves, and NEITHER uses `backdrop-filter` ──────────────────────────
+   This used `backdrop-filter`, the obvious tool, and on a machine that does not
+   composite on the GPU it silently does nothing — the lock was a flat white
+   sheet there. The photograph's glass never had that problem because it
+   filters a COPY of the picture with plain `filter:` (see `.verdict-glass`).
 
-   That technique cannot be used here. What is behind this pane is the entire
-   dashboard — live DOM, not one image — and there is no copy of it to draw.
+   The page behind a lock is our own DOM, so it needs no copy: it is filtered
+   IN PLACE.
 
-   So this uses `backdrop-filter`, knowing it may do nothing, and is built so
-   that when it does nothing the result is still a LOCK:
+     .lock-backdrop   the shell itself (the dashboard layout, the /unlock
+                      shell). While `html[data-locked]` is set it is blurred
+                      and saturated with `filter:` — software-path rendering
+                      that works everywhere. This is the refraction's job: the
+                      page becomes colour and shape.
+     .lock-glass      the pane over it: a light frost, a diagonal sheen (light
+                      across a sheet), and the bevel — the same lit-edge insets
+                      as `.verdict-glass-edge`, sized for a whole viewport.
 
-     the tint alone already obscures the page. `--lock-tint` is opaque enough
-     that the dashboard is unreadable through it with no filter applied at all;
-     the blur's job is to make that look like glass rather than like a sheet.
-
-   The @supports below raises the tint the rest of the way for a browser that
-   admits it has no `backdrop-filter`. It cannot catch the GPU case — nothing in
-   CSS can — which is exactly why the un-filtered state has to be acceptable on
-   its own rather than merely detectable.
+   `PasscodeLockGate` sets `data-locked` on <html> while it is mounted, so the
+   filter follows the lock exactly, wherever the gate is shown.
 
    ⚠️ NOT a security boundary. See `<IdleLock>`: the session cookie stays valid
    behind this, deliberately, and anything visible through the glass was already
    rendered into the page. It withholds a screen from a passer-by; it does not
    withhold data from an attacker. */
-.lock-glass {
-    /* Glass 50: the dashboard's own background at half strength, so the pane
-       reads as the page frosted over rather than a white sheet laid on it. */
-    --lock-tint: 50%;
-    background: color-mix(in srgb, var(--background) var(--lock-tint), transparent);
-    /* 50 XD px, through the same 0.0625rem-per-pixel scale as everything else —
-       so the blur grows and shrinks with the canvas instead of being 50 real
-       pixels on a phone and 50 on a laptop. */
-    -webkit-backdrop-filter: blur(3.125rem) saturate(1.2);
-    backdrop-filter: blur(3.125rem) saturate(1.2);
+.lock-backdrop {
+    transition: filter 0.35s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .lock-glass {
-        /* No blur to hide the page behind — the tint has to do it alone. */
-        --lock-tint: 94%;
-    }
+html[data-locked] .lock-backdrop {
+    /* 5 XD px through the rem scale, so it grows with the canvas. A light
+       frost: the page reads plainly through the glass. (Tuned by eye: 24, 12
+       and 6 hid too much, 3 too little.) Text may be readable — accepted; see
+       the note below, this is not a security boundary. */
+    filter: blur(0.3125rem) saturate(1.35);
+    /* Nothing behind a lock is reachable — the overlay already blocks the
+       pointer; this also keeps it out of the tab order and screen readers'
+       hit testing. */
+    pointer-events: none;
+    user-select: none;
+}
+
+.lock-glass {
+    /* The frost: the background at a third. Light, because the blur below does
+       the obscuring — this only gives the pane a body. */
+    background:
+        /* The sheen: a soft diagonal highlight from the top-start corner, the
+           way light lies across a real sheet. */
+        linear-gradient(
+            135deg,
+            rgb(255 255 255 / 0.35) 0%,
+            rgb(255 255 255 / 0.08) 35%,
+            rgb(255 255 255 / 0) 60%
+        ),
+        color-mix(in srgb, var(--background) 30%, transparent);
+    /* The bevel: tight bright insets for the lit edge, wide soft dark ones
+       falling inward for the body — `.verdict-glass-edge`, at viewport size. */
+    box-shadow:
+        inset 0 0 0.125rem 0.0625rem rgb(255 255 255 / 0.5),
+        inset 0 0 1.5rem 0.5rem rgb(255 255 255 / 0.25),
+        inset 0 0.5rem 2.5rem rgb(17 17 26 / 0.06),
+        inset 0 1rem 4rem rgb(17 17 26 / 0.05);
 }
 
 /* ── The star field ─────────────────────────────────────────────────────────
@@ -1413,150 +1449,6 @@ body {
         transparent 72%
     );
     animation: verdict-unlock 1.15s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-/* ── The match celebration ──────────────────────────────────────────────────
-   Three seconds between "the document and the face were accepted" and the
-   dashboard, and the only three seconds in this flow that are spent on nothing
-   but saying so.
-
-   Two things happen in it, in this order and not together:
-
-     wash    green out of the centre to the edges, twice — the second slower
-             and weaker than the first, the way a real pulse of light has a
-             wake. This is `verdict-unlock`'s idea at the scale of a whole
-             screen rather than of a mark.
-     burst   seven stars, all at once, sudden and large. Not a twinkle and not
-             the field: the field says "a model is working", this says "it is
-             done". Different shape of event, different animation.
-
-   ⚠️ THE BURST IS DELIBERATELY LATE AND DELIBERATELY ABRUPT. It fires at 40%
-   of the wash, on a near-linear curve with no ease-in, so it arrives as a flash
-   rather than as something that grew. An eased burst reads as a second wash and
-   the two blur into one long green event — which was the first attempt, and it
-   made three seconds feel like a loading screen. */
-@keyframes match-wash {
-    0% {
-        transform: scale(0.1);
-        opacity: 0;
-    }
-    6% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.72;
-    }
-    100% {
-        transform: scale(3.4);
-        opacity: 0;
-    }
-}
-
-.match-wash {
-    background: radial-gradient(
-        circle,
-        color-mix(in srgb, var(--verdict-color) 70%, transparent) 0%,
-        color-mix(in srgb, var(--verdict-color) 34%, transparent) 42%,
-        transparent 70%
-    );
-    animation: match-wash 1.5s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-/* The wake. Same shape, half the strength, starting as the first one clears —
-   so the frame is lit for the whole three seconds instead of going dark at 1.5s
-   and waiting. */
-.match-wash--wake {
-    animation: match-wash 1.7s cubic-bezier(0.22, 0.61, 0.36, 1) 1.1s forwards;
-    opacity: 0;
-}
-
-/* One star of the burst.
-   -----------------------------------------------------------------------------
-   ⚠️ `scale` and `opacity` only — NO rotation. The field's stars turn because
-   they are alive and working; these are a flash, and a flash that spins reads
-   as the same idea again rather than as a conclusion.
-
-   The overshoot past 1 is the "strong and large": it arrives bigger than it
-   ends, which is what a spark does. `verdict-gleam` is not used here either —
-   its bloom is a slow event tuned for a star that is turning, and at this speed
-   it would still be blooming after the star had gone. The white blow-out below
-   is the whole brilliance, delivered in a tenth of a second. */
-/* ⚠️ GREEN THROUGHOUT — the star, the bloom and the wake. NO WHITE CORE AND NO
-   BLACK EDGE.
-   -----------------------------------------------------------------------------
-   The first version was the field's star with a brighter flash: white glyph,
-   white core, and the dark contrast shadow every other star in this app carries
-   so it holds against a photograph. Wrong on both counts here.
-
-   The dark edge is wrong because this burst does not need to survive a
-   photograph — it lands on top of the green wash, which is already a flat lit
-   field. A black shadow on it has nothing to separate the star FROM and simply
-   reads as dirt on the light.
-
-   The white is wrong because this is the moment the whole screen is saying one
-   thing. The frame's border turns green, the wash is green, and a white spark
-   over it is a second colour arriving at the instant everything else agreed —
-   which reads as two events, not one. Green sparks on green light read as the
-   light itself throwing off sparks.
-
-   Brightness comes from the ALPHA and the bloom radius rather than from white:
-   a near-opaque green at 0.4rem, carried out to 2.4rem at a quarter of that,
-   is as bright as the white version was and stays the colour of the event. */
-@keyframes match-burst {
-    0% {
-        opacity: 0;
-        scale: 0.2;
-        filter: drop-shadow(0 0 0 rgb(52 211 23 / 0));
-    }
-    7% {
-        opacity: 1;
-        scale: 1.35;
-        filter:
-            drop-shadow(0 0 0.4rem rgb(104 255 96 / 1))
-            drop-shadow(0 0 1.2rem rgb(52 211 23 / 0.9))
-            drop-shadow(0 0 2.4rem rgb(52 211 23 / 0.55));
-    }
-    22% {
-        opacity: 1;
-        scale: 1;
-    }
-    100% {
-        opacity: 0;
-        scale: 0.85;
-        filter: drop-shadow(0 0 0.2rem rgb(52 211 23 / 0));
-    }
-}
-
-.match-burst-star {
-    position: absolute;
-    /* Anchored by the star inside the glyph's box, exactly as the field is —
-       see `.spark-field-star`, which explains why the box is not the star. */
-    translate: -82.3% -15.8%;
-    transform-origin: 82.3% 15.8%;
-
-    /* The glyph itself, a shade brighter than the wash so the points stay
-       legible against it. Still green: see the note above. */
-    color: rgb(126 255 118 / 0.98);
-    opacity: 0;
-    animation: match-burst 1.4s cubic-bezier(0.16, 1, 0.3, 1) var(--burst-delay) forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .match-wash,
-    .match-wash--wake,
-    .match-burst-star {
-        animation: none;
-    }
-
-    /* The result still has to be legible without motion: a steady green wash
-       and the stars simply present. The three seconds pass either way. */
-    .match-wash {
-        opacity: 0.5;
-    }
-
-    .match-burst-star {
-        opacity: 1;
-    }
 }
 
 /* The Face ID glyph landing. Overshoots to 1.1 and settles — the small

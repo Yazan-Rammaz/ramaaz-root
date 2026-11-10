@@ -1,8 +1,17 @@
 import "server-only";
-import { headers } from "next/headers";
-import { env } from "@/lib/env";
+import { cookies, headers } from "next/headers";
+import { env, isProd } from "@/lib/env";
 import { cfEnv } from "@/lib/cf-env";
-import { getAccessToken } from "@/lib/auth/cookies";
+import {
+  clearAuthCookies,
+  getAccessToken,
+  getRefreshToken,
+  setAuthCookies,
+  tokenFingerprint,
+} from "@/lib/auth/cookies";
+import { setSessionEnded } from "@/lib/auth/challenge";
+import { apiErrorSchema, ERROR_CODES } from "@/lib/auth/endpoints";
+import { refreshTokens } from "@/lib/auth/refresh";
 import { edgeHeaders, FALLBACK_USER_AGENT } from "./edge";
 
 /**
@@ -37,6 +46,14 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+
+  /**
+   * On a 401: a fingerprint of the access token the request was SENT with
+   * (`tokenFingerprint`), never the token itself. `/api/auth/recover` compares
+   * it with the one the browser holds now, to tell a session that ended from a
+   * request that merely raced a rotation (token-handling §3).
+   */
+  sentWith?: string;
 }
 
 /**
@@ -74,6 +91,29 @@ export class BackendNotConfiguredError extends ApiError {
     this.name = "BackendNotConfiguredError";
   }
 }
+
+/**
+ * The session is alive but held back: there is a refresh token and no access
+ * token. That is the state middleware leaves a request in when the backend
+ * answered its refresh with `PASS_CODE_REQUIRED` (or rate-limited it) — a page
+ * load gets redirected to /unlock, but a Server Action POST cannot follow a
+ * redirect, so it runs on without a token and lands here.
+ *
+ * Thrown BEFORE calling the backend (the call could only be refused), so an
+ * action can answer "locked" and its page can raise the PIN overlay instead of
+ * showing a generic failure. A 401 subclass, so anything that already treats
+ * ApiError 401 as "not signed in" still does.
+ */
+export class SessionLockedError extends ApiError {
+  constructor(sentWith?: string) {
+    super(401, "The session needs the PIN before it can continue");
+    this.name = "SessionLockedError";
+    this.sentWith = sentWith;
+  }
+}
+
+/** The sign-in flow's own routes run without an access token by design. */
+const SIGN_IN_PREFIX = "/v1/auth/";
 
 /**
  * Who the backend should think is calling — see `./edge.ts` for why this
@@ -131,7 +171,16 @@ type RequestOptions = Omit<RequestInit, "body"> & {
   cache?: RequestCache;
 };
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestOptions = {},
+  /**
+   * The access token from the TOKEN_EXPIRED refresh, for the one retry it
+   * earns — passed rather than re-read from the cookie it was just written to.
+   * Set means "already retried": never twice.
+   */
+  retryWith?: string,
+): Promise<T> {
   // `headers` is renamed on the way out of `options` — the import from
   // `next/headers` owns that name in this module now.
   const { json, headers: extraHeaders, cache = "no-store", ...rest } = options;
@@ -139,7 +188,32 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const base = env.NEST_API_URL;
   if (!base) throw new BackendNotConfiguredError();
 
-  const token = await getAccessToken();
+  const token = retryWith ?? (await getAccessToken());
+  // Held back by middleware (see SessionLockedError) — refuse here rather than
+  // send a call that can only come back 401. Never for the sign-in routes: a
+  // fresh sign-in may legitimately run beside an old refresh cookie.
+  if (!token && !path.startsWith(SIGN_IN_PREFIX) && (await getRefreshToken())) {
+    throw new SessionLockedError();
+  }
+  // DEV ONLY — lets the locked path be exercised on demand. In real use the
+  // app's own idle lock always comes first, so it is otherwise near-impossible
+  // to reach. Set `root_dev_locked=1` in DevTools; never honoured in production.
+  //
+  // Server Actions only (Next marks them with the `Next-Action` header), which
+  // is the one place the real case can happen — a page load is redirected to
+  // /unlock by middleware instead. Applied to page loads too, a cookie left
+  // behind failed the session read after unlocking and bounced to /login.
+  // `/v1/me` is exempt for the same reason: an action's response re-renders the
+  // page in the same request, and that render reads the session.
+  if (
+    !isProd &&
+    !path.startsWith(SIGN_IN_PREFIX) &&
+    path !== "/v1/me" &&
+    (await headers()).has("next-action") &&
+    (await cookies()).get("root_dev_locked")?.value === "1"
+  ) {
+    throw new SessionLockedError();
+  }
   const caller = await callerHeaders();
 
   const res = await fetch(`${base}${path}`, {
@@ -170,15 +244,85 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const retryAfter =
       Number.isInteger(header) && header > 0 ? header : undefined;
 
-    throw new ApiError(
+    const error = new ApiError(
       res.status,
       errorMessage(payload, res.status),
       payload,
       retryAfter,
     );
+    if (res.status === 401 && token && !path.startsWith(SIGN_IN_PREFIX)) {
+      return unauthorized<T>(error, token, path, options, retryWith !== undefined);
+    }
+    throw error;
   }
 
   return payload as T;
+}
+
+/**
+ * A 401 on an authenticated call — branched on the CODE, as the contract
+ * requires before any global 401 handling (console-api.md §0 Errors, token-handling
+ * §5). They do not all mean "signed out":
+ *
+ *   PASS_CODE_REQUIRED  the session is alive and wants the PIN → lock.
+ *   TOKEN_EXPIRED       refresh (single-flight) and retry once. Only where
+ *                       cookies can be written — a Server Action. A page render
+ *                       cannot store a rotated pair, and refreshing without
+ *                       storing it spends the token; there /api/auth/recover
+ *                       drops the access cookie and middleware refreshes.
+ *   anything else       UNAUTHENTICATED, TOKEN_REUSED, MFA_REQUIRED. Thrown
+ *                       as it came, with the fingerprint of the token it was
+ *                       sent with, so the caller can tell a session that ended
+ *                       from a request that raced a rotation.
+ *
+ * Nothing here clears cookies on a mere API 401: the request may have been
+ * sent with a token a newer response already replaced, and deleting cookies
+ * would delete the NEW ones. Only a refresh that came back dead may.
+ */
+async function unauthorized<T>(
+  error: ApiError,
+  sentWith: string,
+  path: string,
+  options: RequestOptions,
+  retried: boolean,
+): Promise<T> {
+  error.sentWith = await tokenFingerprint(sentWith);
+  const body = apiErrorSchema.safeParse(error.body);
+  const code = body.success ? body.data.error.code : undefined;
+
+  if (code === ERROR_CODES.passCodeRequired) throw new SessionLockedError(error.sentWith);
+
+  if (code === ERROR_CODES.tokenExpired && !retried && (await inServerAction())) {
+    const refreshToken = await getRefreshToken();
+    const base = env.NEST_API_URL;
+    if (refreshToken && base) {
+      const outcome = await refreshTokens(base, refreshToken, await callerHeaders());
+      switch (outcome.status) {
+        case "refreshed":
+          await setAuthCookies(outcome.tokens);
+          return request<T>(path, options, outcome.tokens.accessToken);
+        case "locked":
+        case "rejected":
+          throw new SessionLockedError(error.sentWith);
+        case "dead":
+          console.warn(`[auth] refresh failed (${outcome.reason}) in an action — session cleared`);
+          await clearAuthCookies();
+          await setSessionEnded(outcome.message);
+          break;
+        // deferred / unreachable: unspent — keep everything, report the 401.
+      }
+    }
+  }
+  throw error;
+}
+
+/** Next marks Server Action requests with `Next-Action`; only they may set cookies here. */
+async function inServerAction(): Promise<boolean> {
+  try {
+    return (await headers()).has("next-action");
+  } catch {
+    return false;
+  }
 }
 
 export const api = {

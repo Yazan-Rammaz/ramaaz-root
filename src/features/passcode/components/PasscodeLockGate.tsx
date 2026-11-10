@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
@@ -126,6 +126,17 @@ export function PasscodeLockGate({
     const t = useTranslations('passcode');
     const reduce = useReducedMotion();
     const { phase, error, round, fail, succeed, settle, clearError } = useCodeFeedback();
+
+    // While the gate is up, the page behind it goes under the glass —
+    // `html[data-locked] .lock-backdrop` in globals.css. On <html> because the
+    // shell it filters is a sibling of the gate, not its child.
+    useEffect(() => {
+        const root = document.documentElement;
+        root.dataset.locked = '';
+        return () => {
+            delete root.dataset.locked;
+        };
+    }, []);
     /**
      * Whether this browser leads with the passkey. Decides only whether the
      * passcode row takes focus on mount — see `autoFocus` below.

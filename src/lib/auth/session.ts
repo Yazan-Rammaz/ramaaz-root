@@ -1,10 +1,13 @@
 import "server-only";
 import { cache } from "react";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { api, ApiError } from "@/lib/api/server";
+import { api, ApiError, SessionLockedError } from "@/lib/api/server";
 import { getAccessToken, readSessionUser } from "@/lib/auth/cookies";
 import {
+  apiErrorSchema,
   AUTH_PATHS,
+  ERROR_CODES,
   meResponseSchema,
   wireUserSchema,
   type WireUser,
@@ -92,8 +95,9 @@ export function toSessionUser(u: WireUser): SessionUser {
  * Not as a second source of truth, and never in preference to the backend. The
  * rule is exactly:
  *
- *   401 from the backend   → null. The session really is over — revoked link,
- *                            signed out elsewhere, expired chain.
+ *   401 from the backend   → null here; `requireSession` sends it to
+ *                            /api/auth/recover, which reads the code — locked,
+ *                            expired, raced a rotation, or really over.
  *   any other failure      → fall back to the cookie snapshot. A timeout, a
  *                            5xx, or no backend configured at all says nothing
  *                            about whether this person is signed in, and
@@ -111,22 +115,61 @@ export function toSessionUser(u: WireUser): SessionUser {
  * backend enforces every real rule (AGENTS.md §3) — every call that touches
  * data carries the bearer and gets its own 401.
  */
-export const getSession = cache(async (): Promise<SessionUser | null> => {
-  // The token is what says "signed in". Without it there is nothing to ask
-  // with, and the snapshot alone is not a session.
-  if (!(await getAccessToken())) return null;
+export async function getSession(): Promise<SessionUser | null> {
+  return (await readSession()).user;
+}
 
-  try {
-    const raw = await api.get<unknown>(AUTH_PATHS.me);
-    return toSessionUser(meResponseSchema.parse(raw).user);
-  } catch (error) {
-    // The session is over. Say so — this is the one failure that means it.
-    if (error instanceof ApiError && error.status === 401) return null;
+/**
+ * The read behind `getSession`, keeping the 401 when there was one — the gate
+ * needs its code, because a 401 is not always "signed out" (see
+ * `unauthorizedPath`). `cache()` dedupes it across a render pass.
+ */
+const readSession = cache(
+  async (): Promise<{ user: SessionUser | null; unauthorized?: ApiError }> => {
+    // The token is what says "signed in". Without it there is nothing to ask
+    // with, and the snapshot alone is not a session.
+    if (!(await getAccessToken())) return { user: null };
 
-    console.warn("[auth] /v1/me unavailable, falling back to session cookie:", error);
-    return sessionFromCookie();
-  }
-});
+    try {
+      const raw = await api.get<unknown>(AUTH_PATHS.me);
+      return { user: toSessionUser(meResponseSchema.parse(raw).user) };
+    } catch (error) {
+      // Not signed in on THIS token — which may still be a live session.
+      if (error instanceof ApiError && error.status === 401) {
+        return { user: null, unauthorized: error };
+      }
+
+      console.warn("[auth] /v1/me unavailable, falling back to session cookie:", error);
+      return { user: await sessionFromCookie() };
+    }
+  },
+);
+
+/**
+ * Where a page render goes after a 401 — /api/auth/recover, the only place
+ * that can act on it: a Server Component cannot write cookies, and every
+ * answer but one needs to. It decides from the code and from whether the
+ * token that failed is still the browser's current one (token-handling §3, §5).
+ */
+async function unauthorizedPath(error: ApiError): Promise<string> {
+  const body = apiErrorSchema.safeParse(error.body);
+  const code =
+    error instanceof SessionLockedError
+      ? ERROR_CODES.passCodeRequired
+      : body.success
+        ? body.data.error.code
+        : ERROR_CODES.unauthenticated;
+  const query = new URLSearchParams({
+    code,
+    t: error.sentWith ?? "",
+    // Set by middleware for every request: where this render was headed.
+    next: (await headers()).get(REQUEST_PATH_HEADER) ?? "/dashboard",
+  });
+  return `/api/auth/recover?${query}`;
+}
+
+/** The request header middleware puts the requested path in — `x-root-path` there. */
+const REQUEST_PATH_HEADER = "x-root-path";
 
 /**
  * The snapshot written at sign-in. Used only when the backend could not be
@@ -149,9 +192,10 @@ export async function sessionFromCookie(): Promise<SessionUser | null> {
 
 /** Use at the top of any protected Server Component / layout. */
 export async function requireSession(): Promise<SessionUser> {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  return session;
+  const { user, unauthorized } = await readSession();
+  if (unauthorized) redirect(await unauthorizedPath(unauthorized));
+  if (!user) redirect("/login");
+  return user;
 }
 
 /** Server-side role gate. UI gating only — NestJS still enforces the real rule. */

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { motion } from 'motion/react';
 import { useVerification } from '@/features/kyc/context/VerificationContext';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { createKycService } from '@/features/kyc/services';
 import { verifyBackMatchesFront } from '@/features/kyc/services/backSideVerifier';
@@ -12,6 +13,7 @@ import { useFrameValidation } from '@/features/kyc/hooks/useFrameValidation';
 import { useFaceLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { useDocumentScanner } from '@/features/kyc/hooks/useDocumentScanner';
 import type { IDDocument } from '@/features/kyc/types/verification';
+import type { MissingField } from '@/features/kyc/services/kycService.interface';
 import liveDetectIdSvg from '@/features/kyc/assets/live-detect-id.svg';
 import idFrontSvg from '@/features/kyc/assets/id-front.svg';
 import idBackSvg from '@/features/kyc/assets/id-back.svg';
@@ -107,6 +109,7 @@ const areImagesTooSimilar = async (base1: string, base2: string): Promise<boolea
 const BACK_SIDE_FACE_BLOCK_MIN_AREA_RATIO = 0.08;
 
 export default function IDCaptureScreen() {
+    const t = useTranslations('auth');
     const { goTo, setIdDocument, markCompleted } = useVerification();
     const router = useRouter();
     const {
@@ -226,7 +229,15 @@ export default function IDCaptureScreen() {
         code: string | null | undefined,
         reason: string | null | undefined,
         message?: string | null,
+        missingFields?: MissingField[],
     ): string | null {
+        // A named gap beats any generic text: "we couldn't read your full name"
+        // tells the user what to move. Translated, unlike the server `message`.
+        if (code === 'MISSING_CRITICAL_DATA' && missingFields?.length) {
+            if (missingFields.includes('firstName') || missingFields.includes('lastName'))
+                return t('idMissingName');
+            return t(missingFields.includes('birthday') ? 'idMissingBirthday' : 'idMissingDocumentNumber');
+        }
         // Prefer the structured message from the API when available — it's
         // already a short, user-friendly global message.
         if (message) return message;
@@ -707,10 +718,12 @@ export default function IDCaptureScreen() {
                 activeSide,
                 sessionHintRef.current,
             );
-            console.log('✅ AWS Response Received:', result);
+            // Status and code only: the result carries the name, numbers,
+            // birthday and the ID images, and the console is not private.
+            console.log('✅ AWS Response Received:', { status: result.status, code: result.code });
 
             if (result.status !== 'success') {
-                const hint = codeToHint(result.code, result.reason, result.message);
+                const hint = codeToHint(result.code, result.reason, result.message, result.missingFields);
                 setCaptureHint(hint);
                 setPollState('aligning');
                 setStatusText(hint ?? 'Could not read ID — try again');

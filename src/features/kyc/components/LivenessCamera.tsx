@@ -1,5 +1,6 @@
 'use client';
 
+import { traceFaceStartup } from '@/features/kyc/debug/startupTrace';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ThemeProvider, createTheme } from '@aws-amplify/ui-react';
@@ -130,6 +131,14 @@ const ZOOM_STALL_MS = 2500;
  * cover held up for ever would be worse than a picture briefly mis-sized.
  */
 const COVER_WAIT_MS = 2500;
+
+/**
+ * The longest the cover waits, once the picture is up, for the face mesh's
+ * first result — see `liveGate`. Past this the camera is announced anyway: a
+ * face the mesh cannot find (looking away, too dark) must not leave the frame
+ * black for ever.
+ */
+const MESH_COVER_WAIT_MS = 8000;
 
 /**
  * The amounts both panes are drawn from.
@@ -651,6 +660,29 @@ export function LivenessCamera({
     const zoomTrackRef = useRef<MediaStreamTrack | null>(null);
 
     /**
+     * When the camera may be announced live (lifting the black standby cover):
+     * the picture covers the frame AND the face mesh has produced its first
+     * result.
+     *
+     * ⚠️ The picture alone was not enough. The moment AWS's camera showed, two
+     * things started on the main thread — the mesh's first GPU inference (shader
+     * compilation) and the SDK's own TFJS face detector — and the live picture
+     * froze for ~5s, then lagged, and only then did the mesh appear. Waiting for
+     * the mesh's first result keeps all of that under the Face ID standby mark,
+     * so the camera appears already running, mesh and all.
+     *
+     * A ref, not state: it is written from the mesh callback and the cover
+     * observer, and nothing renders from it. `mesh` starts true when the mesh is
+     * off — then the picture alone decides, as before. `announce` is wired to
+     * `sayLive` below (it is defined later in the component).
+     */
+    const liveGate = useRef({
+        picture: false,
+        mesh: !CAPTURE_LIVE_MESH.enabled,
+        announce: () => {},
+    });
+
+    /**
      * Put the glass oval exactly on the wireframe.
      *
      * `useCallback` with no deps: `FaceMesh` reads it through a ref, but a new
@@ -659,6 +691,13 @@ export function LivenessCamera({
      */
     const handleMeshBounds = useCallback(
         (b: { cx: number; cy: number; rx: number; ry: number }) => {
+            // The mesh's first result: its startup stall is over — see liveGate.
+            const gate = liveGate.current;
+            if (!gate.mesh) {
+                traceFaceStartup('mesh found the face (first result)');
+                gate.mesh = true;
+                gate.announce();
+            }
             const glass = glassVideoRef.current;
             /*
              * ⚠️ The pane's mask is positioned in SCREEN coordinates, and the
@@ -1068,9 +1107,46 @@ export function LivenessCamera({
     const announcedLive = useRef(false);
     const sayLive = useCallback(() => {
         if (announcedLive.current) return;
+        traceFaceStartup('cover lifted — AWS camera shown');
         announcedLive.current = true;
         cameraLiveRef.current?.();
     }, []);
+
+    // `liveGate` announces through `sayLive` once both halves are in.
+    useEffect(() => {
+        const gate = liveGate.current;
+        gate.announce = () => {
+            if (gate.picture && gate.mesh) sayLive();
+        };
+    }, [sayLive]);
+
+    /**
+     * The picture half of `liveGate` — called by every route that sees the
+     * picture up (the cover observer, its ceiling, and the poll's backstop).
+     * The mesh half arrives from `handleMeshBounds`; if it hasn't within
+     * MESH_COVER_WAIT_MS of the picture, it is waived so the cover cannot stay
+     * up for ever.
+     */
+    const meshGiveUp = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pictureReady = useCallback(() => {
+        const gate = liveGate.current;
+        if (gate.picture) return;
+        traceFaceStartup('AWS camera picture covers the frame');
+        gate.picture = true;
+        gate.announce();
+        if (!gate.mesh) {
+            meshGiveUp.current = setTimeout(() => {
+                gate.mesh = true;
+                gate.announce();
+            }, MESH_COVER_WAIT_MS);
+        }
+    }, []);
+    useEffect(
+        () => () => {
+            if (meshGiveUp.current !== null) clearTimeout(meshGiveUp.current);
+        },
+        [],
+    );
 
     /**
      * The camera is live THE INSTANT IT HAS A PICTURE — by event, not by poll.
@@ -1120,7 +1196,7 @@ export function LivenessCamera({
          * cover up for ever.
          */
         const announceWhenCovering = (video: HTMLVideoElement) => {
-            if (giveUp === null) giveUp = setTimeout(sayLive, COVER_WAIT_MS);
+            if (giveUp === null) giveUp = setTimeout(pictureReady, COVER_WAIT_MS);
             let good = 0;
             const check = () => {
                 const f = frame.getBoundingClientRect();
@@ -1132,7 +1208,7 @@ export function LivenessCamera({
                     v.height >= f.height * 0.98;
                 good = covers ? good + 1 : 0;
                 if (good >= 2) {
-                    sayLive();
+                    pictureReady();
                     return;
                 }
                 raf = requestAnimationFrame(check);
@@ -1174,7 +1250,7 @@ export function LivenessCamera({
             cancelAnimationFrame(raf);
             if (giveUp !== null) clearTimeout(giveUp);
         };
-    }, [sayLive]);
+    }, [pictureReady]);
 
     useEffect(() => {
         const id = setInterval(() => {
@@ -2105,8 +2181,8 @@ export function LivenessCamera({
             // The backstop. The observer above normally gets there first; this
             // is what covers a browser that fires neither event — `sayLive` is
             // one-shot, so whichever arrives first wins and the other is a
-            // no-op.
-            sayLive();
+            // no-op. Through the live gate, like the observer.
+            pictureReady();
             sawVideo.current = true;
             // Hand the element to the live preview, which has no other way to
             // find it — it is created inside AWS's tree.
@@ -2240,12 +2316,12 @@ export function LivenessCamera({
             };
         }, FRAME_POLL_MS);
         return () => clearInterval(id);
-        // `sayLive` is a `useCallback` with no dependencies, so its identity is
+        // `pictureReady` is a `useCallback` with no dependencies, so its identity is
         // stable for the component's life — listing it changes nothing at
         // runtime and keeps the rule satisfied honestly rather than by
         // suppressing it. The effect must not re-run: it owns the interval and
         // the double-buffered canvases.
-    }, [sayLive]);
+    }, [pictureReady]);
 
     return (
         <div

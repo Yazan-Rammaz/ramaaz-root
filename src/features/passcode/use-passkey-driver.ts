@@ -78,11 +78,21 @@ async function register(
  *   Use this device  /auth/refresh/device/options → get() → refresh { device }
  *   Add device       /auth/refresh/new-device/options { PIN } → create()
  *                    → refresh { new_device, label }
+ *                    (only when `enrolAvailable` — the server's
+ *                    `device_enrol_available`, kept in `root_device_enrol`)
  *
  * Both unlock by refreshing, so both work on /unlock (no access token) as well
  * as on the dashboard lock.
  */
-export function useSessionPasskey({ bound, rpId }: { bound: boolean; rpId?: string }): PasskeyDriver {
+export function useSessionPasskey({
+  bound,
+  enrolAvailable,
+  rpId,
+}: {
+  bound: boolean;
+  enrolAvailable: boolean;
+  rpId?: string;
+}): PasskeyDriver {
   const t = useTranslations("passcode");
 
   return {
@@ -99,45 +109,47 @@ export function useSessionPasskey({ bound, rpId }: { bound: boolean; rpId?: stri
       setDocumentUnlocked(true);
       return "ok";
     },
-    enrol: {
-      async prepare(code) {
-        const result = await newDeviceOptionsAction(code);
-        if (result.ok) return result;
-        switch (result.reason) {
-          case "wrong":
-            return { ok: false, error: t("wrong") };
-          case "rateLimited":
-            return {
-              ok: false,
-              error: result.retryAfterSeconds
-                ? t("rateLimited", { seconds: result.retryAfterSeconds })
-                : t("rateLimitedUnknown"),
-            };
-          case "failed":
-            // The backend's code beside our sentence: readable off a phone
-            // with no console, and what the backend needs to look it up.
-            return {
-              ok: false,
-              error: result.code
-                ? `${t("passkeySetupFailed")} · ${result.code}`
-                : t("passkeySetupFailed"),
-            };
+    enrol: enrolAvailable
+      ? {
+          async prepare(code) {
+            const result = await newDeviceOptionsAction(code);
+            if (result.ok) return result;
+            switch (result.reason) {
+              case "wrong":
+                return { ok: false, error: t("wrong") };
+              case "rateLimited":
+                return {
+                  ok: false,
+                  error: result.retryAfterSeconds
+                    ? t("rateLimited", { seconds: result.retryAfterSeconds })
+                    : t("rateLimitedUnknown"),
+                };
+              case "failed":
+                // The backend's code beside our sentence: readable off a phone
+                // with no console, and what the backend needs to look it up.
+                return {
+                  ok: false,
+                  error: result.code
+                    ? `${t("passkeySetupFailed")} · ${result.code}`
+                    : t("passkeySetupFailed"),
+                };
+            }
+          },
+          async finish(publicKey, label) {
+            const credential = await register(publicKey);
+            if (typeof credential === "string") return credential;
+            // Binding and unlocking are one refresh. A refusal leaves the token
+            // unspent and the session locked — the PIN row is the way on.
+            const result = await registerNewDeviceAction(credential, label);
+            if (!result.ok) {
+              console.warn(`[passkey] add device refused: ${result.reason}`);
+              return `failed:server ${result.reason}`;
+            }
+            setDocumentUnlocked(true);
+            return "ok";
+          },
         }
-      },
-      async finish(publicKey, label) {
-        const credential = await register(publicKey);
-        if (typeof credential === "string") return credential;
-        // Binding and unlocking are one refresh. A refusal leaves the token
-        // unspent and the session locked — the PIN row is the way on.
-        const result = await registerNewDeviceAction(credential, label);
-        if (!result.ok) {
-          console.warn(`[passkey] add device refused: ${result.reason}`);
-          return `failed:server ${result.reason}`;
-        }
-        setDocumentUnlocked(true);
-        return "ok";
-      },
-    },
+      : undefined,
   };
 }
 

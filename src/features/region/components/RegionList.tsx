@@ -1,20 +1,22 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { useAddAction } from "@/features/shell/add-action";
-import type { Region } from "../schema";
-import { DIVISION_TYPES } from "../mock-division";
+import type { NameLanguage } from "@/features/language/names";
+import type { Coded } from "../mock-ai";
+import type { Division } from "../schema";
 import {
   addChildById,
+  removeById,
+  updateById,
   findPathById,
   flagEmoji,
-  GEO_TREE,
-  placeholderMap,
+  countryMap,
   resolveFlag,
   type GeoNode,
 } from "../mock-geo";
@@ -23,10 +25,12 @@ import {
   type CountryPreview,
   type NewChild,
   type NewCountry,
+  type SavedChild,
 } from "./AddCountryDrawer";
 import { AddDivisionDrawer, type NewDivision } from "./AddDivisionDrawer";
 import { CountryDetailDrawer } from "./CountryDetailDrawer";
 import { CountryTree } from "./CountryTree";
+import { GeoThumb } from "./GeoThumb";
 
 type Tab = "countries" | "admin";
 const TABS: { id: Tab; icon: string }[] = [
@@ -38,9 +42,34 @@ const TABS: { id: Tab; icon: string }[] = [
  * "System Geographic Regions" — 2-row header (globe box + Countries /
  * Administrative Divisions tabs over the title), then the country list or the
  * empty state. The navbar "+" opens the right-side Add-Country drawer via the
- * ?add=country param; saving appends to the list (mock, client state).
+ * ?add=country param.
+ *
+ * Seeded from the selected system (`loadGeography`); every save goes to RDB
+ * first (the drawers call the Server Actions) and is appended here only once
+ * RDB has answered with its id — so the tree never shows something RDB does
+ * not hold, and a reload shows the same tree.
  */
-export function RegionList({ items }: { items: Region[] }) {
+export function RegionList({
+  countries: initialCountries,
+  divisions: initialDivisions,
+  languages,
+  languageOptions,
+  currencyOptions,
+  flagUploads,
+  reopenable,
+}: {
+  countries: GeoNode[];
+  divisions: Division[];
+  /** The project's languages (`language.list`) — a name's translation rows. */
+  languages: NameLanguage[];
+  /** The system's languages (a country's main language) and currencies — what those are picked from. */
+  languageOptions: Coded[];
+  currencyOptions: Coded[];
+  /** RDB takes flag uploads (`media.upload` deployed, `media:write` held). */
+  flagUploads: boolean;
+  /** RDB offers `country.reopen`. */
+  reopenable: boolean;
+}) {
   const t = useTranslations("region");
   const router = useRouter();
   const params = useSearchParams();
@@ -48,21 +77,10 @@ export function RegionList({ items }: { items: Region[] }) {
   // param (?add=country | ?add=division), which the navbar "+" sets from the
   // add-action context below.
   const [tab, setTab] = useState<Tab>("countries");
-  // The expandable geo tree: the XD mock countries plus the server list
-  // (empty in the mock); the drawer appends to it.
-  const [countries, setCountries] = useState<GeoNode[]>(() => [
-    ...GEO_TREE,
-    ...items.map((r) => ({
-      id: r.name,
-      code: r.name.slice(0, 2).toUpperCase(),
-      name: r.name,
-      children: [],
-    })),
-  ]);
-  // The system ships with the XD's default division types pre-added.
-  const [divisions, setDivisions] = useState<NewDivision[]>(() => [
-    ...DIVISION_TYPES,
-  ]);
+  // The expandable geo tree, as RDB holds it; the drawers append to it.
+  const [countries, setCountries] = useState<GeoNode[]>(initialCountries);
+  // The region types (Administrative Divisions), as RDB holds them.
+  const [divisions, setDivisions] = useState<NewDivision[]>(initialDivisions);
   // Live mirror of the Add-Country form (country + its levels) shown in this
   // column while the user types in the drawer.
   const [preview, setPreview] = useState<CountryPreview | null>(null);
@@ -77,8 +95,6 @@ export function RegionList({ items }: { items: Region[] }) {
     parentId: string;
     child: NewChild;
   } | null>(null);
-  // Monotonic id source for created nodes (stable, no Date/random needed).
-  const idSeq = useRef(0);
 
   const drawerOpen = params.get("add") != null;
   const closeDrawer = () => router.replace("/regions");
@@ -100,21 +116,17 @@ export function RegionList({ items }: { items: Region[] }) {
     [countries],
   );
 
-  // Build a GeoNode for a child of `parentId` — its depth (for the auto map)
-  // is the parent chain length, its map index the parent's current child count.
-  const buildChildNode = (parentId: string, child: NewChild): GeoNode => {
-    const chain = findPathById(countries, parentId);
-    const depth = chain ? chain.length : 1;
-    const index = chain ? chain[chain.length - 1].children.length : 0;
-    return {
-      id: `n-${idSeq.current++}`,
-      code: child.code,
-      plate: child.plate,
-      name: child.name,
-      map: placeholderMap(depth, index),
-      children: [],
-    };
-  };
+  // A GeoNode for a child just saved under `parentId`, with the map its form matched.
+  const buildChildNode = (child: SavedChild): GeoNode => ({
+    id: child.id,
+    code: child.code,
+    plate: child.plate,
+    name: child.name,
+    map: child.map,
+    names: child.names,
+    regionType: child.regionType,
+    children: [],
+  });
 
   // Tell the navbar "+" which drawer to open for the current tab; unregister
   // on unmount so the "+" goes inert on pages without an add modal.
@@ -135,7 +147,7 @@ export function RegionList({ items }: { items: Region[] }) {
   // the drawer open and drill into its levels. Does NOT close the drawer.
   const handleSaveCountry = (c: NewCountry): GeoNode => {
     const node: GeoNode = {
-      id: `c-${idSeq.current++}`,
+      id: c.id,
       code: c.code,
       name: c.name,
       // A code that matches a known country (TR, IQ, LB, SY, …) gets the
@@ -143,7 +155,9 @@ export function RegionList({ items }: { items: Region[] }) {
       // unrecognized code falls back to the emoji glyph (CountryTree).
       flag: resolveFlag(c.code),
       details: c.details,
-      map: placeholderMap(0, countries.length),
+      // A picked map wins over the generated one (until refresh — map-file.ts).
+      map: c.map ?? countryMap(c.code),
+      names: c.names,
       children: [],
     };
     setCountries((prev) => [...prev, node]);
@@ -152,8 +166,8 @@ export function RegionList({ items }: { items: Region[] }) {
   };
   // Add a sub-level under a node — appends, auto-expands the branch, returns
   // the created node so the wizard can drill one level deeper.
-  const handleAddChild = (parentId: string, child: NewChild): GeoNode => {
-    const node = buildChildNode(parentId, child);
+  const handleAddChild = (parentId: string, child: SavedChild): GeoNode => {
+    const node = buildChildNode(child);
     setCountries((prev) => addChildById(prev, parentId, node));
     expandBranch(parentId, node.id);
     setDraftChild(null);
@@ -181,11 +195,7 @@ export function RegionList({ items }: { items: Region[] }) {
         code: draftChild.child.code,
         plate: draftChild.child.plate,
         name: draftChild.child.name,
-        map: placeholderMap(
-          findPathById(countries, draftChild.parentId)?.length ?? 1,
-          findPathById(countries, draftChild.parentId)?.at(-1)?.children.length ??
-            0,
-        ),
+        map: draftChild.child.map,
         children: [],
       })
     : countries;
@@ -194,9 +204,9 @@ export function RegionList({ items }: { items: Region[] }) {
     tab === "countries"
       ? countries.length === 0 && !preview
       : divisions.length === 0;
-  // The map SVG the draft country previews with — same index save will use,
-  // so the row is identical before and after saving.
-  const draftMap = placeholderMap(0, countries.length);
+  // The map the draft country previews with — the same one save assigns, so
+  // the row is identical before and after saving.
+  const draftMap = preview ? (preview.map ?? countryMap(preview.code)) : undefined;
 
   return (
     <div className="flex h-full">
@@ -308,11 +318,7 @@ export function RegionList({ items }: { items: Region[] }) {
                   {preview.code}
                 </span>
                 <span className="bg-surface rad-12 grid h-50 w-110 shrink-0 place-items-center">
-                  <Icon
-                    name={draftMap.icon}
-                    width={draftMap.w}
-                    height={draftMap.h}
-                  />
+                  {draftMap && <GeoThumb image={draftMap} />}
                 </span>
                 <span className="bg-surface rad-12 flex h-50 w-200 items-center px-12">
                   <span className="fz-14 text-ink truncate">{preview.name}</span>
@@ -348,10 +354,34 @@ export function RegionList({ items }: { items: Region[] }) {
             onPreview={setPreview}
             onDraftChild={handleDraftChild}
             divisions={divisions}
+            languages={languages}
+            languageOptions={languageOptions}
+            currencyOptions={currencyOptions}
+            flagUploads={flagUploads}
           />
           <CountryDetailDrawer
             path={drawerOpen ? null : selectedPath}
             onDraftChild={handleDraftChild}
+            languages={languages}
+            languageOptions={languageOptions}
+            currencyOptions={currencyOptions}
+            divisions={divisions}
+            flagUploads={flagUploads}
+            reopenable={reopenable}
+            onUpdateNode={(id, patch) =>
+              setCountries((prev) => updateById(prev, id, patch))
+            }
+            onCloseNode={(id) => {
+              // Closed in RDB. A country stays, greyed and read-only, its sheet
+              // open on Reopen; a region leaves the tree (only open ones are listed).
+              if (countries.some((c) => c.id === id)) {
+                setCountries((prev) => updateById(prev, id, { closed: true }));
+                return;
+              }
+              setCountries((prev) => removeById(prev, id));
+              setTreePath((p) => (p.includes(id) ? p.slice(0, p.indexOf(id)) : p));
+              setSelectedId(null);
+            }}
             onAddChild={(parentId, child) => {
               setCountries((prev) => addChildById(prev, parentId, child));
               expandBranch(parentId);
@@ -363,7 +393,12 @@ export function RegionList({ items }: { items: Region[] }) {
           />
         </>
       ) : (
-        <AddDivisionDrawer open={drawerOpen} onClose={closeDrawer} onSave={handleSaveDivision} />
+        <AddDivisionDrawer
+          open={drawerOpen}
+          onClose={closeDrawer}
+          onSave={handleSaveDivision}
+          languages={languages}
+        />
       )}
     </div>
   );

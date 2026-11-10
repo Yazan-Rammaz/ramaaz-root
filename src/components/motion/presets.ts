@@ -170,3 +170,33 @@ export const cardOpen: Variants = {
   animate: { opacity: 1, scale: 1, y: 0 },
   exit: { opacity: 0, scale: 0.98, y: 8 },
 };
+
+/**
+ * A group of controls unfolding along one axis — the project sections opening
+ * once a system is selected. The container grows from nothing to its natural
+ * size on `iosSpring` while its items pop in one after another.
+ *
+ * The container's travel is LOGICAL by construction: it animates `width` (or
+ * `height`), never `x`, so the group stays anchored to its leading edge and
+ * unfolds toward the trailing one — left → right in LTR, right → left in RTL —
+ * with no direction branch anywhere. Use through `<Reveal>`, not directly.
+ */
+export const revealX: Variants = {
+  hidden: { width: 0, opacity: 0 },
+  shown: { width: "auto", opacity: 1 },
+};
+
+/** The same unfold, top → bottom. */
+export const revealY: Variants = {
+  hidden: { height: 0, opacity: 0 },
+  shown: { height: "auto", opacity: 1 },
+};
+
+/** One item inside a reveal — a small iOS "pop" as its turn in the stagger comes. */
+export const revealItem: Variants = {
+  hidden: { opacity: 0, scale: 0.6 },
+  shown: { opacity: 1, scale: 1 },
+};
+
+/** Seconds between items in a reveal. */
+export const REVEAL_STAGGER_S = 0.045;

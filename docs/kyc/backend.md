@@ -241,7 +241,7 @@ carries images and fields together. Nothing is left for `ID_INFO` to gate —
 keeping it would mean the dashboard auto-posting a second token representing no
 user action at all.
 
-The original split came from `root-enrollment.md`, where both steps were stubs
+The original split came from `2026-09-30-root-first-sign-in.md`, where both steps were stubs
 and the administrator was expected to TYPE their ID details. OCR removed that
 step, and that document already said those evidence shapes were "a suggestion,
 not a contract".

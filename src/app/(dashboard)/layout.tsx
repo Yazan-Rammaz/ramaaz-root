@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
 import { requireSession } from '@/lib/auth/session';
 import { AddActionProvider } from '@/features/shell/add-action';
-import { Sidebar } from '@/features/shell/components/Sidebar';
-import { Navbar } from '@/features/shell/components/Navbar';
+import { Shell } from '@/features/shell/components/Shell';
 import { PasscodeLock } from '@/features/passcode/components/PasscodeLock';
-import { readDeviceHint, readPinLength } from '@/lib/auth/cookies';
+import { readDeviceHint, readEnrolHint, readPinLength } from '@/lib/auth/cookies';
 import { cfEnv } from '@/lib/cf-env';
+import { getSelectedSystem } from '@/lib/api/backend';
 
 /**
  * The app shell for the whole protected area: fixed left rail + top navbar, with
@@ -35,6 +35,16 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     // to the gate's default.
     const pinLength = await readPinLength();
     const deviceBound = await readDeviceHint();
+    const enrolAvailable = await readEnrolHint();
+    // The selected system decides what the shell offers: nothing selected →
+    // only the systems list and search; selected → its sections unfold and the
+    // rail shows its code. Selecting re-renders this layout (`selectSystem`
+    // revalidates it), which is what plays the unfold.
+    //
+    // A failed registry read is shown as "nothing selected" rather than taking
+    // the whole shell down: the shell only decorates with this, and /systems
+    // reads the same registry and surfaces the real error there.
+    const system = await getSelectedSystem().catch(() => null);
 
     return (
         <AddActionProvider>
@@ -44,21 +54,10 @@ export default async function DashboardLayout({ children }: { children: ReactNod
                 name={session.name}
                 length={pinLength}
                 deviceBound={deviceBound}
+                enrolAvailable={enrolAvailable}
                 rpId={cfEnv('WEBAUTHN_RP_ID')}
             />
-            <div className="flex h-full w-full overflow-hidden">
-                <Sidebar />
-                <div className="flex min-w-0 flex-1 flex-col">
-                    <Navbar />
-                    {/* Page content opens here. Long pages scroll INSIDE this region only.
-              scrollbar-gutter reserves the scrollbar's width up front so a page
-              crossing the scroll threshold (e.g. AI content revealing) doesn't
-              shift everything horizontally when the bar appears. */}
-                    <main className="thin-scroll relative min-h-0 flex-1 overflow-auto">
-                        {children}
-                    </main>
-                </div>
-            </div>
+            <Shell systemCode={system?.code ?? null}>{children}</Shell>
         </AddActionProvider>
     );
 }

@@ -1,48 +1,47 @@
 import "server-only";
-import { currencySchema, type Currency } from "./schema";
+import { getLocale } from "next-intl/server";
+import { activeOperations, readAllPages } from "@/lib/api/operations";
+import { pickName } from "@/lib/i18n/localized";
+import { rdbCurrencySchema, type Currency, type RdbCurrency } from "./schema";
 
 /**
  * Single place currency endpoints are read. Server-only.
  *
- * Currencies are PROJECT data — scoped to the system selected on /systems, and
- * served by the root backend on that project's behalf (it holds the
- * credentials; we never call a project directly). STILL MOCK, and the swap is:
+ * Currencies are PROJECT data, read through the selected system's
+ * `currency.list` operation (`backend docs/project-data/from-backend/2026-10-30-rdb-screens.md`
+ * §4.1) — every page of it, live currencies only (removed ones are left out by
+ * RDB unless asked for).
  *
- *   const data = await backendFetch.get<unknown>("/connection/manifest");
- *   return currencySchema.array().parse(data.currencies);
- *
- * (import { backendFetch } from "@/lib/api/backend" — it prefixes
- * `/v1/projects/{selected}` for you.) Keep the schema.parse boundary exactly.
- *
- * ⚠️ NOT SWAPPED YET, and not for want of an endpoint. We do not know what
- * `manifest.currencies` contains — a list of codes, or objects, and whether
- * anything on it carries a CATEGORY. The category is load-bearing here: the
- * header is a four-tab filter (cash/crypto/gold/silver) and the mock below
- * invents it. If the backend sends no category, either we derive it from
- * something or the tabs go — a design decision, not a mapping.
- *
- * `icon` is ours either way: an asset we ship for the metals, never a backend
- * field. Asked in `backend docs/frontend-project-data-needs.md`.
+ * RDB has no CATEGORY, and the header is a four-tab filter (cash / crypto /
+ * gold / silver). Decided with the owner: every currency sits under "cash" and
+ * the other three tabs stay empty until there is something to put in them.
+ * The leading box shows RDB's `symbol`; `icon` stays ours (the metals' assets),
+ * so nothing from RDB uses it.
  */
-const MOCK_CURRENCIES: unknown[] = [
-  { id: "usd", category: "cash", code: "USD", name: "American Dollars" },
-  { id: "ytl", category: "cash", code: "YTL", name: "Turkish Lira" },
-  { id: "syp", category: "cash", code: "SYP", name: "Syrian Pounds" },
-  { id: "iqd", category: "cash", code: "IQD", name: "Iraqi Dinar" },
-  { id: "lbp", category: "cash", code: "LBP", name: "Lebanese Pound" },
-  { id: "usdt", category: "crypto", icon: "currencies/usdt", name: "USDT, TRON, TRC20" },
-  { id: "gold", category: "gold", icon: "currencies/gold", name: "Gold 24" },
-  { id: "silver", category: "silver", icon: "currencies/silver", name: "Silver" },
-];
-
 export async function listCurrencies(): Promise<Currency[]> {
-  return currencySchema.array().parse(MOCK_CURRENCIES);
+  const [rows, locale] = await Promise.all([readAllPages("currency.list"), getLocale()]);
+  return rdbCurrencySchema.array().parse(rows).map((c) => toCurrency(c, locale));
 }
 
-export async function getCurrency(id: string): Promise<Currency> {
-  const found = MOCK_CURRENCIES.find(
-    (c): c is { id: string } =>
-      typeof c === "object" && c !== null && (c as { id?: unknown }).id === id,
-  );
-  return currencySchema.parse(found);
+/** RDB's Currency → the row the list shows (and Edit starts from). */
+export function toCurrency(c: RdbCurrency, locale: string): Currency {
+  return {
+    id: c.id,
+    category: "cash",
+    code: c.symbol,
+    name: pickName(c.name, locale),
+    names: c.name,
+    isActive: c.isActive,
+    updatedAt: c.updatedAt,
+  };
+}
+
+/**
+ * Whether the list offers Edit: RDB lists `currency.update` as `ACTIVE` and
+ * the person holds `currencies:write` (project only; Root always does). A
+ * failed read of the operation list reads as "not yet".
+ */
+export async function canEditCurrencies(myPermissions: string[]): Promise<boolean> {
+  if (!myPermissions.includes("currencies:write")) return false;
+  return (await activeOperations().catch(() => new Set<string>())).has("currency.update");
 }
