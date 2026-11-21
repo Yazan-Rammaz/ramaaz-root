@@ -6,10 +6,8 @@ import type { GeoImage } from "./mock-geo";
  * A country map the person picked in place of the generated one. SVG only,
  * up to 256 KB, checked here at once.
  *
- * ⚠️ Kept on the screen only: RDB has no field for a country's map (it has
- * `flagImageUrl` for the flag, nothing for a map), so a picked map lasts until
- * the page reloads, then the generated one is back. When RDB gains a field,
- * this is what gets uploaded.
+ * Saved to RDB once the place is saved (`saveMapAction`: `media.upload`, then
+ * `mapImageUrl`), and drawn from there after a reload (`/api/geo-map`).
  */
 
 export type MapProblem = "type" | "size";
@@ -32,4 +30,10 @@ export async function readPickedMap(
     reader.readAsDataURL(file);
   });
   return { icon: "", src, ...MAP_BOX };
+}
+
+/** A picked map's file for `media.upload` (base64, no `data:` prefix); none for a drawn or matched one. */
+export function svgBase64(image?: GeoImage | null): string | undefined {
+  const prefix = "data:image/svg+xml;base64,";
+  return image?.src?.startsWith(prefix) ? image.src.slice(prefix.length) : undefined;
 }

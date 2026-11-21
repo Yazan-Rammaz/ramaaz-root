@@ -213,8 +213,7 @@ export function SubLevelForm({
                 {flag && <Icon name={flag.icon} width={flag.w} height={flag.h} />}
             </span>
 
-            {/* Its map + the AI badges. The map is on the screen only until RDB
-                has a field for it (project-data/to-backend/2026-11-02-maps.md). */}
+            {/* Its map + the AI badges. A picked map is saved to RDB with the region (saveMapAction). */}
             <Section title={`${levelName} Short Name`}>
                 <div className="flex items-center gap-8">
                     <MapPicker

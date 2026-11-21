@@ -5,7 +5,7 @@ import { nameRows, type NameLanguage } from "@/features/language/names";
 import { activeOperations, readAllPages, readOperation } from "@/lib/api/operations";
 import { pickName } from "@/lib/i18n/localized";
 import type { Coded } from "./mock-ai";
-import { countryMap, resolveFlag, type GeoNode } from "./mock-geo";
+import { countryMap, resolveFlag, type GeoImage, type GeoNode } from "./mock-geo";
 import { findRegionMap } from "./region-map";
 import {
   rdbCountryCurrencySchema,
@@ -35,9 +35,9 @@ import {
  * `isoCode`, which the code chip shows.
  *
  * The screens were built on the mock tree (`mock-geo.ts`), so this answers
- * that shape. What RDB does not hold stays decoration: maps are our own
- * generated assets — a country's by code, a region's matched by ISO code or
- * name (`region-map.ts`) — the flag is our own asset by code (RDB's
+ * that shape. A map is the one uploaded to RDB (`mapImageUrl`, shown through
+ * `/api/geo-map`), else our own generated asset — a country's by code, a
+ * region's matched by ISO code or name (`region-map.ts`). The flag is our own asset by code (RDB's
  * `flagImageUrl` is a remote image the CSP would refuse), and a level-1
  * region's plate number has nowhere to live in RDB, so it is gone after a
  * reload.
@@ -132,6 +132,9 @@ function mainLanguageOf(code: string | null | undefined, languages: NameLanguage
   return { key: code, code: code.toUpperCase(), name: l?.label ?? code };
 }
 
+/** The box an uploaded map is fitted into when we have no drawing of that place. */
+const MAP_BOX: GeoImage = { icon: "", w: 62, h: 26 };
+
 function toCountryNode(
   country: RdbCountry,
   regions: RdbRegion[],
@@ -172,7 +175,10 @@ function toCountryNode(
         names: r.name,
         updatedAt: r.updatedAt,
         regionType: r.regionType ?? undefined,
-        map: match?.image,
+        // An uploaded map wins over the matched one, through our own origin.
+        map: r.mapImageUrl
+          ? { ...(match?.image ?? MAP_BOX), src: `/api/geo-map?country=${encodeURIComponent(country.id)}&region=${encodeURIComponent(r.id)}` }
+          : match?.image,
         children: childrenOf(r.id, level + 1, match?.shapeId),
       };
     });
@@ -182,7 +188,9 @@ function toCountryNode(
     code: country.code,
     name,
     flag: resolveFlag(country.code),
-    map: countryMap(country.code),
+    map: country.mapImageUrl
+      ? { ...(countryMap(country.code) ?? MAP_BOX), src: `/api/geo-map?country=${encodeURIComponent(country.id)}` }
+      : countryMap(country.code),
     names: country.name,
     updatedAt: country.updatedAt,
     closed: !!country.deletedAt,

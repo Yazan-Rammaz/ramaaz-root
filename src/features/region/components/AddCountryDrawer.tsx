@@ -8,7 +8,8 @@ import { DashedFrame } from '@/components/ui/DashedFrame';
 import { FormError } from '@/components/ui/FormError';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
-import { createCountryAction, createRegionAction } from '../actions';
+import { createCountryAction, createRegionAction, saveMapAction } from '../actions';
+import { svgBase64 } from '../map-file';
 import { generateCountryDraftAction, translateNameAction } from '../ai';
 import type { Coded, CountryDraft, Translation } from '../mock-ai';
 import { nameForCreate, requiredFilled, rowLanguages, type NameLanguage } from '@/features/language/names';
@@ -75,7 +76,7 @@ export type NewCountry = {
     levels?: Coded[];
     /** The full generated sheet, kept on the saved node (until refresh). */
     details?: CountryDraft;
-    /** A map the person picked over the generated one (until refresh — see map-file.ts). */
+    /** A map the person picked over the generated one, saved to RDB with the country (see map-file.ts). */
     map?: GeoImage;
     /** As saved in RDB — what Edit starts from. */
     names?: LocalizedName;
@@ -389,6 +390,9 @@ function DrawerBody({
             ),
         );
         if (!id) return;
+        // A picked map goes to RDB after the place itself is saved.
+        const svg = svgBase64(pickedMap);
+        if (svg && !(await write.runOk((resume) => saveMapAction('country', id, svg, undefined, resume)))) return;
         write.reset(true);
         const node = onSaveCountry({
             id,
@@ -431,6 +435,9 @@ function DrawerBody({
             ),
         );
         if (!id) return;
+        // A picked map goes to RDB after the place itself is saved.
+        const svg = svgBase64(subReady.map);
+        if (svg && !(await write.runOk((resume) => saveMapAction('region', id, svg, undefined, resume)))) return;
         write.reset();
         const child = onAddChild(parent.id, {
             id,

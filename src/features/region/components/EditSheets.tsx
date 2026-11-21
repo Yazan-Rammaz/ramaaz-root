@@ -13,7 +13,8 @@ import { FormError } from '@/components/ui/FormError';
 import { Icon } from '@/components/ui/Icon';
 import { pickName } from '@/lib/i18n/localized';
 import { cn } from '@/lib/utils/cn';
-import { updateCountryAction, updateRegionAction } from '../actions';
+import { saveMapAction, updateCountryAction, updateRegionAction } from '../actions';
+import { svgBase64 } from '../map-file';
 import { generateCountryDraftAction, translateNameAction } from '../ai';
 import type { MapProblem } from '../map-file';
 import type { Coded, CountryDraft } from '../mock-ai';
@@ -206,6 +207,10 @@ export function CountryEditSheet({
         if (result?.closed) return onClosed();
         const ok = result?.ok;
         if (!ok) return;
+        // A picked map goes to RDB after the country itself is saved.
+        const svg = svgBase64(pickedMap);
+        const mapped = svg ? await write.runOk((resume) => saveMapAction('country', country.id, svg, ok.updatedAt, resume)) : null;
+        if (svg && !mapped) return;
         const names = applyName(country.names, name);
         const shown = pickName(names, locale);
         const nextDetails: CountryDraft = {
@@ -223,7 +228,7 @@ export function CountryEditSheet({
             code: cleanCode,
             name: shown,
             names,
-            updatedAt: ok.updatedAt ?? country.updatedAt,
+            updatedAt: mapped?.updatedAt ?? ok.updatedAt ?? country.updatedAt,
             flag: resolveFlag(cleanCode),
             // A new pick, else an earlier pick, else the generated map for the (maybe new) code.
             map: pickedMap ?? (country.map?.src ? country.map : countryMap(cleanCode)),
@@ -506,8 +511,12 @@ export function RegionEditSheet({
             ),
         );
         if (!ok) return;
+        // A picked map goes to RDB after the region itself is saved.
+        const svg = svgBase64(pickedMap);
+        const mapped = svg ? await write.runOk((resume) => saveMapAction('region', node.id, svg, ok.updatedAt, resume)) : null;
+        if (svg && !mapped) return;
         onSaved({
-            updatedAt: ok.updatedAt ?? node.updatedAt,
+            updatedAt: mapped?.updatedAt ?? ok.updatedAt ?? node.updatedAt,
             regionType: regionType?.key ?? startType,
             code: (level === 1 ? short : node.code) || undefined,
             plate: plate.trim() || undefined,

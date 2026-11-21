@@ -28,6 +28,8 @@ export const rdbCountrySchema = z
     deletedAt: z.string().nullable().optional(),
     /** ISO 639-1, lower case (`ar`), or null when unset (answers 2026-11-05 §5, live 2026-11-07). */
     mainLanguage: z.string().nullable().optional(),
+    /** The map an administrator uploaded (`media.upload`), or null: then ours is drawn. */
+    mapImageUrl: z.string().nullable().optional(),
   })
   .loose();
 export type RdbCountry = z.infer<typeof rdbCountrySchema>;
@@ -44,6 +46,7 @@ export const rdbRegionSchema = z
     isoCode: z.string().nullable().optional(),
     status: z.string().optional(),
     updatedAt: z.string().optional(),
+    mapImageUrl: z.string().nullable().optional(),
   })
   .loose();
 export type RdbRegion = z.infer<typeof rdbRegionSchema>;

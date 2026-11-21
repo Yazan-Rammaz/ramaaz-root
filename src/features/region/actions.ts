@@ -1,5 +1,6 @@
 "use server";
 
+import { z } from "zod";
 import { getTranslations } from "next-intl/server";
 import { readOperation } from "@/lib/api/operations";
 import { errorCode } from "@/lib/auth/errors";
@@ -475,5 +476,59 @@ export async function createDivisionAction(
     return { ok: { id: key } };
   } catch (error) {
     return failure(error);
+  }
+}
+
+/** A picked map, as `media.upload` takes it: an SVG, standard base64, at most 256 KB. */
+const mapFileSchema = z
+  .string()
+  .min(4)
+  .max(Math.ceil((256 * 1024 * 4) / 3) + 4)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/);
+
+/**
+ * Save a picked map to RDB (open-questions answers §3): `media.upload` with
+ * purpose `country_map` / `region_map` (SVG only), then `mapImageUrl` on
+ * `country.update` / `region.update`. Run after the form's own save, with the
+ * `updatedAt` that save answered. A press after a failure re-uses the upload.
+ */
+export async function saveMapAction(
+  kind: "country" | "region",
+  id: string,
+  svgBase64: string,
+  expectedUpdatedAt?: string,
+  resume?: Resume,
+): Promise<WriteResult> {
+  const data = mapFileSchema.safeParse(svgBase64);
+  if (!data.success || !id) return invalid([{ path: ["map"] }]);
+  let mapUrl = resume?.flagUrl;
+  try {
+    if (!mapUrl) {
+      const uploaded = await step(
+        "media.upload",
+        { body: { purpose: kind === "country" ? "country_map" : "region_map", contentType: "image/svg+xml", data: data.data } },
+        "upload",
+        resume,
+        {},
+      );
+      if (stopped(uploaded)) return uploaded;
+      mapUrl = field(uploaded.data, "url");
+      if (!mapUrl) return { error: (await getTranslations("region.errors"))("generic", { ref: "media.upload" }) };
+    }
+    const updated = await step(
+      kind === "country" ? "country.update" : "region.update",
+      {
+        params: kind === "country" ? { id } : { region_id: id },
+        body: { mapImageUrl: mapUrl, ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}) },
+      },
+      "update",
+      resume,
+      // Kept as `flagUrl`: the carry's one slot for an uploaded file.
+      { flagUrl: mapUrl },
+    );
+    if (stopped(updated)) return updated;
+    return { ok: { id, updatedAt: field(updated.data, "updatedAt") } };
+  } catch (error) {
+    return failure(error, { flagUrl: mapUrl });
   }
 }

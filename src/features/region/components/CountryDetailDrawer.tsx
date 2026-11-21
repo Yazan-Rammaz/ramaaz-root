@@ -9,7 +9,8 @@ import { DashedFrame } from '@/components/ui/DashedFrame';
 import { FormError } from '@/components/ui/FormError';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
-import { createRegionAction } from '../actions';
+import { createRegionAction, saveMapAction } from '../actions';
+import { svgBase64 } from '../map-file';
 import type { Coded } from '../mock-ai';
 import { flagEmoji, type GeoNode } from '../mock-geo';
 import { useWrite } from '../use-write';
@@ -229,6 +230,9 @@ function Body({
             ),
         );
         if (!id) return;
+        // A picked map goes to RDB after the place itself is saved.
+        const svg = svgBase64(subReady.map);
+        if (svg && !(await write.runOk((resume) => saveMapAction('region', id, svg, undefined, resume)))) return;
         resetWrite();
         onAddChild(addParent.id, {
             id,
