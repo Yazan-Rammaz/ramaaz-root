@@ -1,39 +1,57 @@
 import "server-only";
-import { businessTypeSchema, type BusinessType } from "./schema";
+import { z } from "zod";
+import { readAllPages, readOperation } from "@/lib/api/operations";
+import { rdbCatalogItemSchema, type BusinessCountry, type BusinessKind, type BusinessType, type RdbCatalogItem } from "./schema";
 
 /**
  * Single place business types are read. Server-only.
  *
- * ⚠️ MOCKED — the screen is built from its XD frames ahead of the backend.
- * The rows are the ones the design shows. Saving in the panel changes only
- * the screen (until a reload); nothing is sent anywhere.
- *
- * When the backend publishes the route, the swap keeps the schema.parse
- * boundary exactly (the project's data goes through `backendFetch`, which
- * prefixes `/v1/projects/{selected}`):
- *   const data = await backendFetch.get<unknown>("/business-types");
- *   return businessTypeSchema.array().parse(data);
- * and the panel's save becomes a Server Action in `actions.ts`.
+ * RDB's catalogs through the operations route (`POST /v1/projects/{id}/operations/…`):
+ *   business_type.list   Individual and Corporate, told apart by `group`
+ *   work_type.list       Business Work Type
+ *   country.list         the flags a type may be limited to (RDB's ids)
  */
-const all = { all_countries: true, countries: [] };
 
-const MOCK: unknown[] = [
-  { id: "own", kind: "individual", short_name: "OWN", name: { en: "Owner", ar: "مالك" }, ...all },
-  { id: "p", kind: "individual", short_name: "P", name: { en: "Partner", ar: "شريك" }, ...all },
-  { id: "s", kind: "individual", short_name: "S", name: { en: "Staff", ar: "موظف" }, ...all },
-  { id: "k", kind: "individual", short_name: "K", name: { en: "Contract", ar: "متعاقد" }, ...all },
-  { id: "bkr", kind: "individual", short_name: "BKR", name: { en: "Broker", ar: "وسيط" }, ...all },
-  { id: "ag", kind: "individual", short_name: "AG", name: { en: "Agent", ar: "وكيل" }, ...all },
-  { id: "fl", kind: "individual", short_name: "FL", name: { en: "Freelancer", ar: "عامل حر" }, ...all },
-  { id: "o", kind: "corporate", short_name: "O", name: { en: "Office", ar: "مكتب" }, ...all },
-  { id: "c", kind: "corporate", short_name: "C", name: { en: "Center", ar: "مركز" }, ...all },
-  { id: "b", kind: "corporate", short_name: "B", name: { en: "Branch", ar: "فرع" }, ...all },
-  { id: "pt", kind: "corporate", short_name: "P", name: { en: "Point", ar: "نقطة" }, ...all },
-  { id: "bp", kind: "work", short_name: "BP", name: { en: "Business Partner", ar: "شريك أعمال" }, ...all },
-  { id: "bo", kind: "work", short_name: "BO", name: { en: "Business Owners", ar: "أصحاب الأعمال" }, ...all },
-  { id: "cd", kind: "work", short_name: "CD", name: { en: "Business Distributor", ar: "موزع أعمال" }, ...all },
-];
+/** An RDB catalog item in the screen's words. */
+export function toBusinessType(item: RdbCatalogItem, kind: BusinessKind): BusinessType {
+  return {
+    id: item.key,
+    kind,
+    short_name: item.shortName ?? item.key.slice(0, 4).toUpperCase(),
+    name: item.name,
+    all_countries: !item.countries || item.countries === "all",
+    countries: Array.isArray(item.countries) ? item.countries : [],
+    status: item.status,
+    updatedAt: item.updatedAt,
+  };
+}
 
 export async function listBusinessTypes(): Promise<BusinessType[]> {
-  return businessTypeSchema.array().parse(MOCK);
+  const [business, work] = await Promise.all([readOperation("business_type.list"), readOperation("work_type.list")]);
+  const kindOf = (group?: string): BusinessKind => (group === "corporate" ? "corporate" : "individual");
+  return [
+    ...z
+      .array(rdbCatalogItemSchema)
+      .parse(business)
+      .map((i) => toBusinessType(i, kindOf(i.group))),
+    ...z
+      .array(rdbCatalogItemSchema)
+      .parse(work)
+      .map((i) => toBusinessType(i, "work")),
+  ];
+}
+
+const rdbCountrySchema = z
+  .object({
+    id: z.string(),
+    code: z.string().optional(),
+    name: z.record(z.string(), z.string()),
+    deletedAt: z.string().nullable().optional(),
+  })
+  .loose();
+
+/** The project's countries from RDB — the ids a type's `countries` holds. A closed one is shown grey. */
+export async function listBusinessCountries(): Promise<BusinessCountry[]> {
+  const rows = z.array(rdbCountrySchema).parse(await readAllPages("country.list", { query: { includeDeleted: "true" } }));
+  return rows.map((c) => ({ id: c.id, name: c.name, code: c.code?.toUpperCase(), closed: !!c.deletedAt }));
 }

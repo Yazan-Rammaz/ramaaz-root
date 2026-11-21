@@ -1,6 +1,8 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
+import { useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
 import { flagEmoji, resolveFlag } from '@/features/region/mock-geo';
@@ -52,9 +54,9 @@ export function Choice({
     icon?: string;
     disabled?: boolean;
     /** A top-level pick in a data tree is green, as in the frames. */
-    tint?: 'green';
+    tint?: 'green' | 'red';
 }) {
-    const color = on ? (tint === 'green' ? '#3fae7c' : BLUE) : '#c3c3c3';
+    const color = on ? (tint === 'green' ? '#3fae7c' : tint === 'red' ? '#e5707a' : BLUE) : '#c3c3c3';
     return (
         <button
             type="button"
@@ -83,16 +85,18 @@ export function OneOf<T extends string>({
     value,
     label,
     onChange,
+    disabled,
 }: {
     options: readonly T[];
     value: T;
     label: (o: T) => ReactNode;
     onChange: (o: T) => void;
+    disabled?: boolean;
 }) {
     return (
         <div className="flex flex-wrap gap-x-16 gap-y-6">
             {options.map((o) => (
-                <Choice key={o} on={value === o} label={label(o)} onChange={() => onChange(o)} />
+                <Choice key={o} on={value === o} label={label(o)} disabled={disabled} onChange={() => onChange(o)} />
             ))}
         </div>
     );
@@ -126,7 +130,8 @@ export function TabStrip<T extends string>({
                     style={value === id ? SMALL_BLUE : undefined}
                     className={cn('rad-5 grid h-26 w-26 place-items-center', value === id && 'hairline')}
                 >
-                    <Icon name={icon(id)} size={16} />
+                    {/* Selected #1D1D1D, the rest #8D8D8D — every tab and sub-tab strip (XD). */}
+                    <Icon name={icon(id)} size={16} mask className={value === id ? 'text-[#1D1D1D]' : 'text-[#8D8D8D]'} />
                 </button>
             ))}
         </div>
@@ -157,7 +162,7 @@ export function FlagStrip({ codes, framed = true }: { codes: string[]; framed?: 
     );
 }
 
-/** A label over its value in a #fcfcfc box; `onEdit` puts the blue "Edit" before the label. */
+/** A label over its value in a #fcfcfc box; `editLabel` puts the blue "Edit" before the label, a button with `onEdit`. */
 export function InfoField({
     label,
     value,
@@ -172,10 +177,13 @@ export function InfoField({
     return (
         <div className="bg-surface rad-12 flex min-h-50 flex-col justify-center gap-4 px-12 py-8">
             <span className="fz-10 text-muted">
-                {onEdit && (
-                    <button type="button" onClick={onEdit} className="text-primary me-4">
+                {onEdit ? (
+                    <button type="button" onClick={onEdit} className="text-primary me-4 cursor-pointer">
                         {editLabel}
                     </button>
+                ) : (
+                    // The design's Edit on a field nothing can change yet.
+                    editLabel && <span className="text-primary me-4">{editLabel}</span>
                 )}
                 {label}
             </span>
@@ -184,7 +192,12 @@ export function InfoField({
     );
 }
 
-/** A labelled input in a dashed box (the empty Add-Admin fields), solid once it has text. */
+/**
+ * A labelled input in a dashed box — empty, it is dashed; once a value is
+ * entered and the field is left, it turns into the "entered" box of XD work
+ * structure 7: solid #fcfcfc, a blue **Edit** before the label, the value
+ * under it, read-only. Edit (or a tap on the box) opens it again.
+ */
 export function DashedInput({
     label,
     value,
@@ -196,7 +209,23 @@ export function DashedInput({
     onChange: (v: string) => void;
     multiline?: boolean;
 }) {
+    const t = useTranslations('work');
+    const [editing, setEditing] = useState(false);
+    const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
     const empty = !value.trim();
+    const entered = !empty && !editing;
+    const open = () => {
+        setEditing(true);
+        requestAnimationFrame(() => field.current?.focus());
+    };
+    const common = {
+        ref: field,
+        value,
+        readOnly: entered,
+        onFocus: () => setEditing(true),
+        onBlur: () => setEditing(false),
+        onChange: (e: { target: { value: string } }) => onChange(e.target.value),
+    };
     return (
         <label
             className={cn('rad-12 relative flex min-h-54 flex-col gap-4 px-12 py-8', !empty && 'bg-surface')}
@@ -206,20 +235,18 @@ export function DashedInput({
                     : undefined
             }
         >
-            <span className="fz-10 text-muted">{label}</span>
+            <span className="fz-10 text-muted">
+                {entered && (
+                    <button type="button" onClick={open} className="me-4 cursor-pointer text-[#388CFF]">
+                        {t('edit')}
+                    </button>
+                )}
+                {label}
+            </span>
             {multiline ? (
-                <textarea
-                    value={value}
-                    onChange={(e) => onChange(e.target.value)}
-                    rows={3}
-                    className="fz-12 text-ink w-full resize-none bg-transparent outline-none"
-                />
+                <textarea {...common} rows={3} className="fz-12 text-ink w-full resize-none bg-transparent outline-none" />
             ) : (
-                <input
-                    value={value}
-                    onChange={(e) => onChange(e.target.value)}
-                    className="fz-12 text-ink w-full bg-transparent outline-none"
-                />
+                <input {...common} className="fz-12 text-ink w-full bg-transparent outline-none" />
             )}
         </label>
     );

@@ -2,6 +2,8 @@
 
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
+import { FormError } from '@/components/ui/FormError';
+import { useLockWhenLocked } from '@/features/auth/use-lock-when-locked';
 import { useLocale, useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
@@ -12,8 +14,8 @@ import { Field, Section, translationOf } from '@/features/region/components/AddC
 import { NameRows } from '@/features/region/components/NameRows';
 import { flagEmoji, resolveFlag } from '@/features/region/mock-geo';
 import { pickRoleName } from '@/features/role/components/RolePanel';
-import type { RoleCountry } from '@/features/role/schema';
-import { SHORT_NAME, type BusinessKind, type BusinessType } from '../schema';
+import { saveBusinessTypeAction, type BusinessTypeResult } from '../actions';
+import { SHORT_NAME, type BusinessCountry, type BusinessKind, type BusinessType } from '../schema';
 
 /** The blue frame on the panel's small 26×26 boxes (ⓘ / ⚙): its corner follows theirs (`rad-5`). */
 const BLUE = { '--hairline-radius': '0.3125rem', '--hairline-color': '#388cff' } as CSSProperties;
@@ -29,8 +31,8 @@ const flagFrame = (on: boolean) =>
  * and name, and the name in every language the project lists, filled in by
  * the AI pass from the English name (anything typed by hand stays).
  *
- * ⚠️ Design only: Save hands the result back to the list, which keeps it on
- * the screen until a reload. Nothing reaches a backend yet (see `api.ts`).
+ * Save writes it to RDB (`actions.ts`) and hands what RDB answered back to
+ * the list.
  * Mounted per type (keyed by the list), so its form starts from that type.
  */
 export function BusinessTypePanel({
@@ -43,7 +45,7 @@ export function BusinessTypePanel({
     /** Null = a new one, of `kind`. */
     type: BusinessType | null;
     kind: BusinessKind;
-    countries: RoleCountry[];
+    countries: BusinessCountry[];
     languages: NameLanguage[];
     onSaved: (type: BusinessType) => void;
 }) {
@@ -54,6 +56,9 @@ export function BusinessTypePanel({
     const [rows, setRows] = useState<NameRow[]>(() => nameRows(languages, type?.name));
     const [allCountries, setAllCountries] = useState(type?.all_countries ?? true);
     const [picked, setPicked] = useState<Set<string>>(() => new Set(type?.countries ?? []));
+    const [result, setResult] = useState<BusinessTypeResult>({});
+    const [busy, setBusy] = useState(false);
+    useLockWhenLocked(result);
 
     // ── The other languages, from the English name (the AI pass) ───────────
     // Fills empty rows as soon as the panel opens — a language added since this
@@ -72,15 +77,27 @@ export function BusinessTypePanel({
         !missingRequired(languages, rows) &&
         (allCountries || picked.size > 0);
 
-    function save() {
-        onSaved({
-            id: type?.id ?? `new-${Date.now()}`,
-            kind: type?.kind ?? kind,
-            short_name: shortName.trim().toUpperCase(),
-            name: nameForCreate(languages, rows),
-            all_countries: allCountries,
-            countries: allCountries ? [] : [...picked],
-        });
+    async function save() {
+        if (busy) return;
+        setBusy(true);
+        try {
+            const r = await saveBusinessTypeAction(
+                {
+                    kind: type?.kind ?? kind,
+                    key: type?.id,
+                    short_name: shortName.trim().toUpperCase(),
+                    name: nameForCreate(languages, rows),
+                    all_countries: allCountries,
+                    countries: allCountries ? [] : [...picked],
+                    updatedAt: type?.updatedAt,
+                },
+                result.commandId,
+            );
+            setResult(r);
+            if (r.type) onSaved(r.type);
+        } finally {
+            setBusy(false);
+        }
     }
 
     return (
@@ -219,10 +236,11 @@ export function BusinessTypePanel({
             </div>
 
             <div className="flex shrink-0 flex-col gap-8 pe-12 pt-12 pb-24">
+                <FormError message={result.error} attempt={result} />
                 <button
                     type="button"
-                    onClick={save}
-                    disabled={!canSave}
+                    onClick={() => void save()}
+                    disabled={!canSave || busy}
                     className="bg-primary fz-14 rad-12 flex h-50 w-full items-center justify-center font-medium text-white disabled:opacity-50"
                 >
                     ↳ {type ? t('save.edit') : t('save.add')}

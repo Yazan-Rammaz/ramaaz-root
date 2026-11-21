@@ -1,14 +1,9 @@
 import { z } from "zod";
 
 /*
- * A project's dashboard types — the System Dashboards Type screen (XD
- * "Center Dash" 54): Management, Partner, Business. Each has a logo (SVG),
- * a name in every language the project lists, the countries it is available
- * in, and the language its dashboards open in.
- *
- * ⚠️ There is no backend for this yet: the shape below is OUR PROPOSAL, kept
- * close to business types'. When the backend defines the routes, this schema
- * follows their contract and `api.ts` swaps the mock out.
+ * The dashboard type business units sign in to — the System Dashboards Type
+ * screen (XD "Center Dash" 54). There is one, Management, and it is fixed
+ * (`api.ts`): this is its shape on the screen.
  */
 
 export const dashboardTypeSchema = z.object({

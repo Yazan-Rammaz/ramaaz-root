@@ -81,3 +81,6 @@ AI_REASONING_EFFORT="low"
 AI_GATEWAY_TOKEN=""
 # OpenAI directly instead: leave the four above empty and set
 # AI_API_KEY=""
+
+# The Management console (the "Dashboard Link" on Login Info).
+MANAGEMENT_URL="https://canmgt.yazan-adnof.workers.dev"

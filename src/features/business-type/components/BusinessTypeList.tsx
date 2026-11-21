@@ -8,9 +8,8 @@ import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
 import type { NameLanguage } from '@/features/language/names';
 import { pickRoleName } from '@/features/role/components/RolePanel';
-import type { RoleCountry } from '@/features/role/schema';
 import { useAddAction } from '@/features/shell/add-action';
-import { BUSINESS_KINDS, type BusinessKind, type BusinessType } from '../schema';
+import { BUSINESS_KINDS, type BusinessCountry, type BusinessKind, type BusinessType } from '../schema';
 import { BusinessTypePanel } from './BusinessTypePanel';
 
 const BLUE = { '--hairline-radius': '0.75rem', '--hairline-color': '#388cff' } as CSSProperties;
@@ -29,8 +28,7 @@ const TAB_ICON: Record<BusinessKind, string> = {
  * the selected one framed blue — and the selected type's panel on the end
  * side. The navbar "+" starts a new type of the open tab (`?add=business-type`).
  *
- * ⚠️ Design only — the rows are mocked and a save stays on the screen until a
- * reload (`api.ts`).
+ * The rows are RDB's catalogs (`api.ts`); a save goes to RDB (`actions.ts`).
  */
 export function BusinessTypeList({
     items: initial,
@@ -38,7 +36,7 @@ export function BusinessTypeList({
     languages,
 }: {
     items: BusinessType[];
-    countries: RoleCountry[];
+    countries: BusinessCountry[];
     languages: NameLanguage[];
 }) {
     const t = useTranslations('businessType');

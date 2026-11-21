@@ -296,9 +296,12 @@ export function PasscodeLockGate({
                  * This is the one moment the blur is re-rasterised, and it is
                  * once per lock rather than once per keystroke.
                  */
-                initial={reduce ? false : { opacity: 0 }}
+                // Same starting frame on the server and in the browser — the server
+                // cannot know Reduced Motion, and choosing the start from it broke
+                // hydration. Reduced Motion gets the same frames in no time.
+                initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={iosEase}
+                transition={reduce ? { duration: 0 } : iosEase}
             />
 
             {/* The contents arrive a touch behind the glass and lift into
@@ -306,9 +309,9 @@ export function PasscodeLockGate({
             <motion.div
                 className="relative flex h-full w-full flex-col items-center"
                 variants={cardOpen}
-                initial={reduce ? 'animate' : 'initial'}
+                initial="initial"
                 animate="animate"
-                transition={iosSpring}
+                transition={reduce ? { duration: 0 } : iosSpring}
             >
                 {/*
           ⚠️ MEASURED GAPS, NOT `justify-center`. The stack was centred as a

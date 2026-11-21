@@ -10,6 +10,9 @@
   },
   "vars": {
     "NODE_ENV": "production",
+    // Where business admins sign in — the Management console. Shown as the
+    // "Dashboard Link" on a level's Login Info tab (XD work structure 5).
+    "MANAGEMENT_URL": "https://canmgt.yazan-adnof.workers.dev",
     // The backend base URL is a public hostname, not a credential — it is
     // already committed in .dev.vars.example — so it lives here rather than as
     // a secret. A `vars` entry would in any case shadow a secret of the same
