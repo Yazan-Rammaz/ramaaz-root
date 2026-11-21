@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -66,7 +66,6 @@ const IOS_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 const rem = (px: number) => `${px * 0.0625}rem`;
 
 export function SplashGate() {
-  const [filled, setFilled] = useState(false);
   // Starts "pending" — renders nothing — because the decision depends on
   // sessionStorage and Navigation Timing, neither of which exists on the
   // server. Deciding here rather than in the initial state keeps server and
@@ -77,7 +76,6 @@ export function SplashGate() {
   );
 
   useEffect(() => {
-    let fillRaf = 0;
     let toHide: ReturnType<typeof setTimeout>;
     let toGone: ReturnType<typeof setTimeout>;
 
@@ -94,8 +92,6 @@ export function SplashGate() {
       setSplashPlaying(true);
       setPhase("show");
 
-      // One more frame so the bar paints at 0% before transitioning to 100%.
-      fillRaf = requestAnimationFrame(() => setFilled(true));
       // Bar completes -> slide out -> unmount.
       toHide = setTimeout(() => setPhase("hide"), FILL_MS);
       toGone = setTimeout(() => {
@@ -106,7 +102,6 @@ export function SplashGate() {
 
     return () => {
       cancelAnimationFrame(decideRaf);
-      if (fillRaf) cancelAnimationFrame(fillRaf);
       clearTimeout(toHide);
       clearTimeout(toGone);
     };
@@ -148,13 +143,7 @@ export function SplashGate() {
             aria-label="Loading"
           >
             <div className="absolute inset-0 overflow-hidden rad-4">
-              <div
-                className="bg-primary absolute inset-y-0 start-0 transition-[width] ease-in-out"
-                style={{
-                  width: filled ? "100%" : "0%",
-                  transitionDuration: `${FILL_MS}ms`,
-                }}
-              />
+              <Fill />
             </div>
           </div>
 
@@ -177,4 +166,28 @@ export function SplashGate() {
       </div>
     </div>
   );
+}
+
+/**
+ * The bar's blue fill, 0 → 100% over `FILL_MS`.
+ *
+ * Driven by the Web Animations API, not a CSS transition. `globals.css` cuts
+ * every transition to 0.001ms under `prefers-reduced-motion`, which made the
+ * bar appear already full on a machine with Reduced Motion on. A progress
+ * bar filling in place is not the motion that setting exists to stop (nothing
+ * slides or zooms), and that rule does not reach a script-driven animation.
+ * Starting it on mount also means it always begins from 0%, however late the
+ * first frame paints.
+ */
+function Fill() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const animation = ref.current?.animate([{ width: "0%" }, { width: "100%" }], {
+      duration: FILL_MS,
+      easing: "ease-in-out",
+      fill: "forwards",
+    });
+    return () => animation?.cancel();
+  }, []);
+  return <div ref={ref} className="bg-primary absolute inset-y-0 start-0" style={{ width: "0%" }} />;
 }
