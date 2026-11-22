@@ -2,6 +2,7 @@
 
 import {
     useEffect,
+    useLayoutEffect,
     useRef,
     useState,
     useSyncExternalStore,
@@ -17,7 +18,7 @@ import {
     type HandoffFacing,
     type HandoffPhase,
 } from './useCameraHandoff';
-import { detectCameraTrouble, isHandheldDevice, type CameraTrouble } from './cameraShim';
+import { detectCameraTrouble, isHandheldDevice, requirePhoneCamera, type CameraTrouble } from './cameraShim';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -165,6 +166,26 @@ export function CameraHandoffPanel({
         void detectCameraTrouble().then(setTrouble);
     }, []);
 
+    /*
+      On a computer the phone IS the camera (decided 2026-11-22): the laptop's
+      camera is never opened, and the QR is offered at once instead of after a
+      failure. A layout effect, and the device read directly rather than through
+      `handheld` (whose first client render still carries the server's "true"):
+      it must be in place before any capture screen's own effect asks for a
+      camera in the same commit. On a phone this does nothing.
+    */
+    useLayoutEffect(() => {
+        if (isHandheldDevice()) return;
+        requirePhoneCamera(true);
+        return () => requirePhoneCamera(false);
+    }, []);
+    const autoStarted = useRef(false);
+    useEffect(() => {
+        if (handheld || autoStarted.current || phase !== 'idle') return;
+        autoStarted.current = true;
+        void start(facing);
+    }, [handheld, phase, start, facing]);
+
     /**
      * Mirror the check's guidance to the phone while the hand-off is live.
      *
@@ -270,8 +291,11 @@ export function CameraHandoffPanel({
     // corner they have no reason to look at. So in that case it says what it is.
     const stuck = trouble === 'no-camera' || trouble === 'denied';
 
-    const control =
-        phase === 'live'
+    // On a computer there is no other camera to switch to, and the QR opens by
+    // itself: no control. (A phone never reaches here while idle.)
+    const control = !handheld
+        ? null
+        : phase === 'live'
             ? {
                   icon: 'kyc/camera_desktop',
                   title: "Switch back to this computer's camera",

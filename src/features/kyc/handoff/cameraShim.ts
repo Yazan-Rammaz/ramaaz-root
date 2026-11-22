@@ -54,6 +54,21 @@ let relayStream: MediaStream | null = null;
 /** The resolution to ask cameras for, when the quality lift is on. */
 let qualityBoost: { width: number; height: number } | null = null;
 
+/**
+ * On a computer the camera is ALWAYS the phone's (decided 2026-11-22): the
+ * laptop's own camera is never opened. While this is on, a request for video
+ * waits until the hand-off delivers the phone's stream, and then gets that.
+ * Every capture screen — the ID scanner, the light check, AWS liveness — goes
+ * through `getUserMedia`, so this one switch covers them all.
+ */
+let phoneOnly = false;
+let waiting: ((stream: MediaStream) => void)[] = [];
+
+export function requirePhoneCamera(on: boolean): void {
+  phoneOnly = on;
+  apply();
+}
+
 /** Is a hand-off currently feeding this page's cameras? */
 export function isShimInstalled(): boolean {
     return relayStream !== null;
@@ -211,6 +226,10 @@ export function installCameraShim(stream: MediaStream): void {
     stream.getVideoTracks().forEach(describeRelayedTrack);
     relayStream = stream;
     apply();
+    // Whoever asked while the phone was not connected yet gets it now.
+    const asked = waiting;
+    waiting = [];
+    asked.forEach((resolve) => resolve(stream));
 }
 
 /**
@@ -233,7 +252,7 @@ function apply(): void {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
     const md = navigator.mediaDevices;
 
-    if (!relayStream && !qualityBoost) {
+    if (!relayStream && !qualityBoost && !phoneOnly) {
         if (original) {
             md.getUserMedia = original.gum;
             md.enumerateDevices = original.enumerate;
@@ -281,6 +300,11 @@ function apply(): void {
             // of a relayed stream is the phone's decision, made by
             // `PhoneCamera`'s own constraints at the other end of the link.
             return relayStream;
+        }
+
+        // A computer never opens its own camera: wait for the phone.
+        if (phoneOnly && constraints?.video) {
+            return new Promise<MediaStream>((resolve) => waiting.push(resolve));
         }
 
         // Quality lift only — a real camera, asked for more pixels.

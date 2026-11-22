@@ -1379,17 +1379,18 @@ export default function IDCaptureScreen() {
               blocked `startCamera()` can leave `pollState` at 'idle', which
               would have hidden the one control being recommended.
             */}
-            {(pollState !== 'idle' || Boolean(cameraError)) && (
-                <CameraHandoffPanel
-                    /* The frame's existing ref — it is the same element, and a
-                   second ref on it would be two names for one thing. */
-                    frameRef={viewfinderRef}
-                    facing="environment"
-                    onLive={() => {
-                        void startCamera();
-                    }}
-                />
-            )}
+            {/* Mounted from the start (2026-11-22): on a computer the phone is the
+                camera, so its QR opens before anything asks for one; on a phone the
+                panel renders nothing. */}
+            <CameraHandoffPanel
+                /* The frame's existing ref — it is the same element, and a
+               second ref on it would be two names for one thing. */
+                frameRef={viewfinderRef}
+                facing="environment"
+                onLive={() => {
+                    void startCamera();
+                }}
+            />
 
             {/* Tabs */}
             {isPassport ? (
