@@ -25,6 +25,25 @@ import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import { idConfig, kycConfig } from '@/features/kyc/config/kycConfig';
 import { FaceProgressBar } from '../FaceProgressBar';
 
+/** How long the card must be held on target before the shot is taken. */
+const HOLD_MS = 700;
+/** A lapse shorter than this (tremor, one missed detection) does not restart the hold. */
+const HOLD_GRACE_MS = 350;
+
+/** `on`, but staying true until it has been false for `graceMs`. */
+function useLatched(on: boolean, graceMs: number): boolean {
+    const [latched, setLatched] = useState(on);
+    useEffect(() => {
+        if (on) {
+            setLatched(true);
+            return;
+        }
+        const timer = setTimeout(() => setLatched(false), graceMs);
+        return () => clearTimeout(timer);
+    }, [on, graceMs]);
+    return latched;
+}
+
 type PollState = 'idle' | 'aligning' | 'capturing' | 'processing' | 'success' | 'done';
 
 /** Shoelace formula — signed area of an arbitrary quad from ScannerCorners. */
@@ -223,6 +242,13 @@ export default function IDCaptureScreen() {
       to hold still — and the one-second hold is measured after they land.
     */
     const isLockedOn = isCardDetected && isCardCloseEnough && isCardCentered;
+    // The countdown below reads these through a short grace: one frame of
+    // tremor (or a missed detection) no longer starts the hold from zero.
+    const holdingSteady = useLatched(isLockedOn && isStable, HOLD_GRACE_MS);
+    const isLockedOnRef = useRef(isLockedOn);
+    useEffect(() => {
+        isLockedOnRef.current = isLockedOn;
+    }, [isLockedOn]);
 
     /** Maps backend rejection codes/reasons to user-facing guidance. */
     function codeToHint(
@@ -948,12 +974,13 @@ export default function IDCaptureScreen() {
           or stability is lost, so drifting off-centre cancels the shot rather
           than firing a blurred one.
         */
-        if (isLockedOn && isStable) {
+        if (holdingSteady) {
             setStatusText('Hold steady...');
 
+            // Fires only if the brackets are still on the card at that moment.
             const autoCaptureTimer = setTimeout(() => {
-                captureActionRef.current();
-            }, 1000);
+                if (isLockedOnRef.current) captureActionRef.current();
+            }, HOLD_MS);
 
             return () => clearTimeout(autoCaptureTimer);
         }
@@ -962,11 +989,11 @@ export default function IDCaptureScreen() {
             // Something rectangular is in shot, but off to one side — almost
             // always furniture rather than the document being offered up.
             setStatusText('Hold your ID in the centre of the frame');
-        } else if (isLockedOn && !isStable) {
+        } else if (isLockedOn && !holdingSteady) {
             setStatusText('Hold still…');
         }
         // CRITICAL: handleCaptureClick is NOT in this array — the ref handles it
-    }, [isLockedOn, isCardDetected, isCardCentered, isActive, isVerifying, pollState, isStable]);
+    }, [isLockedOn, isCardDetected, isCardCentered, isActive, isVerifying, pollState, holdingSteady]);
 
     return (
         <div className="flex flex-col items-center justify-start h-full bg-white">

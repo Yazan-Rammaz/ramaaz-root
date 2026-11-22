@@ -224,6 +224,7 @@ export function useDocumentScanner(
     const [isReady, setIsReady] = useState(false);
     const [isDetecting, setIsDetecting] = useState(false);
     const [isStable, setIsStable] = useState(false);
+    const stableRef = useRef(false);
     const [corners, setCorners] = useState<ScannerCorners | null>(null);
     const [rawCorners, setRawCorners] = useState<ScannerCorners | null>(null);
     const [overlay, setOverlay] = useState<ScannerOverlay | null>(null);
@@ -269,6 +270,7 @@ export function useDocumentScanner(
                         setRawCorners(null);
                         setOverlay(null);
                         setIsStable(false);
+                        stableRef.current = false;
                         missesRef.current = 0; // تصفير عداد الأخطاء
                     }
                     return;
@@ -276,7 +278,15 @@ export function useDocumentScanner(
                 missesRef.current = 0;
                 const points = data.corners;
 
-                // Stability check: if corners moved less than 6 pixels from last frame, we are stable and focusing is done
+                /*
+                  Stability: how far the corners moved since the last frame,
+                  against the CARD'S OWN SIZE. A fixed 18 px on a 960 px frame
+                  was below a hand's natural tremor, so a person holding the card
+                  as still as people can was told "Hold still" for seconds. Now:
+                  still is under 5% of the card's width, and once still it stays
+                  so until a move of 9% (hysteresis), so tremor never flips it
+                  while a real move still does.
+                */
                 let stable = false;
                 if (rawCornersRef.current) {
                     const maxMove = Math.max(
@@ -285,8 +295,11 @@ export function useDocumentScanner(
                         distanceBetweenPoints(points[2], rawCornersRef.current[2]),
                         distanceBetweenPoints(points[3], rawCornersRef.current[3]),
                     );
-                    stable = maxMove < 18.0;
+                    const cardWidth = Math.max(distanceBetweenPoints(points[0], points[1]), distanceBetweenPoints(points[3], points[2]));
+                    const limit = Math.max(18, cardWidth * (stableRef.current ? 0.09 : 0.05));
+                    stable = maxMove < limit;
                 }
+                stableRef.current = stable;
                 setIsStable(stable);
 
                 const alpha = Math.max(0, Math.min(1, smoothingAlpha));
