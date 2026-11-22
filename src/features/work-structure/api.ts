@@ -21,6 +21,7 @@ import {
   nameMapSchema,
   policySchema,
   rdbSettingsSchema,
+  verificationSchema,
   timelineSchema,
   unitSchema,
   type Approval,
@@ -40,6 +41,7 @@ import {
   type LoginApproval,
   type StructureNode,
   type Unit,
+  type Verification,
 } from "./schema";
 import { getStartedFailed, pickName } from "./timeline";
 
@@ -286,6 +288,11 @@ async function readLoginApprovals(): Promise<LoginApproval[]> {
   );
   const byId = new Map(lists.flat().map((l) => [l.id, l] as const));
   return [...byId.values()].sort((x, y) => Date.parse(y.requested_at) - Date.parse(x.requested_at));
+}
+
+/** A member's passed face check and document — audited on every read; see verificationSchema. */
+export async function getMemberVerification(userId: string): Promise<Verification> {
+  return verificationSchema.parse(await backendFetch.get<unknown>(`/members/${enc(userId)}/verification`));
 }
 
 export async function getLoginApproval(id: string): Promise<LoginApproval> {

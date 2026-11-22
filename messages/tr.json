@@ -661,7 +661,8 @@
             },
             "contractTitle": "Yasal Olarak Bağlayıcı Sözleşme ve Şartlar",
             "iAgree": "Kabul Ediyorum",
-            "iDisagree": "Kabul Etmiyorum"
+            "iDisagree": "Kabul Etmiyorum",
+            "purged": "Saklama takvimi gereği silindi. Doğrulama geçti; gösterilecek bir şey saklanmıyor."
         },
         "admin": {
             "tabs": {

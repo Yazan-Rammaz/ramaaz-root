@@ -33,6 +33,10 @@ export async function photoToDataUrl(file: File, maxSide = 1024): Promise<string
 export const memberPhotoSrc = (userId: string, version = 0) =>
   `/api/work-image?member=${encodeURIComponent(userId)}${version ? `&v=${version}` : ""}`;
 
+/** One picture of a member's passed verification (the Files tab). */
+export const verificationSrc = (userId: string, image: "reference" | "capture" | "front" | "back") =>
+  `/api/work-image?verification=${encodeURIComponent(userId)}&image=${image}`;
+
 /** One picture of a first sign-in's evidence. */
 export const evidenceSrc = (approvalId: string, image: "reference" | "capture" | "front" | "back") =>
   `/api/work-image?approval=${encodeURIComponent(approvalId)}&image=${image}`;

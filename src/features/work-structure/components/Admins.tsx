@@ -14,6 +14,7 @@ import {
     decideLoginAction,
     getStartedAction,
     readSecretWordsAction,
+    readVerificationAction,
     saveMemberCountriesAction,
     type SecretWordsRead,
     setMemberPhotoAction,
@@ -22,8 +23,8 @@ import {
 } from '../actions';
 import { useLockWhenLocked } from '@/features/auth/use-lock-when-locked';
 import { flagEmoji, resolveFlag } from '@/features/region/mock-geo';
-import { evidenceSrc, memberPhotoSrc, photoToDataUrl } from '../photo';
-import type { AdminStage, BusinessAdmin, ContractTemplate, GrantRole, Level, LoginApproval, Policy, TimelineEvent } from '../schema';
+import { evidenceSrc, memberPhotoSrc, photoToDataUrl, verificationSrc } from '../photo';
+import type { AdminStage, BusinessAdmin, ContractTemplate, GrantRole, Level, LoginApproval, Policy, TimelineEvent, VerificationSummary } from '../schema';
 import { pickName } from '../timeline';
 import { useWorkWrite } from '../use-work-write';
 import { Choice, ChoiceBox, DashedInput, InfoField, OneOf, PanelTitle } from './parts';
@@ -787,22 +788,68 @@ export function AppointmentSheet({ admin, onDone, onClose }: { admin: BusinessAd
 
 /* ──────────────────────────── Review ──────────────────────────── */
 
+/**
+ * What the file pieces show, from either source: a first sign-in's
+ * `evidence` (the review sheet) or the member's passed verification (the
+ * Files tab). Each picture is a src through our own origin, or absent.
+ */
+type Evidence = {
+    reference?: string;
+    capture?: string;
+    /** The retention schedule removed it: the check passed, nothing is left to show. */
+    capturePurged?: boolean;
+    docType?: string;
+    front?: string;
+    back?: string;
+    extracted?: LoginApprovalExtracted | null;
+    documentPurged?: boolean;
+};
+type LoginApprovalExtracted = NonNullable<NonNullable<NonNullable<LoginApproval['evidence']>['document']>['extracted']>;
+
+function evidenceOfLogin(login: LoginApproval | undefined, admin: BusinessAdmin): Evidence {
+    const ev = login?.evidence;
+    return {
+        reference: login && ev?.reference_photo_url ? evidenceSrc(login.id, 'reference') : admin.hasPhoto ? memberPhotoSrc(admin.id) : undefined,
+        capture: login && ev?.face_capture_url ? evidenceSrc(login.id, 'capture') : undefined,
+        docType: ev?.document?.type,
+        front: login && ev?.document?.front_image_url ? evidenceSrc(login.id, 'front') : undefined,
+        back: login && ev?.document?.back_image_url ? evidenceSrc(login.id, 'back') : undefined,
+        extracted: ev?.document?.extracted,
+    };
+}
+
+function evidenceOfVerification(v: VerificationSummary | null, admin: BusinessAdmin): Evidence {
+    return {
+        reference: v?.reference ? verificationSrc(admin.id, 'reference') : admin.hasPhoto ? memberPhotoSrc(admin.id) : undefined,
+        capture: v?.capture?.has ? verificationSrc(admin.id, 'capture') : undefined,
+        capturePurged: !!v?.capture?.purged,
+        docType: v?.document?.type,
+        front: v?.document?.front ? verificationSrc(admin.id, 'front') : undefined,
+        back: v?.document?.back ? verificationSrc(admin.id, 'back') : undefined,
+        extracted: v?.document?.extracted,
+        documentPurged: !!v?.document?.purged,
+    };
+}
+
 /** The document's images, 192 × 109 each (XD work structure 20): an ID's two sides, a passport's one page. */
-function IdImages({ login }: { login?: LoginApproval }) {
-    const doc = login?.evidence?.document;
-    const sides = doc?.type === 'PASSPORT' ? (['front'] as const) : (['front', 'back'] as const);
+function IdImages({ ev }: { ev: Evidence }) {
+    const t = useTranslations('work.kyc');
+    const sides = ev.docType === 'PASSPORT' ? (['front'] as const) : (['front', 'back'] as const);
     return (
-        <div className="flex justify-between gap-6">
-            {sides.map((side) => (
-                <span key={side} className="grid h-109 w-192 shrink-0 place-items-center overflow-hidden rad-12 bg-surface">
-                    {login && doc?.[`${side}_image_url`] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={evidenceSrc(login.id, side)} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                        <Icon name="work/id-card" size={26} />
-                    )}
-                </span>
-            ))}
+        <div className="flex flex-col gap-4">
+            <div className="flex justify-between gap-6">
+                {sides.map((side) => (
+                    <span key={side} className="grid h-109 w-192 shrink-0 place-items-center overflow-hidden rad-12 bg-surface">
+                        {ev[side] ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={ev[side]} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                            <Icon name="work/id-card" size={26} />
+                        )}
+                    </span>
+                ))}
+            </div>
+            {ev.documentPurged && <span className="fz-10 text-muted text-center">{t('purged')}</span>}
         </div>
     );
 }
@@ -811,14 +858,13 @@ const DOC_TYPES = ['NATIONAL_ID', 'PASSPORT', 'DRIVING_LICENSE'] as const;
 const isDocType = (v: string): v is (typeof DOC_TYPES)[number] => (DOC_TYPES as readonly string[]).includes(v);
 
 /** What was read off the identity document (frames 27, 37). */
-export function KycFields({ login, birthday }: { login?: LoginApproval; birthday?: boolean }) {
+function KycFields({ ev, birthday }: { ev: Evidence; birthday?: boolean }) {
     const t = useTranslations('work.kyc');
-    const doc = login?.evidence?.document;
-    const k = doc?.extracted;
-    if (!doc || !k) return null;
+    const k = ev.extracted;
+    if (!k) return null;
     return (
         <div className="flex flex-col gap-4">
-            {doc.type && <InfoField label={t('idType')} value={isDocType(doc.type) ? t(`docType.${doc.type}`) : doc.type} />}
+            {ev.docType && <InfoField label={t('idType')} value={isDocType(ev.docType) ? t(`docType.${ev.docType}`) : ev.docType} />}
             {k.country && <InfoField label={t('country')} value={k.country} />}
             {k.full_name && <InfoField label={t('name')} value={k.full_name} />}
             {k.national_number && <InfoField label={t('nationalNumber')} value={k.national_number} />}
@@ -827,28 +873,25 @@ export function KycFields({ login, birthday }: { login?: LoginApproval; birthday
     );
 }
 
-/** The reference photograph beside this sign-in's face capture. */
-function Faces({ login, admin, size }: { login?: LoginApproval; admin: BusinessAdmin; size: number }) {
+/** The reference photograph beside the face capture. */
+function Faces({ ev, size }: { ev: Evidence; size: number }) {
     const t = useTranslations('work.kyc');
-    const reference = login?.evidence?.reference_photo_url
-        ? evidenceSrc(login.id, 'reference')
-        : admin.hasPhoto
-          ? memberPhotoSrc(admin.id)
-          : undefined;
-    const capture = login?.evidence?.face_capture_url ? evidenceSrc(login.id, 'capture') : undefined;
     return (
-        <div className="flex justify-between gap-6">
-            {(
-                [
-                    ['entered', reference],
-                    ['detected', capture],
-                ] as const
-            ).map(([k, src]) => (
-                <div key={k} className="flex flex-col items-center gap-4">
-                    <AdminPhoto src={src} size={size} className="rad-20" />
-                    <span className="fz-10 text-ink">{t(k)}</span>
-                </div>
-            ))}
+        <div className="flex flex-col gap-4">
+            <div className="flex justify-between gap-6">
+                {(
+                    [
+                        ['entered', ev.reference],
+                        ['detected', ev.capture],
+                    ] as const
+                ).map(([k, src]) => (
+                    <div key={k} className="flex flex-col items-center gap-4">
+                        <AdminPhoto src={src} size={size} className="rad-20" />
+                        <span className="fz-10 text-ink">{t(k)}</span>
+                    </div>
+                ))}
+            </div>
+            {ev.capturePurged && <span className="fz-10 text-muted text-center">{t('purged')}</span>}
         </div>
     );
 }
@@ -879,8 +922,8 @@ export function ReviewSheet({ admin, onDone, onClose }: { admin: BusinessAdmin; 
             <AdminRow admin={admin} />
             <div className="thin-scroll flex flex-1 flex-col gap-6 overflow-y-auto">
                 <AdminPhoto src={face} size={240} className="mx-auto rad-24" />
-                <IdImages login={login} />
-                <KycFields login={login} />
+                <IdImages ev={evidenceOfLogin(login, admin)} />
+                <KycFields ev={evidenceOfLogin(login, admin)} />
                 <ContractTerms contract={admin.contract} />
             </div>
             <FormError message={write.result.error} attempt={write.result} />
@@ -1194,17 +1237,33 @@ function ContractTerms({ contract }: { contract?: BusinessAdmin['contract'] }) {
     );
 }
 
-/** Their files (frame 20): both faces, the document, what was read off it, and the verifier's mark with the day. */
+/**
+ * Their files (frame 20): both faces, the document, what was read off it, and
+ * the verifier's mark with the day — from the member's passed verification
+ * (`GET …/members/{id}/verification`), read when the tab opens because every
+ * read is audited. A sign-in waiting for review is the review sheet's.
+ */
 export function AdminFiles({ admin }: { admin: BusinessAdmin }) {
     const t = useTranslations('work.kyc');
-    const login = admin.loginApproval;
-    const day = dayOf(login?.decided_at ?? login?.requested_at);
+    const [read, setRead] = useState<{ data?: VerificationSummary; locked?: true; error?: string } | null>(null);
+    useLockWhenLocked(read ?? {});
+    useEffect(() => {
+        let live = true;
+        void readVerificationAction(admin.id).then((r) => live && setRead(r));
+        return () => {
+            live = false;
+        };
+    }, [admin.id]);
+    const v = read?.data ?? null;
+    const ev = evidenceOfVerification(v, admin);
+    const day = dayOf(v?.capture?.at ?? v?.document?.submittedAt);
     return (
         <div className="flex flex-col gap-6">
-            <Faces login={login} admin={admin} size={199} />
-            <IdImages login={login} />
-            <KycFields login={login} birthday />
-            {login && (
+            <Faces ev={ev} size={199} />
+            <IdImages ev={ev} />
+            <KycFields ev={ev} birthday />
+            <FormError message={read?.error} attempt={read ?? undefined} />
+            {day && (
                 <div className="flex h-36 items-center justify-between rad-12 bg-surface px-12 fz-10 text-ink">
                     <span>
                         <span className="font-bold">{t('brandStrong')}</span>

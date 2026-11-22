@@ -179,6 +179,50 @@ export const loginApprovalSchema = z
   .loose();
 export type LoginApproval = z.infer<typeof loginApprovalSchema>;
 
+/**
+ * A member's verification (`GET …/members/{id}/verification`, 2026-11-22
+ * answers): the newest face check and document that PASSED, from any sign-in.
+ * Every read is audited, so it is read only when the Files tab opens. A URL
+ * may be "" (nothing resolvable now); `purged`: removed under retention.
+ */
+export const verificationSchema = z
+  .object({
+    reference_photo_url: z.string().nullable().optional(),
+    face_capture: z
+      .object({ image_url: z.string().nullable().optional(), captured_at: z.string().nullable().optional(), purged: z.boolean().optional() })
+      .loose()
+      .nullable()
+      .optional(),
+    document: z
+      .object({
+        type: z.string().optional(),
+        front_image_url: z.string().nullable().optional(),
+        back_image_url: z.string().nullable().optional(),
+        extracted: extractedSchema.nullable().optional(),
+        submitted_at: z.string().nullable().optional(),
+        purged: z.boolean().optional(),
+      })
+      .loose()
+      .nullable()
+      .optional(),
+  })
+  .loose();
+export type Verification = z.infer<typeof verificationSchema>;
+
+/** What the Files tab is told: which pictures exist, never their URLs. */
+export type VerificationSummary = {
+  reference: boolean;
+  capture: { has: boolean; at?: string | null; purged: boolean } | null;
+  document: {
+    type?: string;
+    front: boolean;
+    back: boolean;
+    extracted?: z.infer<typeof extractedSchema> | null;
+    submittedAt?: string | null;
+    purged: boolean;
+  } | null;
+};
+
 /** The pictures a login approval carries, by the name the image route takes. */
 export const EVIDENCE_IMAGES = ["reference", "capture", "front", "back"] as const;
 export type EvidenceImage = (typeof EVIDENCE_IMAGES)[number];

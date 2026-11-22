@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getTranslations } from "next-intl/server";
 import { backendFetch } from "@/lib/api/backend";
 import { commandOrRetry, oneParam } from "@/lib/api/operations";
+import { getMemberVerification } from "./api";
 import { ApiError, SessionLockedError } from "@/lib/api/server";
 import { apiErrorSchema } from "@/lib/auth/endpoints";
 import { correlationId, errorCode, retryAfterSeconds } from "@/lib/auth/errors";
@@ -21,6 +22,7 @@ import {
   type NewMember,
   type PolicyInput,
   type SettingsInput,
+  type VerificationSummary,
 } from "./schema";
 
 /*
@@ -439,5 +441,40 @@ export async function saveLevelRolesAction(level: Level, all: boolean, roles: st
     return { ok: true };
   } catch (error) {
     return failure(error, "PUT level-roles");
+  }
+}
+
+/**
+ * Which verification pictures a member has, and what was read off their
+ * document (`GET …/members/{id}/verification`) — for the Files tab, read when
+ * it opens (every read is audited). The URLs stay on the server: the images
+ * come through `/api/work-image?verification=…`.
+ */
+export async function readVerificationAction(userId: string): Promise<{ data?: VerificationSummary; locked?: true; error?: string }> {
+  const id = idSchema.safeParse(userId);
+  if (!id.success) return { error: (await getTranslations("work.errors"))("invalid") };
+  try {
+    const v = await getMemberVerification(id.data);
+    return {
+      data: {
+        reference: !!v.reference_photo_url,
+        capture: v.face_capture
+          ? { has: !!v.face_capture.image_url, at: v.face_capture.captured_at, purged: !!v.face_capture.purged }
+          : null,
+        document: v.document
+          ? {
+              type: v.document.type,
+              front: !!v.document.front_image_url,
+              back: !!v.document.back_image_url,
+              extracted: v.document.extracted,
+              submittedAt: v.document.submitted_at,
+              purged: !!v.document.purged,
+            }
+          : null,
+      },
+    };
+  } catch (error) {
+    const f = await failure(error, "GET verification");
+    return { locked: f.locked, error: f.error };
   }
 }

@@ -661,7 +661,8 @@
       },
       "contractTitle": "Legally Binding Contract And Terms",
       "iAgree": "I Agree",
-      "iDisagree": "I Disagree"
+      "iDisagree": "I Disagree",
+      "purged": "Removed under the retention schedule. The check passed; nothing is kept to show."
     },
     "admin": {
       "tabs": {
