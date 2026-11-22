@@ -672,8 +672,14 @@ export default function IDCaptureScreen() {
         [getDetectedDocumentLabel, goTo, markCompleted, setIdDocument, stopCamera],
     );
 
+    // Pressed "Start Live Detection Your ID": the computer may open the phone's QR.
+    const [handoffArmed, setHandoffArmed] = useState(false);
     const handleCaptureClick = useCallback(async () => {
         if (!isActive) {
+            // On a computer the camera IS the phone: open its QR now, BEFORE asking
+            // for a camera — startCamera() waits for the phone's stream, so arming
+            // the QR after it would leave each waiting for the other (2026-11-23).
+            setHandoffArmed(true);
             await startCamera();
             setPollState('aligning');
             setStatusText('Align ID within frame...');
@@ -1379,14 +1385,16 @@ export default function IDCaptureScreen() {
               blocked `startCamera()` can leave `pollState` at 'idle', which
               would have hidden the one control being recommended.
             */}
-            {/* Mounted from the start (2026-11-22): on a computer the phone is the
-                camera, so its QR opens before anything asks for one; on a phone the
+            {/* Mounted from the start, but on a computer its QR opens only once
+                "Start Live Detection Your ID" is pressed (2026-11-23); on a phone the
                 panel renders nothing. */}
             <CameraHandoffPanel
                 /* The frame's existing ref — it is the same element, and a
                second ref on it would be two names for one thing. */
                 frameRef={viewfinderRef}
                 facing="environment"
+                // The QR waits for "Start Live Detection Your ID" (2026-11-23).
+                armed={handoffArmed}
                 onLive={() => {
                     void startCamera();
                 }}

@@ -243,6 +243,8 @@ export function useDocumentScanner(
             missesRef.current = 0;
         }
     }, [enabled]);
+    // The shrink applied to the frame last sent to the worker (see processResult).
+    const processScaleRef = useRef(1);
     useEffect(() => {
         if (typeof window === 'undefined') return;
         const worker = new Worker(new URL('../workers/documentScanner.worker.ts', import.meta.url));
@@ -276,7 +278,16 @@ export function useDocumentScanner(
                     return;
                 }
                 missesRef.current = 0;
-                const points = data.corners;
+                /*
+                  The worker sees the frame shrunk to maxProcessingWidth and answers in
+                  THAT size; everything here (the overlay, stability, the capture
+                  crop) works in the video's own pixels. Scale back up. A laptop
+                  camera at or under 960 px never showed the gap; the phone's
+                  picture over the hand-off is wider, and its box landed small in
+                  the top-left, so "centre" never passed (2026-11-23).
+                */
+                const k = processScaleRef.current || 1;
+                const points = data.corners.map((p) => ({ x: p.x / k, y: p.y / k })) as typeof data.corners;
 
                 /*
                   Stability: how far the corners moved since the last frame,
@@ -365,6 +376,7 @@ export function useDocumentScanner(
             if (++localFrameCounter % processEveryNFrames !== 0 || isProcessingRef.current) return;
 
             const scale = Math.min(1, maxProcessingWidth / video.videoWidth);
+            processScaleRef.current = scale;
             const processWidth = Math.max(1, Math.round(video.videoWidth * scale));
             const processHeight = Math.max(1, Math.round(video.videoHeight * scale));
 

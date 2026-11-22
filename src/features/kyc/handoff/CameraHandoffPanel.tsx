@@ -69,6 +69,7 @@ export function CameraHandoffPanel({
     frameRef,
     style,
     cameraLive = true,
+    armed = true,
 }: {
     /**
      * The hand-off's own phase, reported upward.
@@ -102,6 +103,13 @@ export function CameraHandoffPanel({
      * Defaults to true so a host that does not care never freezes the phone.
      */
     cameraLive?: boolean;
+    /**
+     * Whether the computer may open the QR yet. A screen with its own start
+     * button (the ID step's "Start Live Detection Your ID") passes false until
+     * it is pressed, so the QR appears only then. Defaults to true: the face
+     * step has no start button and opens it on arrival.
+     */
+    armed?: boolean;
     /**
      * The camera frame this hand-off belongs to.
      *
@@ -188,9 +196,9 @@ export function CameraHandoffPanel({
     // start that fails stays on 'failed', with its own button, so this cannot
     // loop.
     useEffect(() => {
-        if (handheld || phase !== 'idle') return;
+        if (handheld || !armed || phase !== 'idle') return;
         void start(facing);
-    }, [handheld, phase, start, facing]);
+    }, [handheld, armed, phase, start, facing]);
 
     /**
      * Mirror the check's guidance to the phone while the hand-off is live.
