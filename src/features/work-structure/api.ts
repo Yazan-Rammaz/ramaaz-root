@@ -272,6 +272,22 @@ async function memberExtras(id: string) {
 }
 
 /** One first-sign-in approval with its evidence (the list carries none). */
+/**
+ * First sign-ins, pending AND approved, newest first. Without a `status` the
+ * list now answers only PENDING, so an approved person's sign-in — the one
+ * their captured face and documents hang on — fell off it and their Files
+ * went empty. Asked for both, merged by id.
+ */
+async function readLoginApprovals(): Promise<LoginApproval[]> {
+  const lists = await Promise.all(
+    ["PENDING", "APPROVED"].map((status) =>
+      backendFetch.get<unknown>(`/login-approvals?status=${status}`).then((raw) => list(loginApprovalSchema).parse(raw).data),
+    ),
+  );
+  const byId = new Map(lists.flat().map((l) => [l.id, l] as const));
+  return [...byId.values()].sort((x, y) => Date.parse(y.requested_at) - Date.parse(x.requested_at));
+}
+
 export async function getLoginApproval(id: string): Promise<LoginApproval> {
   return loginApprovalSchema.parse(await backendFetch.get<unknown>(`/login-approvals/${enc(id)}`));
 }
@@ -306,7 +322,7 @@ export async function loadLevel(level: Level, units: Unit[]): Promise<LevelPanel
     level === null
       ? safe(backendFetch.get<unknown>("/approvals").then((raw) => list(approvalSchema).parse(raw).data), "approvals")
       : Promise.resolve([] as Approval[]),
-    safe(backendFetch.get<unknown>("/login-approvals").then((raw) => list(loginApprovalSchema).parse(raw).data), "login approvals"),
+    safe(readLoginApprovals(), "login approvals"),
     safe(listRoles(), "roles"),
     safe(
       backendFetch
