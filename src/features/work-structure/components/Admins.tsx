@@ -915,7 +915,8 @@ export function ReviewSheet({ admin, onDone, onClose }: { admin: BusinessAdmin; 
                     type="button"
                     disabled={write.busy}
                     onClick={() => void approve()}
-                    className="h-36 w-full shrink-0 rad-12 fz-12 text-primary disabled:opacity-60"
+                    // 406 × 50, radius 12; "Approve" 14 regular #388CFF (XD).
+                    className="mx-auto h-50 w-406 max-w-full shrink-0 rad-12 fz-14 font-normal text-[#388CFF] disabled:opacity-60"
                     style={DASHED}
                 >
                     {t('approve')}
