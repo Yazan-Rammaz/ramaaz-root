@@ -8,7 +8,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { pickName } from '@/lib/i18n/localized';
 import { cn } from '@/lib/utils/cn';
-import { useAddAction } from '@/features/shell/add-action';
+import { closeAddUrl, useAddAction } from '@/features/shell/add-action';
 import type { LanguageAccess } from '../api';
 import type { Coverage, Language } from '../schema';
 import { AddLanguageDrawer, EditLanguageDrawer } from './LanguageDrawer';
@@ -90,7 +90,7 @@ export function LanguageList({
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                if (adding) router.replace('/languages');
+                                                if (adding) closeAddUrl('/languages');
                                                 setSelected(item.code);
                                             }}
                                             aria-pressed={selected === item.code}
@@ -114,7 +114,7 @@ export function LanguageList({
                     <AddLanguageDrawer
                         key="add"
                         onAdded={() => {
-                            router.replace('/languages');
+                            closeAddUrl('/languages');
                             reload();
                         }}
                     />

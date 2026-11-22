@@ -65,3 +65,20 @@ export function AddActionProvider({ children }: { children: ReactNode }) {
 }
 
 export const useAddAction = () => useContext(AddActionContext);
+
+/**
+ * Opens / closes a page's add drawer (`?add=…`) in the browser alone. The
+ * App Router keeps `useSearchParams` in step with the History API, so the
+ * drawer reads the new param at once and slides in — no server round trip,
+ * which is what made the "+" feel slow (a Link re-rendered the whole page on
+ * the server first). Use it only when the drawer needs nothing new from the
+ * server; anything it reads is already on the page.
+ */
+export function openAddUrl(href: string) {
+  window.history.pushState(null, "", href);
+}
+
+/** Closes the drawer the same way: back to the bare path, nothing re-read. */
+export function closeAddUrl(path: string) {
+  window.history.replaceState(null, "", path);
+}

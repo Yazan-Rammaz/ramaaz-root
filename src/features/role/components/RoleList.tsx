@@ -10,7 +10,7 @@ import { DashedFrame } from "@/components/ui/DashedFrame";
 import { FormError } from "@/components/ui/FormError";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
-import { useAddAction } from "@/features/shell/add-action";
+import { closeAddUrl, useAddAction } from "@/features/shell/add-action";
 import { reorderRolesAction } from "../actions";
 import {
   permissionChip,
@@ -70,15 +70,12 @@ export function RoleList({
 
   const [roles, setRoles] = useState(initial);
   const [order, setOrder] = useState(() => initial.map((r) => r.id));
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initial[0]?.id ?? null,
-  );
+  // Nothing open until a row (or the "+") is pressed.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmSort, setConfirmSort] = useState(false);
   // The sub-tab is client state, as on Regions; only "add" is in the URL.
   const [tab, setTab] = useState<Tab>("roles");
-  const [selectedKey, setSelectedKey] = useState<string | null>(
-    catalog[0]?.key ?? null,
-  );
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   // A newer list from the server wins (React's pattern for resetting state on a prop change).
   const [seed, setSeed] = useState(initial);
   if (seed !== initial) {
@@ -86,12 +83,12 @@ export function RoleList({
     setRoles(initial);
     setOrder(initial.map((r) => r.id));
     setConfirmSort(false);
-    if (!initial.some((r) => r.id === selectedId))
-      setSelectedId(initial[0]?.id ?? null);
+    if (selectedId && !initial.some((r) => r.id === selectedId))
+      setSelectedId(null);
   }
 
   const adding = params.get("add") === "role";
-  const closeAdd = () => router.replace("/roles");
+  const closeAdd = () => closeAddUrl("/roles");
   const selected = adding
     ? null
     : (roles.find((r) => r.id === selectedId) ?? null);
@@ -126,7 +123,6 @@ export function RoleList({
           : setSelectedId(null),
     );
     return () => setOnClose(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- closeAdd is a fresh closure over the stable router
   }, [panelOpen, adding, tab, setOnClose]);
 
   function switchTab(next: Tab) {

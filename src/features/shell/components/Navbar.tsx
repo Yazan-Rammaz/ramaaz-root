@@ -1,7 +1,6 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
@@ -9,7 +8,7 @@ import { cn } from "@/lib/utils/cn";
 import { DashedFrame } from "@/components/ui/DashedFrame";
 import { Reveal, RevealItem } from "@/components/motion/Reveal";
 import { requestLock } from "@/features/auth/lock-flag";
-import { useAddAction } from "../add-action";
+import { closeAddUrl, openAddUrl, useAddAction } from "../add-action";
 import { NAV_ITEMS } from "../nav-items";
 import { NavBox } from "./NavBox";
 
@@ -74,7 +73,7 @@ export function Navbar({ systemSelected }: { systemSelected: boolean }) {
   const hidden = hiddenAt === pathname;
   // A client-state sheet (e.g. the country detail drawer) registers `onClose`
   // while it's open — the trailing "+" becomes an X for it too, same as the
-  // URL-param add drawers (rendered as its own branch below, so the Link
+  // URL-param add drawers (rendered as its own branch below, so the button
   // branch only ever sees onClose null or drawerOpen true — i.e. `drawerOpen`
   // alone already tells that branch whether it's showing "close" or "add").
   const addHref = drawerOpen ? pathname : onClose ? null : addOpenHref;
@@ -212,8 +211,9 @@ export function Navbar({ systemSelected }: { systemSelected: boolean }) {
                   <Icon name="regions/close-x" size={26} mask />
                 </button>
               ) : hideAdd ? null : addHref ? (
-                <Link
-                  href={addHref}
+                <button
+                  type="button"
+                  onClick={() => (drawerOpen ? closeAddUrl(pathname) : openAddUrl(addHref))}
                   aria-label={drawerOpen ? t("nav.close") : t("nav.add")}
                   className="relative flex h-50 w-50 shrink-0 items-center justify-center rad-12 bg-surface"
                 >
@@ -225,7 +225,7 @@ export function Navbar({ systemSelected }: { systemSelected: boolean }) {
                       <Icon name="nav/add" size={26} mask />
                     </>
                   )}
-                </Link>
+                </button>
               ) : (
                 <button
                   type="button"

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
-import { useAddAction } from "@/features/shell/add-action";
+import { closeAddUrl, useAddAction } from "@/features/shell/add-action";
 import type { NameLanguage } from "@/features/language/names";
 import type { Coded } from "../mock-ai";
 import type { Division } from "../schema";
@@ -97,7 +97,7 @@ export function RegionList({
   } | null>(null);
 
   const drawerOpen = params.get("add") != null;
-  const closeDrawer = () => router.replace("/regions");
+  const closeDrawer = () => closeAddUrl("/regions");
   const selectedPath = selectedId ? findPathById(countries, selectedId) : null;
   const openDetail = (id: string) => {
     setSelectedId(id);
