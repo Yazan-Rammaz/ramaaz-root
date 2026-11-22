@@ -31,7 +31,9 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             */}
             <div className="absolute top-30 start-30 z-10">
                 <Icon name="auth/rdb" width={72} height={52} alt="Ramaaz Digital Banking" />
-                <p className="text-[#388CFF] text-center mt-4 font-medium">Root</p>
+                {/* On a phone the KYC titles span the width and start right here, so the
+                    word would sit on top of them: the mark alone there (the word stays for screen readers). */}
+                <p className="text-[#388CFF] text-center mt-4 font-medium phone:sr-only">Root</p>
             </div>
 
             {children}
