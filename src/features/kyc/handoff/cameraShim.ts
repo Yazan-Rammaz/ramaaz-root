@@ -116,9 +116,14 @@ function describeRelayedTrack(track: MediaStreamTrack): void {
         configurable: true,
         value: (): MediaTrackSettings => ({
             ...real,
-            frameRate: real.frameRate ?? 30,
-            width: real.width ?? 1280,
-            height: real.height ?? 720,
+            // Under 15, not just absent: a remote track reports 0 until its
+            // first frames arrive, and the hand-off now answers a waiting
+            // request the instant the phone connects — exactly then. 0 is not
+            // nullish, so `?? 30` kept it, and AWS refused every attempt.
+            // The phone captures at 30 (PhoneCamera asks for it, min 15).
+            frameRate: (real.frameRate ?? 0) >= 15 ? real.frameRate : 30,
+            width: real.width || 1280,
+            height: real.height || 720,
             deviceId: real.deviceId || HANDOFF_DEVICE_ID,
             groupId: real.groupId || HANDOFF_GROUP_ID,
         }),
@@ -131,8 +136,8 @@ function describeRelayedTrack(track: MediaStreamTrack): void {
         configurable: true,
         value: (): MediaTrackCapabilities => ({
             frameRate: { min: 15, max: 30 },
-            width: { min: 320, max: real.width ?? 1280 },
-            height: { min: 240, max: real.height ?? 720 },
+            width: { min: 320, max: real.width || 1280 },
+            height: { min: 240, max: real.height || 720 },
             deviceId: HANDOFF_DEVICE_ID,
             groupId: HANDOFF_GROUP_ID,
         }),
