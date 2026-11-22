@@ -113,6 +113,14 @@ export const AUTH_PATHS = {
   link: "/v1/auth/link",
 
   /**
+   * ✅ Read the step the attempt is at, again (§2.1): `{ challenge_token }` →
+   * the step as answered when reached, with a FRESH `face_capture_url` (a
+   * presigned link that expires in minutes), same token. Enters nothing,
+   * charges nothing, extends nothing. An ended attempt is 401 CHALLENGE_INVALID.
+   */
+  current: "/v1/auth/current",
+
+  /**
    * ✅ Step 2. The code the administrator PULLS over WhatsApp by messaging the
    * trigger phrase from their registered handset — there is no endpoint that
    * sends it, and deliberately is not one: a code the console could request on

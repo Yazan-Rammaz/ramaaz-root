@@ -1,5 +1,8 @@
+import { z } from "zod";
+import { api } from "@/lib/api/server";
+import { AUTH_PATHS } from "@/lib/auth/endpoints";
 import { proxyImage } from "@/lib/api/proxy-image";
-import { readChallenge } from "@/lib/auth/challenge";
+import { readChallenge, writeChallenge } from "@/lib/auth/challenge";
 
 /**
  * The face captured earlier in THIS sign-in, served from our own origin.
@@ -23,12 +26,34 @@ import { readChallenge } from "@/lib/auth/challenge";
  * Taking no input at all makes that impossible rather than merely guarded
  * against: the only image this can ever return is the one belonging to the
  * sign-in whose cookie the caller already holds.
+ *
+ * ── An expired link is fetched again ────────────────────────────────────────
+ * The URL is presigned and lives minutes (§2.5). After a few reloads on the ID
+ * step it had died, the face could not be loaded, and the comparison told the
+ * person to start the whole sign-in over. On a miss this asks the backend for
+ * the step again (`/auth/current`: enters nothing, charges nothing), which
+ * mints a fresh link, keeps it in the cookie, and tries once more.
  */
 
 // A per-request read of an httpOnly cookie — never prerendered, never cached.
 export const dynamic = "force-dynamic";
 
+const currentSchema = z.object({ face_capture_url: z.string().nullable().optional() }).loose();
+
 export async function GET() {
-  const { faceCaptureUrl } = await readChallenge();
-  return proxyImage(faceCaptureUrl, "face-capture");
+  const challenge = await readChallenge();
+  const first = await proxyImage(challenge.faceCaptureUrl, "face-capture");
+  if (first.ok || !challenge.challengeToken) return first;
+
+  try {
+    const step = currentSchema.parse(
+      await api.post<unknown>(AUTH_PATHS.current, { challenge_token: challenge.challengeToken }),
+    );
+    if (!step.face_capture_url || step.face_capture_url === challenge.faceCaptureUrl) return first;
+    await writeChallenge({ ...challenge, faceCaptureUrl: step.face_capture_url });
+    return proxyImage(step.face_capture_url, "face-capture");
+  } catch (error) {
+    console.warn("[face-capture] could not refresh the link:", error instanceof Error ? error.message : error);
+    return first;
+  }
 }
