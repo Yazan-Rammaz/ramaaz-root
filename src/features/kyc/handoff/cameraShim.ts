@@ -116,7 +116,13 @@ export function endRelayedTrack(track: MediaStreamTrack): void {
     (realStops.get(track) ?? (() => track.stop()))();
 }
 
-function describeRelayedTrack(track: MediaStreamTrack): void {
+/**
+ * `size`: the frame the track REALLY carries, when we know it better than the
+ * track does (the redrawn canvas). AWS sizes the picture it judges from these
+ * numbers: a portrait phone picture described as 1280×720 was stretched
+ * sideways, the face looked wide and close, and AWS said "move back" for ever.
+ */
+function describeRelayedTrack(track: MediaStreamTrack, size?: () => { width: number; height: number }): void {
     const real = track.getSettings();
 
     /*
@@ -144,8 +150,8 @@ function describeRelayedTrack(track: MediaStreamTrack): void {
             // nullish, so `?? 30` kept it, and AWS refused every attempt.
             // The phone captures at 30 (PhoneCamera asks for it, min 15).
             frameRate: (real.frameRate ?? 0) >= 15 ? real.frameRate : 30,
-            width: real.width || 1280,
-            height: real.height || 720,
+            width: size?.().width || real.width || 1280,
+            height: size?.().height || real.height || 720,
             deviceId: real.deviceId || HANDOFF_DEVICE_ID,
             groupId: real.groupId || HANDOFF_GROUP_ID,
         }),
@@ -158,8 +164,8 @@ function describeRelayedTrack(track: MediaStreamTrack): void {
         configurable: true,
         value: (): MediaTrackCapabilities => ({
             frameRate: { min: 15, max: 30 },
-            width: { min: 320, max: real.width || 1280 },
-            height: { min: 240, max: real.height || 720 },
+            width: { min: 320, max: size?.().width || real.width || 1280 },
+            height: { min: 240, max: size?.().height || real.height || 720 },
             deviceId: HANDOFF_DEVICE_ID,
             groupId: HANDOFF_GROUP_ID,
         }),
@@ -247,11 +253,117 @@ function boostConstraints(video: MediaTrackConstraints): MediaTrackConstraints {
     };
 }
 
+/**
+ * The phone's video, redrawn at a CONSTANT size and a steady 30 fps.
+ *
+ * ⚠️ Why this exists — measured, not guessed (2026-11-22). Over the hand-off
+ * AWS came back SUCCEEDED with confidence 0.0001 and NO image at all, on
+ * today's code AND on the hand-off code from before it, while the laptop's
+ * own camera passed the same check (liveness 78.8) minutes later. AWS records
+ * the camera it is given; a WebRTC track changes resolution and frame rate
+ * whenever the network wobbles, and a recording whose frame size keeps
+ * changing is one AWS cannot analyse. A webcam never does that.
+ *
+ * So AWS is given what a webcam gives: a canvas the relayed video is drawn
+ * into every frame, sized once from the phone's first frame (long side at
+ * most 1280), and captured at 30 fps. The phone's picture can shrink or
+ * stutter underneath; what AWS records never changes shape.
+ */
+let normalized: { stream: MediaStream; stop: () => void; size: () => { width: number; height: number } } | null = null;
+
+function normalize(source: MediaStream): MediaStream {
+    if (typeof document === 'undefined') return source;
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.srcObject = source;
+    /*
+      ON the page, tiny and practically invisible. A video that is not in the
+      document (or is hidden) gets no new frames from the browser, so the
+      canvas kept redrawing ONE frame: AWS saw a frozen face, said "move back
+      slightly" for ever whatever the person did, and the session expired.
+    */
+    Object.assign(video.style, {
+        position: 'fixed',
+        right: '0',
+        bottom: '0',
+        width: '2px',
+        height: '2px',
+        opacity: '0.01',
+        pointerEvents: 'none',
+        zIndex: '-1',
+    });
+    document.body.appendChild(video);
+    void video.play().catch(() => {});
+
+    const canvas = document.createElement('canvas');
+    // Shaped like the phone's picture from the start — never the canvas default
+    // (300×150): AWS reads the size when it opens the camera, maybe before the
+    // first frame. The phone asks for 7:8 (PhoneCamera), so that is the guess.
+    const first = source.getVideoTracks()[0]?.getSettings();
+    const fit = (w: number, h: number) => {
+        const scale = Math.min(1, 1280 / Math.max(w, h));
+        canvas.width = Math.round((w * scale) / 2) * 2;
+        canvas.height = Math.round((h * scale) / 2) * 2;
+    };
+    fit(first?.width || 700, first?.height || 800);
+    const ctx = canvas.getContext('2d');
+    if (!ctx || typeof canvas.captureStream !== 'function') return source;
+
+    let sized = false;
+    const draw = () => {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (!w || !h) return;
+        // The real shape, once, from the first frame (the guess above may differ).
+        if (!sized) {
+            fit(w, h);
+            sized = true;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    };
+    // Each NEW phone frame where the browser can say so; a timer as well,
+    // so the canvas keeps producing frames at 30 fps between them (and where
+    // requestVideoFrameCallback does not exist). Not requestAnimationFrame:
+    // it stops while the tab is in the background.
+    type FrameVideo = HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+    const fv = video as FrameVideo;
+    let alive = true;
+    const onFrame = () => {
+        if (!alive) return;
+        draw();
+        fv.requestVideoFrameCallback?.(onFrame);
+    };
+    fv.requestVideoFrameCallback?.(onFrame);
+    const timer = window.setInterval(draw, 1000 / 30);
+
+    const out = canvas.captureStream(30);
+    normalized = {
+        stream: out,
+        size: () => ({ width: canvas.width, height: canvas.height }),
+        stop: () => {
+            alive = false;
+            window.clearInterval(timer);
+            out.getTracks().forEach((t) => (realStops.get(t) ?? (() => t.stop()))());
+            video.srcObject = null;
+            video.remove();
+        },
+    };
+    return out;
+}
+
 export function installCameraShim(stream: MediaStream): void {
-    // Before anything asks: the relayed track has to be able to describe
-    // itself, or AWS rejects it sight unseen. See describeRelayedTrack.
-    stream.getVideoTracks().forEach(describeRelayedTrack);
-    relayStream = stream;
+    normalized?.stop();
+    normalized = null;
+    const steady = normalize(stream);
+    // Before anything asks: the track has to be able to describe itself, or
+    // AWS rejects it sight unseen. See describeRelayedTrack. (A canvas track
+    // already reports its size and rate; describing it is harmless and keeps
+    // the consumer stop() a no-op.)
+    steady.getVideoTracks().forEach((t) => describeRelayedTrack(t, normalized?.size));
+    stream.getVideoTracks().forEach((t) => describeRelayedTrack(t));
+    relayStream = steady;
     apply();
     // Whoever asked while the phone was not connected yet gets it now.
     const asked = waiting;
@@ -319,7 +431,7 @@ function apply(): void {
             //
             // Idempotent: describing an already-described track just rewrites
             // the same two properties.
-            relayStream.getVideoTracks().forEach(describeRelayedTrack);
+            relayStream.getVideoTracks().forEach((t) => describeRelayedTrack(t, normalized?.size));
 
             // The SAME MediaStream for every caller, deliberately. Cloning per
             // call would let one screen's `stop()` kill the tracks another still
@@ -373,6 +485,8 @@ function apply(): void {
 
 /** Hand the page's real camera stack back, exactly as it was. */
 export function uninstallCameraShim(): void {
+    normalized?.stop();
+    normalized = null;
     relayStream = null;
     apply();
 }

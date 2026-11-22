@@ -141,9 +141,13 @@ export function CameraHandoffPanel({
      * portal appear.
      */
     const [frameEl, setFrameEl] = useState<HTMLElement | null>(null);
+    // Re-read after EVERY render, not once: the face screen replaces its frame
+    // element (after the splash), and a frame resolved only on mount kept the
+    // detached one — the QR was portalled into a node nobody could see, and
+    // the laptop showed a black frame with nothing to scan.
     useEffect(() => {
-        setFrameEl(frameRef.current);
-    }, [frameRef]);
+        if (frameRef.current !== frameEl) setFrameEl(frameRef.current);
+    });
     const [trouble, setTrouble] = useState<CameraTrouble | null>(null);
     /**
      * Whether this is a phone or tablet, and so should not be offered a

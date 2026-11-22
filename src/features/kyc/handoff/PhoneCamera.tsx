@@ -100,7 +100,19 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
 
             const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             pcRef.current = pc;
-            stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+            stream.getTracks().forEach((t) => {
+                // A face check needs every frame the same size: under a weak
+                // link, drop frames rather than resolution. The computer redraws
+                // at a constant size anyway; this keeps that picture sharp.
+                if (t.kind === 'video') t.contentHint = 'detail';
+                const sender = pc.addTrack(t, stream);
+                if (t.kind === 'video') {
+                    const params = sender.getParameters();
+                    void sender
+                        .setParameters({ ...params, degradationPreference: 'maintain-resolution' } as RTCRtpSendParameters)
+                        .catch(() => {});
+                }
+            });
 
             // The computer creates the channel, so this side receives it.
             pc.addEventListener('datachannel', (e) => {
