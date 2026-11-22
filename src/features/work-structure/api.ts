@@ -395,11 +395,27 @@ export async function loadLevel(level: Level, units: Unit[]): Promise<LevelPanel
       }),
   ]);
 
-  // The latest first sign-in of each person, with its evidence, for Files and Review.
+  // Each person's first sign-in with its evidence, for Files and Review.
+  //   waiting for review → the pending one: it is what Root is judging;
+  //   otherwise → the newest that actually CARRIES evidence. A later attempt
+  //   (expired, refused, a test) can hold no face and no document, and taking
+  //   the newest blindly emptied the Files of somebody already verified.
+  const hasEvidence = (l: LoginApproval) =>
+    !!(l.evidence?.face_capture_url || l.evidence?.reference_photo_url || l.evidence?.document?.front_image_url);
   await Promise.all(
     admins.map(async (a) => {
       if (!a.loginApproval) return;
-      a.loginApproval = (await safe(getLoginApproval(a.loginApproval.id), "login approval")) ?? a.loginApproval;
+      const mine = (logins ?? []).filter((l) => l.subject.id === a.id);
+      const candidates = a.loginApproval.status === "PENDING" ? [a.loginApproval] : mine.slice(0, 5);
+      for (const c of candidates) {
+        const full = await safe(getLoginApproval(c.id), "login approval");
+        if (!full) continue;
+        if (c === candidates[0]) a.loginApproval = full;
+        if (hasEvidence(full)) {
+          a.loginApproval = full;
+          break;
+        }
+      }
     }),
   );
 
