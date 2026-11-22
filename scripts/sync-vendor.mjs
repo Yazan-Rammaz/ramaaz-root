@@ -126,6 +126,27 @@ function syncMediapipe() {
     return true;
 }
 
+/**
+ * A download, tried `attempts` times with a growing pause. One flaky fetch of
+ * opencv.js on a Cloudflare build shipped Management's ID scanner without its
+ * engine (`/vendor/opencv.js` 404, "Looking for your ID…" for ever).
+ */
+async function fetchWithRetry(url, attempts) {
+    let last;
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            const res = await fetch(url, { redirect: 'follow' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return Buffer.from(await res.arrayBuffer());
+        } catch (err) {
+            last = err;
+            console.warn(`[sync-vendor] ${url}: attempt ${i}/${attempts} failed (${err.message})`);
+            if (i < attempts) await new Promise((r) => setTimeout(r, 2000 * i));
+        }
+    }
+    throw last;
+}
+
 // ── OpenCV: download (no npm package ships a browser build we can use) ──────
 async function syncOpenCv() {
     const dest = join(vendor, 'opencv.js');
@@ -136,9 +157,7 @@ async function syncOpenCv() {
     mkdirSync(vendor, { recursive: true });
     console.log(`[sync-vendor] opencv.js: downloading from ${OPENCV_URL} …`);
     try {
-        const res = await fetch(OPENCV_URL, { redirect: 'follow' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const buf = Buffer.from(await res.arrayBuffer());
+        const buf = await fetchWithRetry(OPENCV_URL, 3);
         // Guard against a proxy/captive-portal HTML page being written as JS —
         // it would fail confusingly at runtime instead of here.
         if (buf.length < OPENCV_MIN_BYTES) {
@@ -336,3 +355,10 @@ const ok = mediapipeOk && faceModelOk && tfjsOk && blazefaceOk && openCvOk;
 // Do not fail the install: a developer who never touches KYC should not be
 // blocked by a flaky download. The warning above is the signal.
 if (!ok) console.warn('[sync-vendor] completed with errors (see above).');
+// `--strict` (the build): a missing KYC runtime FAILS the deploy instead of
+// shipping capture screens that can never work. Cloudflare then keeps the
+// previous version live. The install stays lenient, as above.
+if (!ok && process.argv.includes('--strict')) {
+    console.error('[sync-vendor] --strict: refusing to build without the KYC runtime files.');
+    process.exit(1);
+}
