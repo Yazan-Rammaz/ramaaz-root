@@ -5,7 +5,7 @@ import { listRoleCountries, listRoles } from "@/features/role/api";
 import type { Role } from "@/features/role/schema";
 import { backendFetch } from "@/lib/api/backend";
 import { getLocale, getTranslations } from "next-intl/server";
-import { oneParam, readAllPages, readOperation } from "@/lib/api/operations";
+import { activeOperations, oneParam, readAllPages, readOperation } from "@/lib/api/operations";
 import { correlationId, errorCode } from "@/lib/auth/errors";
 import { ApiError } from "@/lib/api/server";
 import {
@@ -525,6 +525,35 @@ const countryLevelsSchema = z
   })
   .loose();
 
+/** A metal (`metal.list`) or crypto token (`crypto_token.list`), RDB 1.21. */
+const coinSchema = z
+  .object({ id: z.string(), symbol: z.string(), name: nameMapSchema, network: z.string().optional(), status: z.string().optional() })
+  .loose();
+type Coin = z.infer<typeof coinSchema>;
+/** A list answered bare or paged (`{ items }`): the paging comes with RDB's guide. */
+const itemsOf = (raw: unknown): unknown => (raw && typeof raw === "object" && "items" in raw ? (raw as { items: unknown }).items : raw);
+
+/** The caller's reach on the project (`GET /v1/projects/{id}` → `my_access`, §5.1). */
+const myAccessSchema = z
+  .object({
+    my_access: z
+      .object({
+        everything: z.boolean(),
+        assignments: z
+          .array(
+            z
+              .object({
+                unit: z.object({ id: z.string() }).loose().nullable(),
+                permissions: z.array(z.object({ key: z.string(), status: z.string().optional() }).loose()).optional(),
+              })
+              .loose(),
+          )
+          .default([]),
+      })
+      .loose(),
+  })
+  .loose();
+
 /** A read that may fail on its own: logged, and read as empty. */
 async function orEmpty<T>(read: Promise<T[]>, what: string): Promise<T[]> {
   try {
@@ -566,12 +595,18 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
   const unit = level === null ? undefined : units.find((u) => u.id === level);
   const countryId = unit?.place?.country_id ?? undefined;
 
-  const [settings, parent, countries, currencies, ...catalogs] = await Promise.all([
+  const [settings, parent, access, operations, countries, currencies, ...catalogs] = await Promise.all([
     readSettings(level).catch((error: unknown) => {
       console.warn("[work-structure] data setting: settings unavailable:", error instanceof Error ? error.message : error);
       return null;
     }),
     unit ? readSettings(isHead(unit.parent_id) ? null : unit.parent_id).catch(() => null) : Promise.resolve(null),
+    // The caller's own reach: who may save (guide 1.21 §1).
+    backendFetch
+      .get<unknown>("")
+      .then((raw) => myAccessSchema.parse(raw).my_access)
+      .catch(() => null),
+    activeOperations().catch(() => new Set<string>()),
     orEmpty(
       readAllPages("country.list").then((rows) => z.array(countryLevelsSchema).parse(rows).filter((c) => !c.deletedAt)),
       "country.list",
@@ -592,6 +627,29 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
     ),
   ]);
   const [departments, adminLevels, jobTitles, workTypes, businessTypes] = catalogs as CatalogItem[][];
+
+  // Metals and crypto tokens: real lists once RDB serves them (guide 1.21 §5).
+  const hasLists = operations.has("metal.list") && operations.has("crypto_token.list");
+  const [metals, tokens] = hasLists
+    ? await Promise.all([
+        orEmpty(readOperation("metal.list").then((raw) => z.array(coinSchema).parse(itemsOf(raw))), "metal.list"),
+        orEmpty(readOperation("crypto_token.list").then((raw) => z.array(coinSchema).parse(itemsOf(raw))), "crypto_token.list"),
+      ])
+    : [[], []];
+
+  // Only the levels above may save a level's data settings (guide 1.21 §1): the
+  // head office and a country office need Root or the permission project-wide;
+  // a regional office or a branch also takes it at one of its ancestors.
+  const ancestors = new Set<string>();
+  for (let p = unit?.parent_id; p && !isHead(p); p = units.find((u) => u.id === p)?.parent_id) ancestors.add(p);
+  const holds = (a: { permissions?: { key: string; status?: string }[] }) =>
+    !!a.permissions?.some((x) => x.key === "business_settings:write" && (x.status ?? "ACTIVE") === "ACTIVE");
+  const mayEdit =
+    !!access &&
+    (access.everything ||
+      access.assignments.some(
+        (a) => holds(a) && (a.unit === null || (unit?.kind !== "country" && level !== null && ancestors.has(a.unit.id))),
+      ));
 
   const own = (list: SettingsList) => new Set<SettingsItem>(settings?.[list] ?? []);
   // A unit may only narrow its parent; with the parent unread, the backend's refusal is the guard.
@@ -620,18 +678,24 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
   // so each country shows the positions it has, picked independently on the
   // screen; Update saves every position picked under any country, and read
   // back a saved position is on wherever it appears. A unit shows its own country's.
+  // RDB 1.21: the head office keeps levels per country (`levelsByCountry`); a
+  // country with no entry follows the default `levels`, and says so.
+  const byCountry = level === null && settings?.levelsByCountry !== undefined ? settings.levelsByCountry : undefined;
   const levelOptions = countries
     .filter((c) => !countryId || c.id === countryId)
-    .map((c) =>
-      groupOption(
+    .map((c) => {
+      const entry = byCountry?.[c.id];
+      const levelsHere = entry ?? settings?.levels ?? [];
+      const folder = groupOption(
         `country-${c.id}`,
         pickName(c.name, locale),
         [...(c.levels ?? [])]
           .sort((a, b) => a.position - b.position)
           .filter((l) => allowed("levels", l.position))
-          .map((l) => pick("levels", l.position, t("level", { n: l.position }))),
-      ),
-    );
+          .map((l) => ({ ...pick("levels", l.position, t("level", { n: l.position })), on: levelsHere.includes(l.position) })),
+      );
+      return byCountry ? { ...folder, countryId: c.id, custom: entry !== undefined } : folder;
+    });
 
   // Departments nest by `parentKey`; a sub-department whose parent is not offered stands on its own.
   const offered = departments.filter(usable("departments"));
@@ -646,12 +710,26 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
   const departmentOptions = offered.filter((d) => !d.parentKey || !keys.has(d.parentKey)).map(department);
 
   const byGroup = (g: string) => businessTypes.filter((b) => b.group === g);
+
+  // A metal or token: offered when ACTIVE (a unit: when its parent holds it);
+  // one a setting still names stays, greyed, whatever its status.
+  const coins = (list: "metals" | "cryptoTokens", items: Coin[]): DataOption[] =>
+    items
+      .filter((i) => own(list).has(i.id) || ((i.status ?? "ACTIVE") === "ACTIVE" && allowed(list, i.id)))
+      .map((i) => ({
+        ...pick(list, i.id, [i.symbol, pickName(i.name, locale), i.network].filter(Boolean).join(" · ")),
+        list,
+        ...((i.status ?? "ACTIVE") !== "ACTIVE" ? { disabled: true } : {}),
+      }));
+  // Gold and Silver are one metal each (XAU, XAG): the row itself is the pick.
+  const metalOption = (id: string, label: string, symbol: string): DataOption[] =>
+    coins("metals", metals.filter((m) => m.symbol.toUpperCase() === symbol)).map((o) => ({ ...o, id: `${id}-${o.id}`, label }));
   const money = currencies
     .filter((c) => allowed("currencies", c.id))
     .map((c) => pick("currencies", c.id, pickName(c.name, locale)));
 
   const tabs: Record<DataTab, DataGroup[]> = {
-    regions: [group("regions", t("groups.regions"), "regions/map", levelOptions, "levels")],
+    regions: [{ ...group("regions", t("groups.regions"), "regions/map", levelOptions, "levels"), ...(byCountry ? { byCountry: true } : {}) }],
     currencies: [
       group(
         "currencies",
@@ -659,10 +737,22 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
         "nav/currencies",
         [
           groupOption("money", t("money"), money),
-          // Not saved: RDB lists no crypto tokens or metals yet.
-          opt(t("crypto"), false, [opt("USDT, TRON, TRC20", false), opt("ETH", false)]),
-          opt(t("gold"), false),
-          opt(t("silver"), false),
+          ...(hasLists
+            ? [
+                groupOption(
+                  "crypto",
+                  t("crypto"),
+                  coins("cryptoTokens", tokens),
+                ),
+                ...metalOption("gold", t("gold"), "XAU"),
+                ...metalOption("silver", t("silver"), "XAG"),
+              ]
+            : [
+                // Not saved until RDB lists crypto tokens and metals (guide 1.21 §5).
+                opt(t("crypto"), false, [opt("USDT, TRON, TRC20", false), opt("ETH", false)]),
+                opt(t("gold"), false),
+                opt(t("silver"), false),
+              ]),
         ],
         "currencies",
       ),
@@ -692,6 +782,7 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
   return {
     tabs,
     settings,
+    mayEdit,
     countryChoices: countries.flatMap((c) => (c.code ? [{ id: c.id, code: c.code.toUpperCase() }] : [])),
     workTypes: workTypes
       .filter((w) => (w.status ?? "ACTIVE") === "ACTIVE")

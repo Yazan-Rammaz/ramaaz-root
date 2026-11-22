@@ -68,7 +68,15 @@ const NAMED = {
   SERVICE_UNAVAILABLE: "unavailable",
   STALE_UPDATE: "stale",
 } as const;
-const RELOAD = new Set(["APPROVAL_PAYLOAD_CHANGED", "APPROVAL_STALE", "APPROVAL_CLOSED", "APPROVAL_EXPIRED", "STALE_UPDATE"]);
+// `SETTINGS_SET_FROM_ABOVE` (RDB 1.21): only a level above may change these settings; its message says so.
+const RELOAD = new Set([
+  "APPROVAL_PAYLOAD_CHANGED",
+  "APPROVAL_STALE",
+  "APPROVAL_CLOSED",
+  "APPROVAL_EXPIRED",
+  "STALE_UPDATE",
+  "SETTINGS_SET_FROM_ABOVE",
+]);
 
 async function failure(error: unknown, what = "write"): Promise<WorkResult> {
   if (error instanceof SessionLockedError) return { locked: true };
@@ -86,6 +94,8 @@ async function failure(error: unknown, what = "write"): Promise<WorkResult> {
     const key = NAMED[code as keyof typeof NAMED];
     return { error: t(key), ...(RELOAD.has(code) ? { reload: true as const } : {}) };
   }
+  // A refusal in the backend's own words that also means "what you see moved".
+  if (code && RELOAD.has(code) && detail?.message) return { error: detail.message, reload: true };
   if (status === 422 && detail?.fields && Object.keys(detail.fields).length) {
     return { fields: detail.fields, error: detail.message };
   }

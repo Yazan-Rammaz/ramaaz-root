@@ -749,7 +749,9 @@
             "rbac": {
                 "unavailable": "Bu seviyede verilebilecek roller okunamadı.",
                 "noneConfirm": "Bu seviyede ve altında hiçbir rol verilemeyecek. Onaylamak için Güncelle'ye tekrar basın."
-            }
+            },
+            "defaultLevels": "Varsayılan seviyeler",
+            "useDefault": "Varsayılanı kullan"
         },
         "headPanel": "Ana Şirket | Proje Yönetimi",
         "headTree": "Ana İş Yönetimi",

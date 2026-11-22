@@ -749,7 +749,9 @@
       "rbac": {
         "unavailable": "The roles this level may give could not be read.",
         "noneConfirm": "No role can be given at this level or below it. Press Update again to confirm."
-      }
+      },
+      "defaultLevels": "Default levels",
+      "useDefault": "Use default"
     },
     "headPanel": "Main Company | Projects Management",
     "headTree": "Main Business Management",

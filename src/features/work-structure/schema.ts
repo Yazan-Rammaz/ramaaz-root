@@ -570,6 +570,12 @@ export const rdbSettingsSchema = z
      */
     countries: z.union([z.literal("all"), z.array(z.string())]).optional(),
     workType: z.string().nullable().optional(),
+    /**
+     * The head office only, RDB 1.21: a country id → the level positions allowed
+     * there; a country with no entry uses `levels`. Absent before 1.21 — then
+     * never sent (guide 1.21 §4).
+     */
+    levelsByCountry: z.record(z.string(), z.array(z.number())).optional(),
     updatedAt: z.string().nullable(),
   })
   .loose();
@@ -580,8 +586,29 @@ export type RdbSettings = z.infer<typeof rdbSettingsSchema>;
  * pick without one (Money, Individual, a country) only groups the others, and
  * a group without a `list` is shown as designed and not saved.
  */
-export type DataOption = { id: string; label: string; on: boolean; value?: SettingsItem; children?: DataOption[] };
-export type DataGroup = { id: string; title: string; icon: string; list?: SettingsList; options: DataOption[] };
+export type DataOption = {
+  id: string;
+  label: string;
+  on: boolean;
+  value?: SettingsItem;
+  /** Saves in this list instead of its group's (Gold, Silver and Crypto sit in the currencies group). */
+  list?: SettingsList;
+  /** Shown, not pickable: an inactive item a setting still names. */
+  disabled?: boolean;
+  /** A country on the head office's levels (1.21): its id, and whether it has its own entry. */
+  countryId?: string;
+  custom?: boolean;
+  children?: DataOption[];
+};
+export type DataGroup = {
+  id: string;
+  title: string;
+  icon: string;
+  list?: SettingsList;
+  /** The head office's levels, saved per country (`levelsByCountry`). */
+  byCountry?: boolean;
+  options: DataOption[];
+};
 // The design's five (XD work structure 21–25); RDB's legalEntities has no tab in it.
 export const DATA_TABS = ["regions", "currencies", "structure", "rbac", "business"] as const;
 export type DataTab = (typeof DATA_TABS)[number];
@@ -593,6 +620,8 @@ export type DataSettings = {
   countryChoices: { id: string; code: string }[];
   /** ACTIVE work types — the head office's Business Work Type. */
   workTypes: { key: string; short: string; name: string }[];
+  /** Whether this person may save these settings: only the levels above may (guide 1.21 §1). */
+  mayEdit: boolean;
 };
 
 /** What Update sends: every list, complete. */
@@ -600,6 +629,7 @@ export const settingsInputSchema = z.object({
   ...settingsLists,
   countries: z.union([z.literal("all"), z.array(z.string()).max(300)]).optional(),
   workType: z.string().nullable().optional(),
+  levelsByCountry: z.record(z.string(), z.array(z.number())).optional(),
   expectedUpdatedAt: z.string().nullable(),
 });
 export type SettingsInput = z.infer<typeof settingsInputSchema>;

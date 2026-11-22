@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { pickName } from '../timeline';
@@ -126,15 +127,7 @@ export function toInput(own: OwnPolicy): PolicyInput {
 }
 
 /** The ⚙ tab of the head office (`level` null) or a unit — XD work structure 3. */
-export function SettingsForm({
-    level,
-    policy,
-    templates,
-}: {
-    level: Level;
-    policy: Policy | null;
-    templates: ContractTemplate[];
-}) {
+export function SettingsForm({ level, policy, templates }: { level: Level; policy: Policy | null; templates: ContractTemplate[] }) {
     const t = useTranslations('work.access');
     const tw = useTranslations('work');
     const write = useWorkWrite();
@@ -318,7 +311,21 @@ const DATA_ICON: Record<DataTab, string> = {
  * country — only opens and closes. Its mark is green while any level under it
  * is on, and opening it never changes a level.
  */
-function OptionTree({ options, onChange, folders }: { options: DataOption[]; onChange: (o: DataOption[]) => void; folders?: boolean }) {
+function OptionTree({
+    options,
+    onChange,
+    folders,
+    readOnly,
+    after,
+}: {
+    options: DataOption[];
+    onChange: (o: DataOption[]) => void;
+    folders?: boolean;
+    /** Shown, nothing pickable: this person may not save these settings. */
+    readOnly?: boolean;
+    /** Something beside a folder row (a country's "Default" mark). */
+    after?: (o: DataOption) => ReactNode;
+}) {
     const setAll = (o: DataOption, on: boolean): DataOption => ({ ...o, on, children: o.children?.map((c) => setAll(c, on)) });
     const isFolder = (o: DataOption) => !!folders && o.value === undefined && !!o.children;
     const [open, setOpen] = useState(() => new Set(options.filter((o) => isFolder(o) && o.children!.some((c) => c.on)).map((o) => o.id)));
@@ -329,29 +336,36 @@ function OptionTree({ options, onChange, folders }: { options: DataOption[]; onC
                 const shown = folder ? open.has(o.id) : o.on;
                 return (
                     <div key={o.id} className="flex flex-col gap-6">
-                        <Choice
-                            on={folder ? o.children!.some((c) => c.on) : o.on}
-                            label={o.label}
-                            tint={folder ? 'green' : undefined}
-                            onChange={() =>
-                                folder
-                                    ? setOpen((s) => {
-                                          const next = new Set(s);
-                                          if (next.has(o.id)) next.delete(o.id);
-                                          else next.add(o.id);
-                                          return next;
-                                      })
-                                    : onChange(options.map((x, j) => (j === i ? setAll(x, !x.on) : x)))
-                            }
-                        />
+                        <div className="flex items-center gap-8">
+                            <Choice
+                                on={folder ? o.children!.some((c) => c.on) : o.on}
+                                label={o.label}
+                                tint={folder ? 'green' : undefined}
+                                disabled={!folder && (readOnly || o.disabled)}
+                                onChange={() =>
+                                    folder
+                                        ? setOpen((s) => {
+                                              const next = new Set(s);
+                                              if (next.has(o.id)) next.delete(o.id);
+                                              else next.add(o.id);
+                                              return next;
+                                          })
+                                        : onChange(options.map((x, j) => (j === i ? setAll(x, !x.on) : x)))
+                                }
+                            />
+                            {folder && after?.(o)}
+                        </div>
                         {o.children && shown && (
                             <div className="ps-12">
                                 <OptionTree
                                     options={o.children}
+                                    readOnly={readOnly}
                                     onChange={(children) =>
                                         onChange(
                                             options.map((x, j) =>
-                                                j === i ? { ...x, children, on: folder ? children.some((c) => c.on) : x.on || children.some((c) => c.on) } : x,
+                                                j === i
+                                                    ? { ...x, children, on: folder ? children.some((c) => c.on) : x.on || children.some((c) => c.on) }
+                                                    : x,
                                             ),
                                         )
                                     }
@@ -377,7 +391,13 @@ export function toSettingsInput(tabs: Record<DataTab, DataGroup[]>, settings: Rd
     const groups = DATA_TABS.flatMap((id) => tabs[id]);
     const lists = Object.fromEntries(
         SETTINGS_LISTS.map((list) => {
-            const picks = flatten(groups.filter((g) => g.list === list).flatMap((g) => g.options)).filter((o) => o.value !== undefined);
+            // A pick saves in its own list, else its group's; the head office's
+            // per-country levels go to `levelsByCountry`, not `levels`.
+            const picks = groups
+                .filter((g) => !g.byCountry)
+                .flatMap((g) => flatten(g.options).map((o) => ({ o, in: o.list ?? g.list })))
+                .filter((x) => x.in === list && x.o.value !== undefined)
+                .map((x) => x.o);
             if (picks.length === 0) return [list, settings[list]];
             const shown = new Set(picks.map((o) => o.value));
             const on = picks.filter((o) => o.on).map((o) => o.value!);
@@ -389,8 +409,24 @@ export function toSettingsInput(tabs: Record<DataTab, DataGroup[]>, settings: Rd
         // The head office's two RDB 1.20 fields: sent exactly when the read had them.
         ...(settings.countries !== undefined ? { countries: settings.countries } : {}),
         ...(settings.workType !== undefined ? { workType: settings.workType } : {}),
+        // RDB 1.21: sent exactly when the read had it. A country with its own
+        // entry sends its picks; one on the default sends nothing.
+        ...(settings.levelsByCountry !== undefined ? { levelsByCountry: levelsByCountryOf(groups, settings.levelsByCountry) } : {}),
         expectedUpdatedAt: settings.updatedAt,
     };
+}
+
+function levelsByCountryOf(groups: DataGroup[], saved: Record<string, number[]>): Record<string, number[]> {
+    const countries = groups.filter((g) => g.byCountry).flatMap((g) => g.options);
+    if (countries.length === 0) return saved;
+    const shown = new Set(countries.map((c) => c.countryId));
+    // Countries the tab does not show (none offered there) keep what RDB holds.
+    const kept = Object.fromEntries(Object.entries(saved).filter(([id]) => !shown.has(id)));
+    for (const c of countries) {
+        if (!c.countryId || !c.custom) continue;
+        kept[c.countryId] = (c.children ?? []).filter((l) => l.on && typeof l.value === 'number').map((l) => l.value as number);
+    }
+    return kept;
 }
 
 const sameList = (a: SettingsItem[], b: SettingsItem[]) => a.length === b.length && a.every((v) => b.includes(v));
@@ -420,8 +456,7 @@ export function DataSettings({
     // A role is on when this level may give it; one a level above leaves out is off and locked.
     const savedRoles = new Set(levelRoles?.effective.map((r) => r.id) ?? []);
     const inherited = levelRoles?.inherited;
-    const lockedOut = (id: string) =>
-        !!inherited && !inherited.all_roles && !inherited.roles.some((r) => (typeof r === 'string' ? r : r.id) === id);
+    const lockedOut = (id: string) => !!inherited && !inherited.all_roles && !inherited.roles.some((r) => (typeof r === 'string' ? r : r.id) === id);
     const [rolesOn, setRolesOn] = useState(savedRoles);
     const [rolesRead, setRolesRead] = useState(levelRoles);
     if (rolesRead !== levelRoles) {
@@ -446,8 +481,21 @@ export function DataSettings({
     }
     const { settings } = data;
     const input = settings && toSettingsInput(draft, settings);
-    const settingsDirty = !!input && SETTINGS_LISTS.some((list) => !sameList(input[list], settings[list]));
+    const settingsDirty =
+        !!input &&
+        (SETTINGS_LISTS.some((list) => !sameList(input[list], settings[list])) ||
+            JSON.stringify(input.levelsByCountry ?? null) !== JSON.stringify(settings.levelsByCountry ?? null));
     const dirty = settingsDirty || rolesDirty;
+    const setGroup = (gi: number, options: DataOption[]) => {
+        write.reset();
+        setDraft((d) => ({ ...d, [tab]: d[tab].map((x, j) => (j === gi ? { ...x, options } : x)) }));
+    };
+    // A country back on the default levels: its picks become `levels` again.
+    const toDefault = (c: DataOption): DataOption => ({
+        ...c,
+        custom: false,
+        children: c.children?.map((l) => ({ ...l, on: typeof l.value === 'number' && (settings?.levels ?? []).includes(l.value) })),
+    });
     const update = async () => {
         if (rolesDirty && rolesOn.size === 0 && !askNoRoles) return setAskNoRoles(true);
         if (input && (settingsDirty || write.result.commandId)) await write.run(() => saveDataSettingsAction(level, input, write.result.commandId));
@@ -473,13 +521,40 @@ export function DataSettings({
                             <OptionTree
                                 options={g.options}
                                 folders={tab === 'regions'}
-                                onChange={(options) => {
-                                    write.reset();
-                                    setDraft((d) => ({
-                                        ...d,
-                                        [tab]: d[tab].map((x, j) => (j === gi ? { ...x, options } : x)),
-                                    }));
-                                }}
+                                readOnly={!data.mayEdit}
+                                after={
+                                    g.byCountry
+                                        ? (c) =>
+                                              c.custom ? (
+                                                  // Back to the default: its entry is dropped on Update.
+                                                  data.mayEdit && (
+                                                      <button
+                                                          type="button"
+                                                          onClick={() =>
+                                                              setGroup(
+                                                                  gi,
+                                                                  g.options.map((x) => (x.id === c.id ? toDefault(x) : x)),
+                                                              )
+                                                          }
+                                                          className="cursor-pointer fz-10 text-primary"
+                                                      >
+                                                          {t('useDefault')}
+                                                      </button>
+                                                  )
+                                              ) : (
+                                                  <span className="fz-10 text-muted">{t('defaultLevels')}</span>
+                                              )
+                                        : undefined
+                                }
+                                onChange={(options) =>
+                                    // A country whose levels change gets its own entry.
+                                    setGroup(
+                                        gi,
+                                        g.byCountry
+                                            ? options.map((x, k) => (x.children !== g.options[k]?.children ? { ...x, custom: true } : x))
+                                            : options,
+                                    )
+                                }
                             />
                         </ChoiceBox>
                     </div>
@@ -519,16 +594,16 @@ export function DataSettings({
             </div>
             {askNoRoles && (
                 // No role here means none beneath either: asked before it is sent.
-                <span className="fz-10 text-ink text-center">{tr('noneConfirm')}</span>
+                <span className="text-center fz-10 text-ink">{tr('noneConfirm')}</span>
             )}
             <FormError message={write.result.error} attempt={write.result} />
             <FormError message={rolesWrite.result.error} attempt={rolesWrite.result} />
             <button
                 type="button"
                 onClick={() => void update()}
-                disabled={(!dirty && !write.result.commandId) || write.busy || rolesWrite.busy}
+                disabled={!data.mayEdit || (!dirty && !write.result.commandId) || write.busy || rolesWrite.busy}
                 // 406 × 50, #3066cc, radius 12 (XD).
-                className="bg-primary rad-12 fz-12 mx-auto flex h-50 w-406 max-w-full shrink-0 items-center justify-center gap-6 text-white disabled:opacity-60"
+                className="mx-auto flex h-50 w-406 max-w-full shrink-0 items-center justify-center gap-6 rad-12 bg-primary fz-12 text-white disabled:opacity-60"
             >
                 <Icon name="work/update" size={14} mask />
                 {t('update')}
