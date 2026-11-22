@@ -602,7 +602,7 @@ const settingsLists = {
 /**
  * A level's data settings as RDB holds them. Update sends them back COMPLETE —
  * every list, the ones this screen does not edit exactly as read — with
- * `updatedAt` as `expectedUpdatedAt` (`null` until first saved).
+ * `updatedAt` as `expectedUpdatedAt`: left out while it is `null` (never saved).
  */
 export const rdbSettingsSchema = z
   .object({
@@ -674,6 +674,7 @@ export const settingsInputSchema = z.object({
   countries: z.union([z.literal("all"), z.array(z.string()).max(300)]).optional(),
   workType: z.string().nullable().optional(),
   levelsByCountry: z.record(z.string(), z.array(z.number())).optional(),
-  expectedUpdatedAt: z.string().nullable(),
+  /** The `updatedAt` exactly as read — LEFT OUT when the read said null (never saved): RDB does not define null, and refused it as STALE_UPDATE (2026-11-23 answers). */
+  expectedUpdatedAt: z.string().optional(),
 });
 export type SettingsInput = z.infer<typeof settingsInputSchema>;

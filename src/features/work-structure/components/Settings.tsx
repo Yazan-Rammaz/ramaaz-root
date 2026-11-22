@@ -412,7 +412,9 @@ export function toSettingsInput(tabs: Record<DataTab, DataGroup[]>, settings: Rd
         // RDB 1.21: sent exactly when the read had it. A country with its own
         // entry sends its picks; one on the default sends nothing.
         ...(settings.levelsByCountry !== undefined ? { levelsByCountry: levelsByCountryOf(groups, settings.levelsByCountry) } : {}),
-        expectedUpdatedAt: settings.updatedAt,
+        // As read, character for character; LEFT OUT when never saved (null):
+        // RDB defines no null here and refused it as STALE_UPDATE.
+        ...(settings.updatedAt ? { expectedUpdatedAt: settings.updatedAt } : {}),
     };
 }
 
