@@ -335,6 +335,20 @@ html body {
     }
 }
 
+/* Skeleton — the shape of a value still being read, never the word "Loading".
+   A soft grey sweep over the surface colour. It keeps sweeping under Reduced Motion:
+   it is how the person knows something is on its way (the test machine has it on). */
+@keyframes skeleton-sweep {
+    100% {
+        background-position: -200% 0;
+    }
+}
+.skeleton {
+    background-image: linear-gradient(100deg, #eeeeee 20%, #f8f8f8 42%, #f8f8f8 58%, #eeeeee 80%);
+    background-size: 200% 100%;
+    animation: skeleton-sweep 1.3s linear infinite;
+}
+
 /* Font size in XD pixels: `fz-18` -> 18px@reference, auto-scaling. */
 @utility fz-* {
     font-size: calc(--value(integer) * 0.0625rem);

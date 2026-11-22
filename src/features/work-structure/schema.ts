@@ -653,7 +653,7 @@ export type DataGroup = {
   byCountry?: boolean;
   options: DataOption[];
 };
-// The design's five (XD work structure 21–25); RDB's legalEntities has no tab in it.
+// The design's five (XD work structure 21–25); legal entities sit under Business Types (2026-11-23).
 export const DATA_TABS = ["regions", "currencies", "structure", "rbac", "business"] as const;
 export type DataTab = (typeof DATA_TABS)[number];
 export type DataSettings = {

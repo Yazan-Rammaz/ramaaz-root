@@ -24,10 +24,10 @@ import {
 import { useLockWhenLocked } from '@/features/auth/use-lock-when-locked';
 import { flagEmoji, resolveFlag } from '@/features/region/mock-geo';
 import { evidenceSrc, memberPhotoSrc, photoToDataUrl, verificationSrc } from '../photo';
-import type { AdminStage, BusinessAdmin, ContractTemplate, GrantRole, Level, LoginApproval, Policy, TimelineEvent, VerificationSummary } from '../schema';
+import type { AdminStage, BusinessAdmin, GrantRole, Level, LoginApproval, Policy, TimelineEvent, VerificationSummary } from '../schema';
 import { pickName } from '../timeline';
 import { useWorkWrite } from '../use-work-write';
-import { Choice, ChoiceBox, DashedInput, InfoField, OneOf, PanelTitle } from './parts';
+import { Choice, ChoiceBox, DashedInput, InfoField, PanelTitle } from './parts';
 
 /*
  * A level's business admins (XD "Root Dashboard home page" 18–33): the list
@@ -451,7 +451,7 @@ function SwipeSheet({ onClose, className, children }: { onClose: () => void; cla
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             transition={iosEase}
-            className={cn('flex flex-1 flex-col overflow-hidden bg-background shadow-sm', className)}
+            className={cn('flex min-h-0 flex-1 flex-col overflow-hidden bg-background shadow-sm', className)}
             // A sheet rising from the bottom edge: only its TOP corners round (20 XD px);
             // the bottom sits square on the panel's edge.
             style={{
@@ -599,7 +599,7 @@ export function AddAdminSheet({ level, roles, onDone, onClose }: { level: Level;
     return (
         <SwipeSheet onClose={onClose} className="gap-8 px-8 pb-12">
             <span className="text-center fz-10 text-ink">{t('sheet.title')}</span>
-            <div className="thin-scroll flex flex-1 flex-col gap-6 overflow-y-auto">
+            <div className="thin-scroll flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
                 <PhotoPicker src={photo} onPick={setPhoto} label={photo ? t('sheet.editPhoto') : t('sheet.addPhoto')} />
                 <DashedInput label={t('sheet.name')} value={f.name} onChange={set('name')} />
                 <FieldError message={field('full_name')} />
@@ -649,13 +649,11 @@ function FieldError({ message }: { message?: string }) {
 export function GetStartedSheet({
     admin,
     policy,
-    templates,
     onDone,
     onClose,
 }: {
     admin: BusinessAdmin;
     policy: Policy | null;
-    templates: ContractTemplate[];
     onDone: (notice?: string) => void;
     onClose: () => void;
 }) {
@@ -666,17 +664,17 @@ export function GetStartedSheet({
     // Prefilled with the words typed on Add, when this tab still has them.
     const [words, setWords] = useState(() => takeWords(admin.id));
     const effective = policy?.effective;
-    const allowed = effective?.contract_types?.length ? templates.filter((x) => effective.contract_types!.includes(x.code)) : templates;
-    const contractRequired = effective?.require_contract ?? false;
-    const [contract, setContract] = useState<string>(contractRequired && allowed[0] ? allowed[0].code : '');
+    // The contract is the one the level's Setting tab chose (Request Contract → one type);
+    // the sheet does not ask again — it sends that one when the level requires a contract.
+    const contract = effective?.require_contract ? (effective.contract_types?.[0] ?? '') : '';
     // Unknown policy reads as "face on": the safe side of a rule the screen keeps.
     const photoNeeded = !admin.hasPhoto && (effective?.require_face ?? true);
-    const ready = !photoNeeded && (!contractRequired || !!contract) && !write.busy;
+    const ready = !photoNeeded && !write.busy;
 
     return (
         <SwipeSheet onClose={onClose} className="gap-8 px-8 pb-12">
             <span className="text-center fz-10 text-ink">{t('title', { name: admin.name })}</span>
-            <div className="thin-scroll flex flex-1 flex-col gap-6 overflow-y-auto">
+            <div className="thin-scroll flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
                 <PhotoPicker
                     size={136}
                     src={admin.hasPhoto ? memberPhotoSrc(admin.id, version) : undefined}
@@ -691,21 +689,6 @@ export function GetStartedSheet({
                 <DashedInput label={t('secretWords')} value={words} onChange={(v) => (write.reset(), setWords(v))} />
                 <span className="px-12 fz-10 text-muted">{t('secretWordsHint')}</span>
                 <FieldError message={write.result.fields?.secret_words} />
-                <ChoiceBox label={contractRequired ? t('contractRequired') : t('contract')}>
-                    {allowed.length === 0 ? (
-                        <span className="fz-10 text-muted">{t('noTemplates')}</span>
-                    ) : (
-                        <OneOf
-                            options={[...(contractRequired ? [] : ['']), ...allowed.map((x) => x.code)]}
-                            value={contract}
-                            label={(code) => {
-                                const tpl = allowed.find((x) => x.code === code);
-                                return tpl ? `${tpl.title} · ${tpl.version}` : t('noContract');
-                            }}
-                            onChange={(code) => (write.reset(), setContract(code))}
-                        />
-                    )}
-                </ChoiceBox>
                 <FieldError message={write.result.fields?.contract_type} />
             </div>
             <FormError message={write.result.error} attempt={write.result} />
@@ -759,7 +742,7 @@ export function AppointmentSheet({ admin, onDone, onClose }: { admin: BusinessAd
     return (
         <SwipeSheet onClose={onClose} className="gap-8 px-8 pb-12">
             <span className="text-center fz-10 text-ink">{t('title', { name: a.target.full_name })}</span>
-            <div className="thin-scroll flex flex-1 flex-col gap-6 overflow-y-auto">
+            <div className="thin-scroll flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
                 <InfoField label={t('requestedBy')} value={`${a.requested_by.full_name} · ${new Date(a.requested_at).toLocaleString()}`} />
                 {a.expires_at && <InfoField label={t('expires')} value={new Date(a.expires_at).toLocaleString()} />}
                 <InfoField label={t('proposed')} value={rolesLine(head(a.proposed), locale, t('nothing'))} />
@@ -920,7 +903,7 @@ export function ReviewSheet({ admin, onDone, onClose }: { admin: BusinessAdmin; 
     return (
         <SwipeSheet onClose={onClose} className="gap-8 px-8 pb-8">
             <AdminRow admin={admin} />
-            <div className="thin-scroll flex flex-1 flex-col gap-6 overflow-y-auto">
+            <div className="thin-scroll flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
                 <AdminPhoto src={face} size={240} className="mx-auto rad-24" />
                 <IdImages ev={evidenceOfLogin(login, admin)} />
                 <KycFields ev={evidenceOfLogin(login, admin)} />

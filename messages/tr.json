@@ -746,7 +746,8 @@
                 "jobTitles": "İdari Yapı | Unvan",
                 "roles": "Sistem RBAC | Roller",
                 "workTypes": "Sistem İş Çalışma Türü",
-                "businessTypes": "Sistem İş Türü"
+                "businessTypes": "Sistem İş Türü",
+                "legalEntities": "Sistem Tüzel Kişiliği"
             },
             "rbac": {
                 "unavailable": "Bu seviyede verilebilecek roller okunamadı.",

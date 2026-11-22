@@ -295,7 +295,7 @@ export function SettingsForm({ level, policy, templates }: { level: Level; polic
 
 /* ──────────────────────────── Data Setting ──────────────────────────── */
 
-const DATA_ICON: Record<DataTab, string> = {
+export const DATA_ICON: Record<DataTab, string> = {
     regions: 'nav/countries',
     currencies: 'nav/currencies',
     structure: 'work/structure',

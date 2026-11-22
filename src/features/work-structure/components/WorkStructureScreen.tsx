@@ -3,6 +3,8 @@
 import type { CSSProperties } from 'react';
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'motion/react';
+import { iosEase } from '@/components/motion/presets';
 import { useLocale, useTranslations } from 'next-intl';
 import { DashedFrame } from '@/components/ui/DashedFrame';
 import { FormError } from '@/components/ui/FormError';
@@ -32,6 +34,7 @@ import { DataSettings, SettingsForm, toInput, toSettingsInput } from './Settings
 import { saveDataSettingsAction, savePolicyAction } from '../actions';
 import { useWorkWrite } from '../use-work-write';
 import { Choice, ChoiceBox, FlagStrip, InfoField, PanelTitle, TabStrip } from './parts';
+import { PanelSkeleton } from './PanelSkeleton';
 
 /**
  * Business Work Structure (XD "Root Dashboard home page" 9–43): the project's
@@ -160,6 +163,9 @@ export function WorkStructureScreen({
     }, [watching, router]);
 
     const node = openKey ? findNode(structure.tree, openKey) : undefined;
+    // While another level is being read: its row's node (shown at once), or closing (nothing open).
+    const pickedNode = navigating && picking !== null && picking !== openKey ? findNode(structure.tree, picking) : undefined;
+    const closing = navigating && picking === null;
     const admin: BusinessAdmin | undefined =
         panel && (view.kind === 'admin' || view.kind === 'step') ? panel.admins.find((a) => a.id === view.id) : undefined;
     const back = () => setView({ kind: 'dashboard' });
@@ -173,10 +179,33 @@ export function WorkStructureScreen({
                 )}
             </div>
 
-            {panel && node && (
-                <aside className="relative flex h-full w-430 max-w-full shrink-0 flex-col gap-4 overflow-hidden p-8">
+            {/* A level's panel slides in the moment its row is pressed, on the app's iOS curve:
+                its name, flags and tabs at once, its values sweeping until the server has read
+                them. Moving between levels keeps it in place; closing slides it out. */}
+            <AnimatePresence initial={false}>
+                {(pickedNode || (panel && node && !closing)) && (
+                <motion.aside
+                    key="level"
+                    initial={{ x: '100%', opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: '100%', opacity: 0 }}
+                    transition={iosEase}
+                    className="relative flex h-full w-430 max-w-full shrink-0 flex-col gap-4 overflow-hidden p-8"
+                >
                     <DashedFrame radius={12} color="#c3c3c3" />
-                    {view.kind === 'admin' && admin ? (
+                    {pickedNode ? (
+                        <>
+                            <PanelHeader node={pickedNode} tab={tab} addingAdmin={false} />
+                            <FlagStrip
+                                codes={pickedNode.kind === 'head' || !pickedNode.countryFlag ? structure.countries : [pickedNode.countryFlag]}
+                                framed={tab === 'info' || tab === 'settings'}
+                            />
+                            <div aria-disabled className="pointer-events-none opacity-60">
+                                <TabStrip tabs={PANEL_TABS} value={tab} icon={(id) => PANEL_ICON[id]} label={(id) => t(`tabs.${id}`)} onChange={setTab} />
+                            </div>
+                            <PanelSkeleton tab={tab} />
+                        </>
+                    ) : !panel || !node ? null : view.kind === 'admin' && admin ? (
                         <AdminPanel admin={admin} countries={structure.countries} units={panel.countryUnits} onBack={back} />
                     ) : (
                         <>
@@ -232,7 +261,7 @@ export function WorkStructureScreen({
                                 </>
                             ) : (
                                 // A sheet over the dimmed dashboard (frames 20, 27).
-                                <div className="flex flex-1 flex-col bg-black/70 pt-48">
+                                <div className="flex min-h-0 flex-1 flex-col bg-black/70 pt-48">
                                     {view.kind === 'addAdmin' ? (
                                         <AddAdminSheet
                                             level={panel.level}
@@ -250,7 +279,6 @@ export function WorkStructureScreen({
                                             <GetStartedSheet
                                                 admin={admin}
                                                 policy={panel.policy}
-                                                templates={panel.templates}
                                                 onClose={back}
                                                 onDone={(n) => {
                                                     setNotice(n);
@@ -265,8 +293,9 @@ export function WorkStructureScreen({
                             )}
                         </>
                     )}
-                </aside>
-            )}
+                </motion.aside>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

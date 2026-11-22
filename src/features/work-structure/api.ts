@@ -5,7 +5,7 @@ import { listRoleCountries, listRoles } from "@/features/role/api";
 import type { Role } from "@/features/role/schema";
 import { backendFetch } from "@/lib/api/backend";
 import { getLocale, getTranslations } from "next-intl/server";
-import { activeOperations, oneParam, readAllPages, readOperation } from "@/lib/api/operations";
+import { activeOperations, oneParam, readAllPages, readOperation, readShared, readAllPagesShared } from "@/lib/api/operations";
 import { correlationId, errorCode } from "@/lib/auth/errors";
 import { ApiError } from "@/lib/api/server";
 import {
@@ -88,7 +88,7 @@ async function countries(): Promise<{
           deletedAt: z.string().nullable().optional(),
         }),
       )
-      .parse(await readAllPages("country.list", { query: { includeDeleted: "true" } }));
+      .parse(await readAllPagesShared("country.list", { query: { includeDeleted: "true" } }));
     return {
       codes: new Map(rows.map((c) => [c.id, c.code.toUpperCase()])),
       names: new Map(rows.flatMap((c) => (c.name ? [[c.id, c.name] as const] : []))),
@@ -647,32 +647,32 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
       .catch(() => null),
     activeOperations().catch(() => new Set<string>()),
     orEmpty(
-      readAllPages("country.list").then((rows) => z.array(countryLevelsSchema).parse(rows).filter((c) => !c.deletedAt)),
+      readAllPagesShared("country.list").then((rows) => z.array(countryLevelsSchema).parse(rows).filter((c) => !c.deletedAt)),
       "country.list",
     ),
     orEmpty(
       countryId
-        ? readOperation("country.currency.list", { params: { id: countryId } }).then((rows) =>
+        ? readShared("country.currency.list", { params: { id: countryId } }).then((rows) =>
             z.array(z.object({ currency: currencyItemSchema }).loose()).parse(rows).map((l) => l.currency),
           )
-        : readAllPages("currency.list").then((rows) => z.array(currencyItemSchema).parse(rows).filter((c) => !c.deletedAt)),
+        : readAllPagesShared("currency.list").then((rows) => z.array(currencyItemSchema).parse(rows).filter((c) => !c.deletedAt)),
       "currencies",
     ),
-    ...(["department.list", "admin_level.list", "job_title.list", "work_type.list", "business_type.list"] as const).map((name) =>
+    ...(["department.list", "admin_level.list", "job_title.list", "work_type.list", "business_type.list", "legal_entity.list"] as const).map((name) =>
       orEmpty(
-        readOperation(name).then((rows) => z.array(catalogItemSchema).parse(rows)),
+        readShared(name).then((rows) => z.array(catalogItemSchema).parse(rows)),
         name,
       ),
     ),
   ]);
-  const [departments, adminLevels, jobTitles, workTypes, businessTypes] = catalogs as CatalogItem[][];
+  const [departments, adminLevels, jobTitles, workTypes, businessTypes, legalEntities] = catalogs as CatalogItem[][];
 
   // Metals and crypto tokens: real lists once RDB serves them (guide 1.21 §5).
   const hasLists = operations.has("metal.list") && operations.has("crypto_token.list");
   const [metals, tokens] = hasLists
     ? await Promise.all([
-        orEmpty(readOperation("metal.list").then((raw) => z.array(coinSchema).parse(itemsOf(raw))), "metal.list"),
-        orEmpty(readOperation("crypto_token.list").then((raw) => z.array(coinSchema).parse(itemsOf(raw))), "crypto_token.list"),
+        orEmpty(readShared("metal.list").then((raw) => z.array(coinSchema).parse(itemsOf(raw))), "metal.list"),
+        orEmpty(readShared("crypto_token.list").then((raw) => z.array(coinSchema).parse(itemsOf(raw))), "crypto_token.list"),
       ])
     : [[], []];
 
@@ -816,6 +816,10 @@ export async function loadDataSettings(level: Level, units: Unit[]): Promise<Dat
         ],
         "businessTypes",
       ),
+      // The legal entities a level may use (Branch, Subsidiary, Representative):
+      // RDB 1.21 accepts a country office's legal entity only if the head office
+      // lists it here (decided 2026-11-23: under the business types).
+      group("legal-entities", t("groups.legalEntities"), "work/legal", catalog("legalEntities", legalEntities), "legalEntities"),
     ],
   };
   return {

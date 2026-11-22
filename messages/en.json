@@ -746,7 +746,8 @@
         "jobTitles": "Administrative Structure | Job Title",
         "roles": "System RBAC | Roles",
         "workTypes": "System Business Work Type",
-        "businessTypes": "System Business Type"
+        "businessTypes": "System Business Type",
+        "legalEntities": "System Legal Entity"
       },
       "rbac": {
         "unavailable": "The roles this level may give could not be read.",
