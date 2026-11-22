@@ -1185,8 +1185,8 @@ function ContractTerms({ contract }: { contract?: BusinessAdmin['contract'] }) {
                 <div key={c.number} className="flex flex-col gap-8 rad-12 bg-surface px-12 py-8">
                     <p className="fz-10 whitespace-pre-line text-muted">{c.text}</p>
                     <div className="flex gap-16">
-                        <Choice on={c.answer === 'agree'} tint="green" label={t('iAgree')} disabled />
-                        <Choice on={c.answer === 'disagree'} tint="red" label={t('iDisagree')} disabled />
+                        <Choice on={c.answer === 'agree'} tint="green" label={<span className="fz-10 text-muted">{t('iAgree')}</span>} disabled />
+                        <Choice on={c.answer === 'disagree'} tint="red" label={<span className="fz-10 text-muted">{t('iDisagree')}</span>} disabled />
                     </div>
                 </div>
             ))}
