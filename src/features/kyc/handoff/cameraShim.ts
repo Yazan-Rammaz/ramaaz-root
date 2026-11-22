@@ -302,7 +302,10 @@ function apply(): void {
         // and fail somewhere less obvious than here.
         if (constraints?.audio && !constraints.video) return real.gum(constraints);
 
-        if (relayStream) {
+        // Only a stream still carrying video. A dead one (the phone walked
+        // away) is never handed out: on a computer the request waits for the
+        // phone to connect again, through the new QR the hand-off opens.
+        if (relayStream && relayStream.getVideoTracks().some((t) => t.readyState === 'live')) {
             // Re-describe on EVERY call, not just at install.
             //
             // A retry re-mounts the capture screen and asks for a camera again,

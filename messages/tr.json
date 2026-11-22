@@ -53,7 +53,7 @@
         "introStart": "Kimlik Doğrulamayı Başlat",
         "introDisagree": "Kabul Etmiyorum",
         "faceSetupFailed": "Yüz kontrolü başlatılamadı.",
-        "faceCameraFramerate": "Bu kamera yüz kontrolü için fazla yavaş — saniyede en az 15 kare gerekiyor. Bunun yerine telefona aktarmayı kullanın veya kamerası daha iyi bir cihaz deneyin.",
+        "faceCameraFramerate": "Bu kamera yüz kontrolü için çok yavaş: saniyede en az 15 kare gerekiyor. Daha iyi ışıkta tekrar deneyin.",
         "faceSetupFailedCode": "Yüz kontrolü başlatılamadı ({code}).",
         "faceRotateTitle": "Cihazınızı dik tutun",
         "faceRotateBody": "Yüz kontrolü yalnızca dikey modda çalışır. Tabletinizi çevirin, kontrol kendiliğinden başlayacak.",
@@ -77,7 +77,8 @@
         "matchRetry": "Yeniden eşleştir",
         "idMissingName": "Tam adınızı okuyamadık. İsim alanındaki parlamayı giderip tekrar deneyin.",
         "idMissingBirthday": "Doğum tarihinizi okuyamadık. Kartın bu kısmında parlama olmamasına dikkat edin.",
-        "idMissingDocumentNumber": "Kimlik numaranızı okuyamadık. Kartın bu kısmında parlama olmamasına dikkat edin."
+        "idMissingDocumentNumber": "Kimlik numaranızı okuyamadık. Kartın bu kısmında parlama olmamasına dikkat edin.",
+        "faceCameraFramerateHandoff": "Telefonunuzun kamerası bu bilgisayara ulaşmayı bıraktı. Yeni kodu telefonunuzla tarayın (aynı Wi-Fi, VPN yok) ve tekrar deneyin."
     },
     "passcode": {
         "title": "Şifre Belirle !",

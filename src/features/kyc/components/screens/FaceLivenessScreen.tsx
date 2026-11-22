@@ -11,7 +11,7 @@ import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
 import { VerdictMark } from '@/features/kyc/components/VerdictMark';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
 import type { HandoffPhase } from '@/features/kyc/handoff/useCameraHandoff';
-import { isShimInstalled } from '@/features/kyc/handoff/cameraShim';
+import { isHandheldDevice, isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
@@ -1472,7 +1472,10 @@ export function FaceLivenessScreen({
                                 /ACCESS|PERMISSION|DENIED/i.test(state)
                                     ? t('faceCameraBlocked')
                                     : /FRAMERATE/i.test(state)
-                                      ? t('faceCameraFramerate')
+                                      ? // A computer uses only the phone: never "try another device".
+                                        isHandheldDevice()
+                                          ? t('faceCameraFramerate')
+                                          : t('faceCameraFramerateHandoff')
                                       : // Backstop only — the guard above should
                                         // mean we never mount the detector in
                                         // landscape. Kept because the SDK's own

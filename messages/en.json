@@ -53,7 +53,7 @@
     "introStart": "Start Identity Verification",
     "introDisagree": "Disagree",
     "faceSetupFailed": "Could not start the face check.",
-    "faceCameraFramerate": "This camera is too slow for the face check — it needs at least 15 frames per second. Use the phone hand-off instead, or try a device with a better camera.",
+    "faceCameraFramerate": "This camera is too slow for the face check: it needs at least 15 frames per second. Try again in better light.",
     "faceSetupFailedCode": "Could not start the face check ({code}).",
     "faceRotateTitle": "Turn your device upright",
     "faceRotateBody": "The face check only runs in portrait. Rotate your tablet and it will start on its own.",
@@ -77,7 +77,8 @@
     "matchRetry": "Rematch",
     "idMissingName": "We couldn't read your full name. Move away from glare on the name and try again.",
     "idMissingBirthday": "We couldn't read your date of birth. Keep that part of the card free of glare.",
-    "idMissingDocumentNumber": "We couldn't read your ID number. Keep that part of the card free of glare."
+    "idMissingDocumentNumber": "We couldn't read your ID number. Keep that part of the card free of glare.",
+    "faceCameraFramerateHandoff": "Your phone's camera stopped reaching this computer. Scan the new code with your phone (same Wi-Fi, no VPN) and try again."
   },
   "passcode": {
     "title": "Set Passcode !",

@@ -179,10 +179,12 @@ export function CameraHandoffPanel({
         requirePhoneCamera(true);
         return () => requirePhoneCamera(false);
     }, []);
-    const autoStarted = useRef(false);
+    // Whenever the hand-off is idle on a computer — on arrival, and again when
+    // the phone drops (its teardown lands back here) — a fresh QR opens. A
+    // start that fails stays on 'failed', with its own button, so this cannot
+    // loop.
     useEffect(() => {
-        if (handheld || autoStarted.current || phase !== 'idle') return;
-        autoStarted.current = true;
+        if (handheld || phase !== 'idle') return;
         void start(facing);
     }, [handheld, phase, start, facing]);
 

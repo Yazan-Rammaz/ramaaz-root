@@ -167,6 +167,9 @@ export function useCameraHandoff() {
                 // If the phone walks away, the shim is feeding a dead stream —
                 // so the hand-off ends rather than leaving every camera screen
                 // frozen on the last frame it received.
+                // The same when the phone's video track itself ends (its camera
+                // closed) while the connection lingers.
+                stream.getVideoTracks().forEach((t) => t.addEventListener('ended', stop));
                 pc.addEventListener('connectionstatechange', () => {
                     if (
                         pc.connectionState === 'failed' ||
