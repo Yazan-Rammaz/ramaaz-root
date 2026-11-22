@@ -108,8 +108,30 @@ export function isShimInstalled(): boolean {
  * Patched on the INSTANCE, so nothing else in the page is affected and the
  * change dies with the track.
  */
+/** Each relayed track's REAL stop, kept for the hand-off's own teardown. */
+const realStops = new WeakMap<MediaStreamTrack, () => void>();
+
+/** End a relayed track for real — only the hand-off, which owns it, calls this. */
+export function endRelayedTrack(track: MediaStreamTrack): void {
+    (realStops.get(track) ?? (() => track.stop()))();
+}
+
 function describeRelayedTrack(track: MediaStreamTrack): void {
     const real = track.getSettings();
+
+    /*
+      A capture screen stopping its camera must not end the PHONE'S track.
+      Every screen gets this same stream, and each stops "its" camera when it
+      is done — the light check does so the moment AWS takes over. Ending the
+      shared track froze the picture on its last frame, AWS then streamed a
+      dead track (SERVER_ERROR), and the retry found it at 0 fps ("too slow").
+      The hand-off owns this track's life (`endRelayedTrack`, and closing the
+      connection ends it anyway); a consumer's stop() is a no-op.
+    */
+    if (!realStops.has(track)) {
+        realStops.set(track, track.stop.bind(track));
+        Object.defineProperty(track, 'stop', { configurable: true, value: () => {} });
+    }
 
     // `getSettings` first, because that is what the 15fps gate reads.
     Object.defineProperty(track, 'getSettings', {

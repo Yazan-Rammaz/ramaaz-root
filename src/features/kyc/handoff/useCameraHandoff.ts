@@ -8,7 +8,7 @@ import {
     putSdp,
     waitForSdp,
 } from './signaling';
-import { installCameraShim, uninstallCameraShim } from './cameraShim';
+import { installCameraShim, uninstallCameraShim, endRelayedTrack } from './cameraShim';
 
 /**
  * The desktop half of the camera hand-off.
@@ -91,7 +91,7 @@ export function useCameraHandoff() {
         pcRef.current?.close();
         pcRef.current = null;
 
-        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current?.getTracks().forEach(endRelayedTrack);
         streamRef.current = null;
 
         // Unconditional: leaving the shim installed after a hand-off ends would
