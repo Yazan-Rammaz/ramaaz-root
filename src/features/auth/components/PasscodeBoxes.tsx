@@ -397,6 +397,11 @@ export function PasscodeBoxes({
             // reports once burned the backend's throttle.)
             completedRef.current = true;
 
+            // The row is full: close the phone's keyboard. A wrong entry
+            // remounts this component (`key`), which focuses the first box
+            // again and brings the keyboard back for the next try.
+            inputRef.current?.blur();
+
             // Straight away, before the box has shut — see `onFilled`. Whatever this
             // starts runs alongside the animation rather than behind it.
             onFilled?.(next);
