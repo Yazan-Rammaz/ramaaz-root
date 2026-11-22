@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { activeOperations, readOperation } from "@/lib/api/operations";
+import { activeOperations, readOperation, readShared } from "@/lib/api/operations";
 import { chipOf, type NameLanguage } from "./names";
 import { coverageSchema, languageSchema, type Coverage, type Language } from "./schema";
 
@@ -17,7 +17,7 @@ import { coverageSchema, languageSchema, type Coverage, type Language } from "./
  * languages. The fixed `en / ar / tr / ku` list that stood here is gone.
  */
 export const listLanguages = cache(async (): Promise<Language[]> => {
-  return languageSchema.array().parse(await readOperation("language.list"));
+  return languageSchema.array().parse(await readShared("language.list"));
 });
 
 /**

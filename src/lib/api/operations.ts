@@ -1,7 +1,9 @@
 import "server-only";
+import { cookies } from "next/headers";
 import { cache } from "react";
 import { z } from "zod";
-import { backendFetch } from "./backend";
+import { AUTH_COOKIE_NAMES } from "@/lib/auth/cookies";
+import { backendFetch, getSelectedSystemId } from "./backend";
 
 /**
  * THE one way to call a project's operation (RDB's currencies, countries,
@@ -77,6 +79,7 @@ export async function readOperation(name: string, input: ReadInput = {}): Promis
  * `retryCommand` by the command's id, so the key never has to leave the server.
  */
 export async function runCommand(name: string, input: CommandInput): Promise<CommandOutcome> {
+  forgetShared();
   const raw = await backendFetch.post<unknown>(operationPath(name), input, {
     headers: { "Idempotency-Key": crypto.randomUUID() },
   });
@@ -89,6 +92,7 @@ export async function runCommand(name: string, input: CommandInput): Promise<Com
  * to check in the project whether it happened.
  */
 export async function retryCommand(commandId: string): Promise<CommandOutcome> {
+  forgetShared();
   const raw = await backendFetch.post<unknown>(
     `/commands/${encodeURIComponent(commandId)}/retry`,
   );
@@ -108,6 +112,57 @@ export function commandOrRetry(
   return pendingCommandId ? retryCommand(pendingCommandId) : runCommand(name, input);
 }
 
+/* ─────────────── Lists that rarely change, kept for a minute ─────────────── */
+
+/**
+ * The root backend answers a caller's project operations ONE AT A TIME
+ * (~0.4 s each, measured 2026-11-23): opening a level asked for 13 and waited
+ * ~5.5 s for the last. The catalogs among them (departments, job titles, work
+ * types, countries, currencies, …) change only when somebody edits them, so a
+ * read of one is kept for a minute and shared by the requests that follow.
+ *
+ * Kept per signed-in session and per project (the session's refresh cookie
+ * and the selected system are the key), so nobody is ever served what another
+ * person's access read. In this Worker isolate's memory only; any command —
+ * every write goes through `runCommand` / `retryCommand` — forgets it all,
+ * so a save is seen at once. A failed read is not kept.
+ */
+const SHARED_MS = 60_000;
+const shared = new Map<string, { until: number; value: Promise<unknown> }>();
+
+function forgetShared() {
+  shared.clear();
+}
+
+async function sharedKey(name: string, input: unknown): Promise<string | null> {
+  const [store, system] = await Promise.all([cookies(), getSelectedSystemId()]);
+  const session = store.get(AUTH_COOKIE_NAMES.REFRESH)?.value;
+  return session && system ? `${system}|${session}|${name}|${JSON.stringify(input)}` : null;
+}
+
+async function keep<T>(name: string, input: unknown, read: () => Promise<T>): Promise<T> {
+  const key = await sharedKey(name, input);
+  if (!key) return read();
+  const now = Date.now();
+  const hit = shared.get(key);
+  if (hit && hit.until > now) return hit.value as Promise<T>;
+  for (const [k, v] of shared) if (v.until <= now) shared.delete(k);
+  const value = read();
+  shared.set(key, { until: now + SHARED_MS, value });
+  value.catch(() => shared.delete(key));
+  return value;
+}
+
+/** `readOperation` for a list that rarely changes: kept for a minute (see above). */
+export function readShared(name: string, input: ReadInput = {}): Promise<unknown> {
+  return keep(name, input, () => readOperation(name, input));
+}
+
+/** `readAllPages` for a list that rarely changes: kept for a minute (see above). */
+export function readAllPagesShared(name: string, input: ReadInput = {}): Promise<unknown[]> {
+  return keep(`pages:${name}`, input, () => readAllPages(name, input));
+}
+
 const operationsSchema = z.object({
   data: z.array(
     z.object({ name: z.string(), status: z.string(), path: z.string().optional() }).loose(),
@@ -121,7 +176,7 @@ const operationsSchema = z.object({
  * without a new one.
  */
 const operationCatalog = cache(async () => {
-  const { data } = operationsSchema.parse(await backendFetch.get<unknown>("/operations"));
+  const { data } = operationsSchema.parse(await keep("GET /operations", null, () => backendFetch.get<unknown>("/operations")));
   return new Map(data.map((o) => [o.name, o]));
 });
 
