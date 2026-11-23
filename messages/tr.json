@@ -701,7 +701,8 @@
             "dataSaved": "Veri ayarları kaydedildi.",
             "wordsPending": "Giriş bilgisi gönderildi. Gizli kelimeler WhatsApp şablonu onaylanınca gönderilecek; o zaman Giriş Bilgisini Gönder'e tekrar basın.",
             "phoneChanged": "Telefon değiştirildi. Her yerden çıkış yapıldı; yeni numarayı bir sonraki girişinde doğrulayacak.",
-            "memberSaved": "Kaydedildi."
+            "memberSaved": "Kaydedildi.",
+            "sendByHand": "Eklendi. Giriş bilgileri kendiliğinden gönderilemedi — Giriş Bilgilerini Gönder'e basın."
         },
         "errors": {
             "invalid": "Formda geçersiz bir alan var.",

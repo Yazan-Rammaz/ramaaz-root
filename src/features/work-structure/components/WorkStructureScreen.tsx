@@ -275,9 +275,10 @@ export function WorkStructureScreen({
                                             level={panel.level}
                                             roles={panel.roles}
                                             onClose={back}
-                                            onDone={() => {
+                                            onDone={(sent) => {
                                                 setTab('login');
                                                 back();
+                                                setNotice(sent);
                                             }}
                                         />
                                     ) : view.kind === 'step' && admin ? (
@@ -490,10 +491,10 @@ function InfoTab({ panel, node, data }: { panel: LevelPanel; node: StructureNode
                 {node.kind === 'head' ? (
                     <>
                         <div className="flex gap-16">
-                            <Choice on={!pickedCountries} label={t('enable')} disabled={!ready || rdb.busy} onChange={() => saveRdb({ countries: 'all' })} />
+                            <Choice on={!pickedCountries} label={<span className="fz-13 font-normal">{t('enable')}</span>} disabled={!ready || rdb.busy} onChange={() => saveRdb({ countries: 'all' })} />
                             <Choice
                                 on={!!pickedCountries}
-                                label={t('disable')}
+                                label={<span className="fz-13 font-normal">{t('disable')}</span>}
                                 disabled={!ready || rdb.busy}
                                 // Disable starts from every open country, so nothing closes until a flag is unpicked.
                                 onChange={() => pickedCountries || saveRdb({ countries: (data?.countryChoices ?? []).map((c) => c.id) })}

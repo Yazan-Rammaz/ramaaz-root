@@ -583,7 +583,7 @@ function dropWords(userId: string) {
  * (rank 1, "Business Admin"). At the head office it goes to the other root for
  * approval first.
  */
-export function AddAdminSheet({ level, roles, onDone, onClose }: { level: Level; roles: GrantRole[]; onDone: () => void; onClose: () => void }) {
+export function AddAdminSheet({ level, roles, onDone, onClose }: { level: Level; roles: GrantRole[]; onDone: (notice?: string) => void; onClose: () => void }) {
     const t = useTranslations('work.admins');
     const write = useWorkWrite();
     const [photo, setPhoto] = useState<string>();
@@ -618,7 +618,8 @@ export function AddAdminSheet({ level, roles, onDone, onClose }: { level: Level;
                         if (r?.ok) {
                             // Kept in the tab only when the backend did not take them on Add.
                             if (r.userId && r.wordsInTab && f.words.trim()) keepWords(r.userId, f.words.trim());
-                            onDone();
+                            // The login information went out with the Add: say where (or why not).
+                            onDone(r.notice);
                         }
                     }}
                 >
@@ -735,7 +736,7 @@ export function AppointmentSheet({ admin, onDone, onClose }: { admin: BusinessAd
     if (!a) return null;
     const head = (g: typeof a.proposed) => (g?.assignments ?? []).filter((x) => x.unit === null).flatMap((x) => x.roles);
     const decide = async (d: 'approve' | 'refuse' | 'withdraw') => {
-        const r = await write.run(() => decideAppointmentAction(a.id, d, { payloadHash: a.payload_hash, reason }));
+        const r = await write.run(() => decideAppointmentAction(a.id, d, { payloadHash: a.payload_hash, reason, targetId: a.target.id, level: null }));
         if (r?.ok || r?.reload) onDone();
     };
 
@@ -1148,10 +1149,10 @@ export function AdminAvailability({ admin, units }: { admin: BusinessAdmin; unit
             <PanelTitle>{t('availability', { name: admin.name })}</PanelTitle>
             <ChoiceBox label={ti('countries')}>
                 <div className="flex gap-16">
-                    <Choice on={all} label={ti('enable')} disabled={!editable} onChange={() => save(true, [])} />
+                    <Choice on={all} label={<span className="fz-13 font-normal">{ti('enable')}</span>} disabled={!editable} onChange={() => save(true, [])} />
                     <Choice
                         on={!all}
-                        label={ti('disable')}
+                        label={<span className="fz-13 font-normal">{ti('disable')}</span>}
                         disabled={!editable}
                         onChange={() => all && save(false, units.map((u) => u.id))}
                     />

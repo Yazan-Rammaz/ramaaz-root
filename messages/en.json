@@ -701,7 +701,8 @@
       "dataSaved": "Data settings saved.",
       "wordsPending": "Login info sent. The secret words will be sent once their WhatsApp template is approved; press Send Login Info again then.",
       "phoneChanged": "Phone changed. They are signed out everywhere and will confirm the new number at their next sign-in.",
-      "memberSaved": "Saved."
+      "memberSaved": "Saved.",
+      "sendByHand": "Added. The login information could not be sent on its own — press Send Login Info."
     },
     "errors": {
       "invalid": "Something in the form is not valid.",

@@ -163,21 +163,33 @@ export async function addMemberAction(level: Level, input: NewMember, photo?: st
 
   const t = await getTranslations("work.notices");
   const pending = added.approval != null ? ({ pending: true } as const) : {};
+  let hasPhoto = false;
   if (picture?.success) {
     try {
       await backendFetch.put<unknown>(`/members/${enc(added.user.id)}/photo`, { photo: picture.data });
+      hasPhoto = true;
     } catch (error) {
       if (error instanceof SessionLockedError) return { ok: true, ...pending, userId: added.user.id, locked: true };
       return { ok: true, ...pending, userId: added.user.id, notice: t("photoLater") };
     }
   }
-  return {
-    ok: true,
-    ...pending,
-    userId: added.user.id,
-    ...(wordsInTab ? { wordsInTab: true as const } : {}),
-    notice: pending.pending ? t("waitingOtherRoot") : undefined,
-  };
+  if (pending.pending) {
+    return {
+      ok: true,
+      ...pending,
+      userId: added.user.id,
+      ...(wordsInTab ? { wordsInTab: true as const } : {}),
+      notice: t("waitingOtherRoot"),
+    };
+  }
+  // In effect at once: the login information goes now (see sendLoginInfo).
+  let notice: string | undefined;
+  try {
+    notice = await sendLoginInfo(added.user.id, where.data, { hasPhoto, words: wordsInTab ? secret_words : undefined });
+  } catch {
+    return { ok: true, userId: added.user.id, locked: true };
+  }
+  return { ok: true, userId: added.user.id, notice };
 }
 
 /** Replace a member's reference photograph — the one their face is compared with at every sign-in. */
@@ -202,6 +214,54 @@ const startedSchema = z
     secret_words_pending: z.boolean().optional(),
   })
   .loose();
+
+/*
+ * Send the login information on its own (2026-11-24): nobody presses Send Login
+ * Info any more. Right after an appointment that takes effect at once (a
+ * manager's), and right after the second root approves one that waited (the
+ * head office's). The level's own policy says which contract to issue — the one
+ * its Setting tab chose — and whether a photo has to be there first; the secret
+ * words were stored on Add. If it cannot go (a required photo missing, the
+ * message refused), the notice says so and Send Login Info is still there.
+ */
+const autoPolicySchema = z
+  .object({
+    effective: z
+      .object({
+        require_contract: z.boolean().nullable().optional(),
+        contract_types: z.array(z.string()).nullable().optional(),
+        require_face: z.boolean().nullable().optional(),
+      })
+      .loose()
+      .optional(),
+  })
+  .loose();
+async function sendLoginInfo(userId: string, level: Level, opts: { hasPhoto: boolean; words?: string }): Promise<string | undefined> {
+  const t = await getTranslations("work.notices");
+  try {
+    const path = level === null ? "/dashboard-policy" : `/units/${enc(level)}/dashboard-policy`;
+    const policy = autoPolicySchema.parse(await backendFetch.get<unknown>(path)).effective;
+    if (policy?.require_face && !opts.hasPhoto) return t("photoLater");
+    const contract = policy?.require_contract ? policy.contract_types?.[0] : undefined;
+    const sent = startedSchema.parse(
+      await backendFetch.post<unknown>(`/members/${enc(userId)}/get-started`, {
+        ...(contract ? { contract_type: contract } : {}),
+        ...(opts.words ? { secret_words: opts.words } : {}),
+      }),
+    );
+    return sent.delivered === false
+      ? t("notDelivered", { phone: sent.phone ?? "" })
+      : sent.secret_words_pending
+        ? t("wordsPending")
+        : t("sent", { phone: sent.phone ?? "" });
+  } catch (error) {
+    if (error instanceof SessionLockedError) throw error;
+    console.warn(
+      `[work-structure] automatic Get Started not sent: ${error instanceof ApiError ? error.status : "-"} ${errorCode(error) ?? "-"} ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return t("sendByHand");
+  }
+}
 
 /**
  * Send Login Info (Get Started, §5.8): the link and the private code by
@@ -265,7 +325,7 @@ const reasonSchema = z.string().trim().max(500).optional();
 export async function decideAppointmentAction(
   approvalId: string,
   decision: "approve" | "refuse" | "withdraw",
-  extra: { payloadHash?: string; reason?: string } = {},
+  extra: { payloadHash?: string; reason?: string; targetId?: string; level?: Level } = {},
 ): Promise<WorkResult> {
   const id = idSchema.safeParse(approvalId);
   const reason = reasonSchema.safeParse(extra.reason);
@@ -278,6 +338,13 @@ export async function decideAppointmentAction(
         : undefined;
   try {
     await backendFetch.post<unknown>(`/approvals/${enc(id.data)}/${decision}`, body);
+    // Approved: the login information goes now, as for any appointment in effect
+    // (see sendLoginInfo). The photo was set on Add; the policy decides if needed.
+    const target = extra.targetId ? idSchema.safeParse(extra.targetId) : null;
+    if (decision === "approve" && target?.success) {
+      const notice = await sendLoginInfo(target.data, extra.level ?? null, { hasPhoto: true });
+      return { ok: true, notice };
+    }
     return { ok: true };
   } catch (error) {
     return failure(error);

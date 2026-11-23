@@ -64,7 +64,8 @@ export function Choice({
             aria-checked={on}
             disabled={disabled}
             onClick={onChange}
-            className="fz-12 text-ink flex items-center gap-6 text-start disabled:cursor-default"
+            // 13 regular — every choice in the work-structure panels (design, 2026-11-24).
+            className="fz-13 font-normal text-ink flex items-center gap-6 text-start disabled:cursor-default"
         >
             <span
                 aria-hidden

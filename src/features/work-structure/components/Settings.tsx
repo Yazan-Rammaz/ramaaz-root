@@ -339,7 +339,8 @@ function OptionTree({
                         <div className="flex items-center gap-8">
                             <Choice
                                 on={folder ? o.children!.some((c) => c.on) : o.on}
-                                label={o.label}
+                                // 13 regular, as designed — every Data Setting list (countries, levels, …).
+                                label={<span className="fz-13 font-normal">{o.label}</span>}
                                 tint={folder ? 'green' : undefined}
                                 disabled={!folder && (readOnly || o.disabled)}
                                 onChange={() =>
@@ -538,13 +539,13 @@ export function DataSettings({
                                                                   g.options.map((x) => (x.id === c.id ? toDefault(x) : x)),
                                                               )
                                                           }
-                                                          className="cursor-pointer fz-10 text-primary"
+                                                          className="cursor-pointer fz-13 font-normal text-primary"
                                                       >
                                                           {t('useDefault')}
                                                       </button>
                                                   )
                                               ) : (
-                                                  <span className="fz-10 text-muted">{t('defaultLevels')}</span>
+                                                  <span className="fz-13 font-normal text-muted">{t('defaultLevels')}</span>
                                               )
                                         : undefined
                                 }
