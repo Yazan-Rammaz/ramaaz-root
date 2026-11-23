@@ -287,6 +287,26 @@
     opacity: 0;
 }
 
+/* ── Over a hand-off: the phone's raw video is the picture (2026-11-24) ──────
+ * `LivenessCamera` shows it (rz-live-raw, first in the frame) and sets
+ * `data-raw`. AWS's video goes transparent — opacity, NEVER display: AWS and
+ * the capture keep reading it — and the page-drawn canvas steps aside, so
+ * nothing that stalls with the page is on screen. AWS's oval, hints and flash
+ * still paint on top, in their own order.
+ */
+.rz-liveness[data-raw='on'] .amplify-liveness-camera-module {
+    background-color: transparent;
+}
+.rz-liveness[data-raw='on'] .amplify-liveness-video {
+    opacity: 0;
+}
+.rz-liveness[data-raw='on'] .rz-live-canvas {
+    display: none;
+}
+.rz-liveness[data-stream='ended'] .rz-live-raw {
+    display: none;
+}
+
 /* Without the attribute the canvas is painting nothing, and a transparent
    canvas over a black frame is harmless — but hiding it outright means a
    surrendered preview cannot leave a stale last frame on screen. */

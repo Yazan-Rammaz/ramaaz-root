@@ -1,4 +1,5 @@
 import { idConfig } from '@/features/kyc/config/kycConfig';
+import { isHandheldDevice, isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 
 /**
  * Lightweight, no-dependency image quality utilities for the client side.
@@ -232,6 +233,8 @@ export function computeSharpness(img: ImageData): number {
 const GLARE_PIXEL_THRESHOLD = idConfig.quality.glarePixelThreshold;
 const GLARE_MAX_RATIO = idConfig.quality.glareMaxRatio;
 const MOTION_MAX_DIFF = idConfig.quality.motionMaxDiff;
+/** How much more frame-to-frame change a relayed phone picture is allowed (see the motion check). */
+const HANDOFF_MOTION_FACTOR = 2.5;
 
 /**
  * Required ratio of center-ROI edge density to outer-ring edge density.
@@ -744,7 +747,12 @@ export function runLocalPreChecks(
     else if (brightness > thresholds.maxBrightness) reason = 'too_bright';
     else if (glareRatio > GLARE_MAX_RATIO) reason = 'glare';
     else if (sharpness < thresholds.minSharpness) reason = 'too_blurry';
-    else if (prevImg && motion > MOTION_MAX_DIFF) reason = 'moving';
+    // Over a hand-off the picture is a hand-held phone, relayed and compressed: frame
+    // to frame it changes more than a webcam on a desk, and the fixed limit said
+    // "Camera moving" non-stop (2026-11-24). A real move is still caught by the
+    // card's own stability (corners against its width, useDocumentScanner). A phone on
+    // its own camera is just as hand-held, so it gets the same allowance.
+    else if (prevImg && motion > (isShimInstalled() || isHandheldDevice() ? MOTION_MAX_DIFF * HANDOFF_MOTION_FACTOR : MOTION_MAX_DIFF)) reason = 'moving';
     else if (!cardDetected) reason = 'card_not_detected';
     else if (moireScore > MOIRE_DETECTION_THRESHOLD) reason = 'screen_detected';
     // Note: aspect-ratio + fill check intentionally disabled — the bounding

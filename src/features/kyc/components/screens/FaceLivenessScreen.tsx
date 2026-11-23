@@ -1,7 +1,7 @@
 'use client';
 
 import { traceFaceStartup } from '@/features/kyc/debug/startupTrace';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 
 import { Icon } from '@/components/ui/Icon';
@@ -10,6 +10,7 @@ import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
 import { VerdictMark } from '@/features/kyc/components/VerdictMark';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
+import { relayPreview } from '@/features/kyc/handoff/cameraShim';
 import type { HandoffPhase } from '@/features/kyc/handoff/useCameraHandoff';
 import { isHandheldDevice, isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 import type { FaceCapture } from '@/features/kyc/services/faceCapture';
@@ -18,7 +19,7 @@ import { createKycService } from '@/features/kyc/services';
 import { isChallengeExpired, KycHttpError } from '@/features/kyc/services/httpKycService';
 import { restartSignInAction } from '@/features/auth/actions';
 import { waitForSplash } from '@/features/splash/timing';
-import { ensureLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { ensureLandmarker, warmUpLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useLightCheck } from '@/features/kyc/hooks/useLightCheck';
 import type { FaceFrameVerdict } from '@/features/kyc/services/imageQuality';
@@ -271,6 +272,30 @@ const MESH_MODEL_TIMEOUT_MS = 120_000;
  */
 const PROBE_MODEL_WAIT_MS = 20_000;
 
+/** The phone's live picture under the cover while AWS's camera opens — see relayPreview. */
+function LiveCover({ mirror }: { mirror: boolean }) {
+    return (
+        <video
+            ref={(el) => {
+                if (!el || el.srcObject) return;
+                const stream = relayPreview();
+                if (!stream) return;
+                el.srcObject = stream;
+                void el.play().catch(() => {});
+            }}
+            autoPlay
+            muted
+            playsInline
+            aria-hidden
+            className="h-full w-full object-cover"
+            style={mirror ? { transform: 'scaleX(-1)' } : undefined}
+        />
+    );
+}
+
+/** isHandheldDevice never changes within a page: nothing to subscribe to. */
+const NO_SUBSCRIBE = () => () => {};
+
 export function FaceLivenessScreen({
     challengeId,
     onSession,
@@ -376,6 +401,8 @@ export function FaceLivenessScreen({
      * is for.
      */
     const [handoffPhase, setHandoffPhase] = useState<HandoffPhase>('idle');
+    // The phone is the camera right now: the hand-over cover can show its live picture.
+    const handoffLive = handoffPhase === 'live';
     /**
      * Bumped to run the whole check again on the SAME challenge.
      *
@@ -462,10 +489,22 @@ export function FaceLivenessScreen({
      * is exactly one place that decides the check may start.
      */
     const [lightCleared, setLightCleared] = useState(false);
+    /*
+     * No light check on a COMPUTER (2026-11-24). There the camera is the phone's,
+     * and the check's own camera open, then close, then AWS's open was what froze
+     * the laptop's frame between them; the phone shows the check anyway. A phone on
+     * its own camera keeps it. (Server snapshot: handheld — the gate as before.)
+     */
+    const handheld = useSyncExternalStore(NO_SUBSCRIBE, isHandheldDevice, () => true);
+    const lightDone = lightCleared || !handheld;
+    // The mesh model's costly first run, now — not on the first live frame.
+    useEffect(() => {
+        void warmUpLandmarker();
+    }, []);
 
     const { verdict: lightVerdict, progress: lightProgress } = useLightCheck({
         videoRef: probeVideoRef,
-        paused: !probeLive || lightCleared,
+        paused: !probeLive || lightDone,
     });
 
     /**
@@ -477,7 +516,7 @@ export function FaceLivenessScreen({
      * a challenge already cleared must not reopen a camera to measure a room
      * nobody is going to be photographed in.
      */
-    const lightGateOpen = !PASSED.has(challengeId) && !mustRotate && !lightCleared;
+    const lightGateOpen = !PASSED.has(challengeId) && !mustRotate && !lightDone;
 
     /**
      * One verdict, one sentence — used by the pre-flight prompt and by the live
@@ -522,7 +561,13 @@ export function FaceLivenessScreen({
      * has already been taken.
      */
     const showLiveWarning =
-        phase === 'ready' && streamLive && liveQuality !== null && liveQuality !== 'ok';
+        phase === 'ready' &&
+        streamLive &&
+        liveQuality !== null &&
+        liveQuality !== 'ok' &&
+        // On a computer the picture is the phone's: no phone, nothing to judge — it was
+        // measuring the black of a dropped hand-off and wrote "Too dark" over the new QR.
+        (isHandheldDevice() || handoffLive);
 
     /** Open the probe stream — after the splash, and only while it is needed. */
     useEffect(() => {
@@ -685,7 +730,7 @@ export function FaceLivenessScreen({
         // putting the guard here rather than around the session call alone. It
         // is the same trade the landscape guard already makes, and the model is
         // cached after the first check, so it is paid at most once.
-        if (!lightCleared) return;
+        if (!lightDone) return;
 
         let cancelled = false;
 
@@ -797,7 +842,7 @@ export function FaceLivenessScreen({
         };
         // `attempt` is the retry trigger: AWS liveness sessions are single-use,
         // so going again means opening a new one, not reusing the last id.
-    }, [challengeId, attempt, t, mustRotate, lightCleared]);
+    }, [challengeId, attempt, t, mustRotate, lightDone]);
 
     /**
      * Handed to AWS's SDK, which calls it whenever it needs to sign. Fetching
@@ -1247,7 +1292,11 @@ export function FaceLivenessScreen({
                          * still IS the cover — see `handoverStill`.
                          */
                         <span className="verdict-layer pointer-events-none absolute inset-0 bg-black">
-                            {handoverStill ? (
+                            {handoffLive ? (
+                                // Over a hand-off the phone never stops filming: the cover is
+                                // the LIVE picture, not a frozen one (2026-11-24).
+                                <LiveCover mirror={probeMirror} />
+                            ) : handoverStill ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                     src={handoverStill}
@@ -1557,6 +1606,22 @@ export function FaceLivenessScreen({
                 // filming somebody waiting for a verdict — and goes live again
                 // if the check re-arms for another attempt.
                 cameraLive={phase === 'preparing' || phase === 'ready'}
+                // The phone draws the check as it goes (2026-11-24): checking, then green or red.
+                stage={
+                    phase === 'checking' || phase === 'passed' || phase === 'failed' || phase === 'unavailable'
+                        ? phase
+                        : 'live'
+                }
+                onPhoneRetry={() => {
+                    // Retry pressed on the phone: the same as the button here.
+                    if (phase !== 'failed' && phase !== 'unavailable') return;
+                    setNotice(null);
+                    setSnapshot(null);
+                    setStreamLive(false);
+                    setPhase('preparing');
+                    rearmLightGate();
+                    setAttempt((n) => n + 1);
+                }}
                 onPhaseChange={setHandoffPhase}
                 onLive={() => {
                     // A phone took over the frame: the light check's last frame

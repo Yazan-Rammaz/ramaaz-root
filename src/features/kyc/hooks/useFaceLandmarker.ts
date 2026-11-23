@@ -117,6 +117,37 @@ async function loadLandmarker(): Promise<import('@mediapipe/tasks-vision').FaceL
  * interleaving would hand the model a timestamp it had already been given, and
  * it answers that with a throw rather than with landmarks.
  */
+/*
+ * The model's FIRST run is the expensive one (2026-11-24): the browser compiles
+ * its GPU programs then, and the page is blocked for 3–5 s. It used to happen on
+ * the first live frame — exactly when the camera had just appeared — so the
+ * picture froze before the mesh showed. Run once on a blank image as soon as the
+ * screen opens (while the QR is scanned, or the splash plays) and that cost is
+ * paid where nobody is watching a moving picture. Once per page.
+ */
+let warmed: Promise<void> | null = null;
+export function warmUpLandmarker(): Promise<void> {
+    if (warmed) return warmed;
+    warmed = (async () => {
+        const ok = await ensureLandmarker(30_000);
+        if (!ok || !cachedLandmarker || typeof document === 'undefined') return;
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 256;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(0, 0, 256, 256);
+        }
+        try {
+            cachedLandmarker.detectForVideo(c, nextStamp());
+        } catch {
+            /* a failed warm-up only means the first real frame pays instead */
+        }
+    })();
+    return warmed;
+}
+
 let lastStamp = -1;
 
 function nextStamp(): number {

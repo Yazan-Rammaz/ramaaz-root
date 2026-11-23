@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 /**
  * Every knob that decides how the captured face LOOKS, in one table.
  *
@@ -1217,7 +1218,8 @@ export const CAPTURE_LIVE_MESH = {
      * constant — and with a ninth as many lines each one can carry six times
      * the width.
      */
-    lineWidth: 1.6,
+    // Thinner by request (2026-11-24): 1.6 read heavy on the face.
+    lineWidth: 0.9,
 
     /**
      * Opacity of the wireframe — STEADY. It never animates.
@@ -1349,6 +1351,10 @@ export const CAPTURE_LIVE_ZOOM = {
      * Until the guide is back, this stays off. The code below is correct and
      * costs nothing while disabled: `handleMeshBounds` returns before writing
      * any transform, and the sampling loop keeps ownership of the mirror.
+     *
+     * Tried again 2026-11-24 over the hand-off and it failed exactly as above: the
+     * face looked close, AWS still said "move closer". What works is the CAMERA's
+     * zoom (CAPTURE_CAMERA_ZOOM) — on the phone during a hand-off (PhoneCamera).
      */
     enabled: false,
 
@@ -1852,3 +1858,21 @@ export const CAPTURE_LIVE_GLASS = {
     faceX: 0.5,
     faceY: 0.42,
 } as const;
+
+/** The glass's look — shared with the phone's mirror of the check (PhoneCamera). */
+export const GLASS_VARS = {
+    '--live-glass-blur': `${CAPTURE_LIVE_GLASS.blur * 0.0625}rem`,
+    '--live-glass-saturation': CAPTURE_LIVE_GLASS.saturation,
+    /*
+     * ⚠️ /100 — `glass` is a PERCENTAGE and CSS alpha is 0..1. Handing the
+     * parser a 40 is not "40%", it is an out-of-range number that clamps to
+     * fully opaque, so the oval would render as a solid frosted disc on the
+     * face.
+     */
+    '--live-glass-amount': CAPTURE_LIVE_GLASS.glass / 100,
+    '--live-glass-feather': CAPTURE_LIVE_GLASS.ovalFeather,
+    '--live-glass-cx': CAPTURE_LIVE_GLASS.faceX,
+    '--live-glass-cy': CAPTURE_LIVE_GLASS.faceY,
+    '--live-glass-rx': CAPTURE_LIVE_GLASS.face,
+    '--live-glass-ry': CAPTURE_LIVE_GLASS.face * 1.3,
+} as CSSProperties;

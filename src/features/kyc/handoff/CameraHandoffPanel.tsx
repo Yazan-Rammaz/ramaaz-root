@@ -14,6 +14,8 @@ import { Icon } from '@/components/ui/Icon';
 import { CustomQRCode } from '@/components/ui/CustomQR';
 import { FormError } from '@/components/ui/FormError';
 import {
+    type IdMirror,
+    type PhoneStage,
     useCameraHandoff,
     type HandoffFacing,
     type HandoffPhase,
@@ -25,6 +27,9 @@ const rem = (px: number) => `${px * 0.0625}rem`;
 
 /** A device does not stop being a phone, so there is nothing to subscribe to. */
 const NEVER_CHANGES = () => () => {};
+
+/** How often the ID scanner's screen reaches the phone: ~15 times a second. */
+const ID_SEND_MS = 66;
 
 /**
  * "Checking…Checking…" → "Checking…".
@@ -70,6 +75,10 @@ export function CameraHandoffPanel({
     style,
     cameraLive = true,
     armed = true,
+    stage,
+    onPhoneRetry,
+    idMirror,
+    idPreview,
 }: {
     /**
      * The hand-off's own phase, reported upward.
@@ -110,6 +119,14 @@ export function CameraHandoffPanel({
      * step has no start button and opens it on arrival.
      */
     armed?: boolean;
+    /** Where the check is, drawn on the phone (face step only). */
+    stage?: PhoneStage;
+    /** The person pressed retry on the phone. */
+    onPhoneRetry?: () => void;
+    /** The ID scanner's screen, drawn on the phone (ID step only). */
+    idMirror?: IdMirror;
+    /** The captured card while it is checked (data URL). */
+    idPreview?: string | null;
     /**
      * The camera frame this hand-off belongs to.
      *
@@ -137,7 +154,8 @@ export function CameraHandoffPanel({
      */
     style?: CSSProperties;
 }) {
-    const { phase, url, error, start, stop, sendHint, sendCameraLive } = useCameraHandoff();
+    const { phase, url, error, start, stop, sendHint, sendCameraLive, sendStage, sendProgress, sendId, sendIdPreview } =
+        useCameraHandoff({ onPhoneRetry });
 
     /**
      * The frame element, resolved AFTER mount.
@@ -240,7 +258,16 @@ export function CameraHandoffPanel({
                 last = text;
                 sendHint(text);
             }
+            // AWS's oval-match bar, so the phone fills the same one.
+            const bar = frameEl.querySelector('.amplify-liveness-match-indicator__bar');
+            const now = bar ? Number(bar.getAttribute('aria-valuenow')) : NaN;
+            const value = Number.isFinite(now) ? Math.min(1, Math.max(0, now / 100)) : null;
+            if (value !== lastProgress) {
+                lastProgress = value;
+                sendProgress(value);
+            }
         };
+        let lastProgress: number | null | undefined;
 
         push();
         const observer = new MutationObserver(push);
@@ -250,7 +277,7 @@ export function CameraHandoffPanel({
             characterData: true,
         });
         return () => observer.disconnect();
-    }, [phase, sendHint, frameEl]);
+    }, [phase, sendHint, sendProgress, frameEl]);
 
     // Pass the host's camera state along whenever it changes — and once when
     // the connection opens, so a phone that joins mid-check is not left filming.
@@ -258,6 +285,74 @@ export function CameraHandoffPanel({
         if (phase !== 'live') return;
         sendCameraLive(cameraLive);
     }, [phase, cameraLive, sendCameraLive]);
+
+    // The ID scanner's screen, at most ten times a second and only when it changed.
+    const idJson = idMirror ? JSON.stringify(idMirror) : null;
+    /*
+     * At most every ID_SEND_MS, and NEVER held back by further changes. It was a
+     * debounce: the corners change on every frame, so each change restarted the
+     * wait and the phone heard nothing until the card stopped moving — the computer
+     * had captured before the phone showed it (2026-11-24). Now the latest state
+     * goes out on a steady beat.
+     */
+    const lastIdRef = useRef<string | null>(null);
+    const latestIdRef = useRef<string | null>(null);
+    const idSentAtRef = useRef(0);
+    const idTimerRef = useRef<number | null>(null);
+    useEffect(() => {
+        latestIdRef.current = idJson;
+        if (phase !== 'live' || !idJson || idJson === lastIdRef.current) return;
+        const flush = () => {
+            idTimerRef.current = null;
+            const json = latestIdRef.current;
+            if (!json || json === lastIdRef.current) return;
+            lastIdRef.current = json;
+            idSentAtRef.current = performance.now();
+            const msg = JSON.parse(json) as IdMirror;
+            // Corners arrive in the video's pixels: as fractions of it, the phone can
+            // place them on its own frame (the same stream, a different screen).
+            const v = frameEl?.querySelector('video');
+            msg.corners = msg.corners && v?.videoWidth ? msg.corners.map(([x, y]) => [x / v.videoWidth, y / v.videoHeight]) : null;
+            sendId(msg);
+        };
+        const wait = ID_SEND_MS - (performance.now() - idSentAtRef.current);
+        if (wait <= 0) flush();
+        else if (idTimerRef.current === null) idTimerRef.current = window.setTimeout(flush, wait);
+    }, [phase, idJson, sendId, frameEl]);
+    useEffect(
+        () => () => {
+            if (idTimerRef.current !== null) window.clearTimeout(idTimerRef.current);
+        },
+        [],
+    );
+    // The captured card, shrunk so it travels in one message.
+    useEffect(() => {
+        if (phase !== 'live') return;
+        if (!idPreview) {
+            sendIdPreview(null);
+            return;
+        }
+        const img = new Image();
+        img.onload = () => {
+            const scale = Math.min(1, 480 / img.width);
+            const c = document.createElement('canvas');
+            c.width = Math.round(img.width * scale);
+            c.height = Math.round(img.height * scale);
+            c.getContext('2d')?.drawImage(img, 0, 0, c.width, c.height);
+            try {
+                sendIdPreview(c.toDataURL('image/jpeg', 0.7));
+            } catch {
+                /* the phone keeps its live picture */
+            }
+        };
+        img.src = idPreview;
+    }, [phase, idPreview, sendIdPreview]);
+
+    // And where the check is, so the phone can show checking, then green or red.
+    useEffect(() => {
+        if (phase !== 'live' || !stage) return;
+        sendStage(stage);
+    }, [phase, stage, sendStage]);
 
     // Once per transition into `live`, never on a re-render. Re-arming twice
     // would open a second AWS liveness session — billed, and single-use.
@@ -369,11 +464,13 @@ export function CameraHandoffPanel({
                               >
                                   Scan with your phone.
                               </p>
+                              {/* A fresh code. It was stop(), and the QR came back only through the idle
+                                  restart — the moment the frame could be left empty. */}
                               <button
                                   type="button"
-                                  onClick={stop}
-                                  aria-label="Cancel"
-                                  title="Cancel"
+                                  onClick={() => void start(facing)}
+                                  aria-label="New code"
+                                  title="New code"
                                   className="text-[#707070]"
                                   style={{ marginTop: rem(12) }}
                               >

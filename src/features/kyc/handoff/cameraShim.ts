@@ -50,6 +50,18 @@ let original: { gum: GetUserMedia; enumerate: EnumerateDevices } | null = null;
 
 /** The relayed stream, when a hand-off is live. */
 let relayStream: MediaStream | null = null;
+/**
+ * The relayed video tracks, held apart from `relayStream` (2026-11-24).
+ *
+ * Every camera request used to get `relayStream` itself, and a screen that
+ * finished took its track OUT of that stream (`removeTrack`): the next request
+ * — AWS after a retry — found the stream with no video and waited for ever on
+ * a black frame while the phone was still filming. Each request now gets its
+ * own MediaStream around these same tracks, so nobody can empty another's.
+ */
+let relayTracks: MediaStreamTrack[] = [];
+/** The phone's own stream, before the steadying canvas — see relayPreview. */
+let rawRelay: MediaStream | null = null;
 
 /** The resolution to ask cameras for, when the quality lift is on. */
 let qualityBoost: { width: number; height: number } | null = null;
@@ -64,9 +76,32 @@ let qualityBoost: { width: number; height: number } | null = null;
 let phoneOnly = false;
 let waiting: ((stream: MediaStream) => void)[] = [];
 
+/*
+ * Counted, not a flag: a panel mounting while another unmounts (a remount, Strict
+ * Mode) ran on(true) then the old one's off(false), leaving it OFF while a hand-off
+ * was showing — measured 2026-11-24. Each panel adds one and takes one away.
+ */
+let phoneOnlyHolders = 0;
+
 export function requirePhoneCamera(on: boolean): void {
-  phoneOnly = on;
+  phoneOnlyHolders = Math.max(0, phoneOnlyHolders + (on ? 1 : -1));
+  phoneOnly = phoneOnlyHolders > 0;
   apply();
+}
+
+/**
+ * The phone's live picture, for a screen to SHOW while its own camera changes
+ * hands (2026-11-24): over a hand-off nothing closes between the light check and
+ * AWS's camera, so the laptop can keep the person moving instead of a still.
+ * Its own stream, like every request (see relayTracks). Null without a live relay.
+ */
+export function relayPreview(): MediaStream | null {
+    // The RAW phone track, not the canvas copy: the browser plays it on its own,
+    // so it keeps moving while the page is busy — the canvas is redrawn BY the page
+    // and froze with it (2026-11-24). Only for showing: AWS still gets the steady one.
+    const raw = rawRelay?.getVideoTracks().filter((t) => t.readyState === 'live') ?? [];
+    if (raw.length) return new MediaStream(raw);
+    return relayStream && relayTracks.some((t) => t.readyState === 'live') ? new MediaStream(relayTracks) : null;
 }
 
 /** Is a hand-off currently feeding this page's cameras? */
@@ -364,11 +399,14 @@ export function installCameraShim(stream: MediaStream): void {
     steady.getVideoTracks().forEach((t) => describeRelayedTrack(t, normalized?.size));
     stream.getVideoTracks().forEach((t) => describeRelayedTrack(t));
     relayStream = steady;
+    relayTracks = steady.getVideoTracks();
+    rawRelay = stream;
     apply();
     // Whoever asked while the phone was not connected yet gets it now.
     const asked = waiting;
     waiting = [];
-    asked.forEach((resolve) => resolve(stream));
+    // The same steady tracks every later request gets, each in its own stream (see relayTracks).
+    asked.forEach((resolve) => resolve(new MediaStream(relayTracks)));
 }
 
 /**
@@ -417,7 +455,7 @@ function apply(): void {
         // Only a stream still carrying video. A dead one (the phone walked
         // away) is never handed out: on a computer the request waits for the
         // phone to connect again, through the new QR the hand-off opens.
-        if (relayStream && relayStream.getVideoTracks().some((t) => t.readyState === 'live')) {
+        if (relayStream && relayTracks.some((t) => t.readyState === 'live')) {
             // Re-describe on EVERY call, not just at install.
             //
             // A retry re-mounts the capture screen and asks for a camera again,
@@ -431,17 +469,18 @@ function apply(): void {
             //
             // Idempotent: describing an already-described track just rewrites
             // the same two properties.
-            relayStream.getVideoTracks().forEach((t) => describeRelayedTrack(t, normalized?.size));
+            relayTracks.forEach((t) => describeRelayedTrack(t, normalized?.size));
 
-            // The SAME MediaStream for every caller, deliberately. Cloning per
-            // call would let one screen's `stop()` kill the tracks another still
-            // needs, and the hand-off owns this stream's lifetime, not its
-            // consumers.
+            // The SAME tracks for every caller (never clones: one screen's
+            // `stop()` would kill what another still needs — and `stop()` is a
+            // no-op on these, see describeRelayedTrack), in a NEW stream each
+            // time, so a caller's removeTrack empties only its own (see
+            // `relayTracks`). The hand-off owns the tracks' lifetime.
             //
             // The quality lift does not apply here and must not: the resolution
             // of a relayed stream is the phone's decision, made by
             // `PhoneCamera`'s own constraints at the other end of the link.
-            return relayStream;
+            return new MediaStream(relayTracks);
         }
 
         // A computer never opens its own camera: wait for the phone.
@@ -488,6 +527,8 @@ export function uninstallCameraShim(): void {
     normalized?.stop();
     normalized = null;
     relayStream = null;
+    relayTracks = [];
+    rawRelay = null;
     apply();
 }
 

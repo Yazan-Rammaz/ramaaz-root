@@ -165,7 +165,8 @@ function getRoundedQuadPath(
     return commands.join(' ');
 }
 
-function buildOverlayPath(corners: ScannerCorners, width: number, height: number): string {
+/** The dark mask with the card cut out (rounded corners) — also drawn on the phone during a hand-off. */
+export function buildOverlayPath(corners: ScannerCorners, width: number, height: number): string {
     return [
         `M 0 0`,
         `H ${width}`,

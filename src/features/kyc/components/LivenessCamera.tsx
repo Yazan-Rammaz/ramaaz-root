@@ -17,6 +17,7 @@ import {
     MIRROR_CLASS,
     CAPTURE_PORTRAIT,
     CAPTURE_RESOLUTION,
+    GLASS_VARS,
 } from '@/features/kyc/config/capture';
 import { FaceMesh } from '@/features/kyc/components/FaceMesh';
 import { useLivePreview } from '@/features/kyc/hooks/useLivePreview';
@@ -36,6 +37,7 @@ import { kickstartSegmenter } from '@/features/kyc/services/portrait';
 import { measureSkin } from '@/features/kyc/services/skinMask';
 import {
     installCaptureQuality,
+    relayPreview,
     uninstallCaptureQuality,
 } from '@/features/kyc/handoff/cameraShim';
 import './liveness.css';
@@ -151,22 +153,6 @@ const MESH_COVER_WAIT_MS = 8000;
  * its first detection and owns it from then on; see `placeGlass`, which also
  * explains why the two elements need different centres for the same face.
  */
-const GLASS_VARS = {
-    '--live-glass-blur': `${CAPTURE_LIVE_GLASS.blur * 0.0625}rem`,
-    '--live-glass-saturation': CAPTURE_LIVE_GLASS.saturation,
-    /*
-     * ⚠️ /100 — `glass` is a PERCENTAGE and CSS alpha is 0..1. Handing the
-     * parser a 40 is not "40%", it is an out-of-range number that clamps to
-     * fully opaque, so the oval would render as a solid frosted disc on the
-     * face.
-     */
-    '--live-glass-amount': CAPTURE_LIVE_GLASS.glass / 100,
-    '--live-glass-feather': CAPTURE_LIVE_GLASS.ovalFeather,
-    '--live-glass-cx': CAPTURE_LIVE_GLASS.faceX,
-    '--live-glass-cy': CAPTURE_LIVE_GLASS.faceY,
-    '--live-glass-rx': CAPTURE_LIVE_GLASS.face,
-    '--live-glass-ry': CAPTURE_LIVE_GLASS.face * 1.3,
-} as React.CSSProperties;
 
 const FACE_TRACK_MS = 320;
 
@@ -522,6 +508,31 @@ export function LivenessCamera({
      */
     const videoElRef = useRef<HTMLVideoElement | null>(null);
     const liveCanvasRef = useRef<HTMLCanvasElement>(null);
+    /*
+     * Over a hand-off, what the person SEES is the phone's raw video (2026-11-24).
+     *
+     * AWS's camera here is the steadied copy (cameraShim's canvas), and that copy —
+     * like the retouched canvas over it — is redrawn by the page, so it stood still
+     * whenever the page was busy (AWS's detector, the mesh). The raw WebRTC track is
+     * played by the browser itself and keeps moving regardless. So it is shown, on
+     * top of AWS's view made transparent; AWS and the capture still read their own
+     * copy underneath, untouched. Its own stream, like every relay request.
+     */
+    const [rawPreview, setRawPreview] = useState<MediaStream | null>(null);
+    const rawPreviewRef = useRef<MediaStream | null>(null);
+    useEffect(() => {
+        const look = () => {
+            const next = relayPreview();
+            const id = (s: MediaStream | null) => s?.getVideoTracks()[0]?.id ?? null;
+            if (id(next) !== id(rawPreviewRef.current)) {
+                rawPreviewRef.current = next;
+                setRawPreview(next);
+            }
+        };
+        look();
+        const t = window.setInterval(look, 500);
+        return () => window.clearInterval(t);
+    }, []);
     /**
      * The glass copy of the preview — a second <video> on the SAME stream.
      *
@@ -676,9 +687,15 @@ export function LivenessCamera({
      * off — then the picture alone decides, as before. `announce` is wired to
      * `sayLive` below (it is defined later in the component).
      */
+    /*
+     * The mesh drives the viewfinder's zoom and places the glass (handleMeshBounds), so
+     * it runs on every device. Turning it off on a computer (a 2026-11-24 test — it was
+     * not the cause of the stutter) left the laptop with no zoom.
+     */
+    const meshOn = CAPTURE_LIVE_MESH.enabled;
     const liveGate = useRef({
         picture: false,
-        mesh: !CAPTURE_LIVE_MESH.enabled,
+        mesh: !meshOn,
         announce: () => {},
     });
 
@@ -1492,9 +1509,11 @@ export function LivenessCamera({
              * slow, it is not happening.
              */
             const glassCopy = glassCopyRef.current;
-            if (glassCopy && video?.srcObject && !glassModeRef.current) {
-                if (glassCopy.srcObject !== video.srcObject) {
-                    glassCopy.srcObject = video.srcObject;
+            // Over a hand-off the glass copies the phone's raw video too (see rawPreview).
+            const glassSource = rawPreviewRef.current ?? video?.srcObject ?? null;
+            if (glassCopy && glassSource && !glassModeRef.current) {
+                if (glassCopy.srcObject !== glassSource) {
+                    glassCopy.srcObject = glassSource;
                     glassProbeAtRef.current = tick;
                     void glassCopy.play().catch(() => {
                         // An autoplay refusal answers the question early.
@@ -2333,7 +2352,24 @@ export function LivenessCamera({
             // painting — otherwise a device whose governor gave up would be
             // left looking at a black frame with a hidden video behind it.
             data-live={live.active ? 'on' : undefined}
+            // The phone's raw video is the picture (see rawPreview).
+            data-raw={rawPreview ? 'on' : undefined}
         >
+            {rawPreview && (
+                <video
+                    ref={(el) => {
+                        if (el && el.srcObject !== rawPreview) {
+                            el.srcObject = rawPreview;
+                            void el.play().catch(() => {});
+                        }
+                    }}
+                    aria-hidden
+                    autoPlay
+                    muted
+                    playsInline
+                    className={`rz-live-raw pointer-events-none absolute inset-0 h-full w-full object-cover ${MIRROR_CLASS}`}
+                />
+            )}
             {/*
               The retouched preview.
 
@@ -2382,7 +2418,7 @@ export function LivenessCamera({
                 on the FACE, which is the one part the glass deliberately leaves
                 clear, so putting it under the pane would hide it exactly where
                 it is meant to be. */}
-            {CAPTURE_LIVE_MESH.enabled && (
+            {meshOn && (
                 <FaceMesh
                     videoRef={videoElRef}
                     canvasRef={meshCanvasRef}
@@ -2430,6 +2466,10 @@ export function LivenessCamera({
                         hintCanNotIdentifyText: t('faceNoFace'),
                         hintTooCloseText: t('faceTooClose'),
                         hintTooFarText: t('faceTooFar'),
+                        // AWS's screen-reader line for the oval bar ("50% completed. Keep moving
+                        // closer.") sits inside the hint, so it reached the phone as a long
+                        // two-line hint (2026-11-24). Our own short line instead, translated.
+                        hintMatchIndicatorText: t('faceTooFar'),
                         hintConnectingText: t('faceLoading'),
                         hintVerifyingText: t('faceChecking'),
                         hintCheckCompleteText: t('faceChecking'),

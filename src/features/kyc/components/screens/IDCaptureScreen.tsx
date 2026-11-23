@@ -22,6 +22,7 @@ import ExitConfirmDialog from '../ExitConfirmDialog';
 import { FlexSpace } from '@/components/ui/FlexSpace';
 import { Icon } from '@/components/ui/Icon';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
+import { relayPreview } from '@/features/kyc/handoff/cameraShim';
 import { idConfig, kycConfig } from '@/features/kyc/config/kycConfig';
 import { FaceProgressBar } from '../FaceProgressBar';
 
@@ -144,6 +145,22 @@ export default function IDCaptureScreen() {
 
     const [pollState, setPollState] = useState<PollState>('idle');
     const [activeSide, setActiveSide] = useState<'front' | 'back'>('front');
+    // The phone's raw video during a hand-off (see the viewfinder).
+    const [rawPreview, setRawPreview] = useState<MediaStream | null>(null);
+    useEffect(() => {
+        let current: string | null = null;
+        const look = () => {
+            const next = relayPreview();
+            const id = next?.getVideoTracks()[0]?.id ?? null;
+            if (id !== current) {
+                current = id;
+                setRawPreview(next);
+            }
+        };
+        look();
+        const t = window.setInterval(look, 500);
+        return () => window.clearInterval(t);
+    }, []);
     const [frontImageData, setFrontImageData] = useState<string | null>(null);
     const [backImageData, setBackImageData] = useState<string | null>(null);
     const [frontPartial, setFrontPartial] = useState<Partial<IDDocument> | null>(null);
@@ -160,6 +177,7 @@ export default function IDCaptureScreen() {
         isDetecting,
         isStable,
         corners: docCorners,
+        rawCorners,
         overlay: scannerOverlay,
         capture: captureDocument,
     } = useDocumentScanner(videoRef, {
@@ -302,6 +320,13 @@ export default function IDCaptureScreen() {
     const flipLockoutRef = useRef(false);
     const [flipLockout, setFlipLockout] = useState(false);
     const isArmedRef = useRef(true);
+    /*
+     * Bumped when a lock lifts by itself (2026-11-24). The locks are refs, and the
+     * auto-capture only re-checks when its dependencies change — so a lock that
+     * lifted while the card sat still, green, waited for the card to move: the back
+     * side lagged, or needed taking out of the frame and back. This re-runs it.
+     */
+    const [unlockTick, setUnlockTick] = useState(0);
 
     // ── Local frame validation ────────────────────────────────────────────────
     // Runs 5 Canvas-API checks on every frame (brightness, glare, sharpness,
@@ -514,10 +539,13 @@ export default function IDCaptureScreen() {
             flipLockoutRef.current = true;
             setFlipLockout(true);
             setStatusText('Please flip to the BACK side...');
-            // Only ungate auto-capture after minimum wait; UI lockout stays until card detected
+            // Only ungate auto-capture after minimum wait; UI lockout stays until card detected.
+            // 3 s (was 5): long enough to turn the card over; the similarity check below
+            // still refuses a front shown again.
             const timer = setTimeout(() => {
                 flipLockoutRef.current = false;
-            }, 5000);
+                setUnlockTick((n) => n + 1);
+            }, 3000);
             return () => clearTimeout(timer);
         }
 
@@ -728,8 +756,14 @@ export default function IDCaptureScreen() {
                     setPollState('aligning');
                     setFlipLockout(true);
                     setIsVerifying(false);
-                    // Force user to remove the card to re-arm
+                    // Re-armed after a short pause rather than only once the card leaves the
+                    // frame (flipping it inside the frame never did). Still the front? This
+                    // check refuses it again.
                     isArmedRef.current = false;
+                    window.setTimeout(() => {
+                        isArmedRef.current = true;
+                        setUnlockTick((n) => n + 1);
+                    }, 2000);
                     return; // SILENT ABORT: Do not send to AWS
                 }
             }
@@ -856,8 +890,20 @@ export default function IDCaptureScreen() {
       `docCorners` is still non-null inside every branch below, because
       `isLockedOn` requires `isCardDetected`, which is `!!docCorners`.
     */
+    /*
+     * The brackets close onto the card as soon as ALL FOUR of its corners are inside
+     * the frame (2026-11-24) — not only once it is centred and close enough, which is
+     * what the capture waits for (isLockedOn). Seeing the corners land is the cue that
+     * the card was found; centring it is the next step.
+     */
+    const bracketsOnCard =
+        !!docCorners &&
+        !!scannerOverlay &&
+        [docCorners.topLeft, docCorners.topRight, docCorners.bottomRight, docCorners.bottomLeft].every(
+            (p) => p.x >= 2 && p.y >= 2 && p.x <= scannerOverlay.width - 2 && p.y <= scannerOverlay.height - 2,
+        );
     const topLeftStyle =
-        isLockedOn && docCorners
+        bracketsOnCard && docCorners
             ? {
                   top: `${Math.max(0, docCorners.topLeft.y - cornerInset)}px`,
                   left: `${Math.max(0, docCorners.topLeft.x - cornerInset)}px`,
@@ -866,7 +912,7 @@ export default function IDCaptureScreen() {
               }
             : {};
     const topRightStyle =
-        isLockedOn && docCorners
+        bracketsOnCard && docCorners
             ? {
                   top: `${Math.max(0, docCorners.topRight.y - cornerInset)}px`,
                   left: `${Math.max(0, docCorners.topRight.x - cornerInset - cornerBracketSize)}px`,
@@ -875,7 +921,7 @@ export default function IDCaptureScreen() {
               }
             : {};
     const bottomLeftStyle =
-        isLockedOn && docCorners
+        bracketsOnCard && docCorners
             ? {
                   top: `${Math.max(0, docCorners.bottomLeft.y - cornerInset - cornerBracketSize)}px`,
                   left: `${Math.max(0, docCorners.bottomLeft.x - cornerInset)}px`,
@@ -884,7 +930,7 @@ export default function IDCaptureScreen() {
               }
             : {};
     const bottomRightStyle =
-        isLockedOn && docCorners
+        bracketsOnCard && docCorners
             ? {
                   top: `${Math.max(0, docCorners.bottomRight.y - cornerInset - cornerBracketSize)}px`,
                   left: `${Math.max(0, docCorners.bottomRight.x - cornerInset - cornerBracketSize)}px`,
@@ -999,7 +1045,7 @@ export default function IDCaptureScreen() {
             setStatusText('Hold still…');
         }
         // CRITICAL: handleCaptureClick is NOT in this array — the ref handles it
-    }, [isLockedOn, isCardDetected, isCardCentered, isActive, isVerifying, pollState, holdingSteady]);
+    }, [isLockedOn, isCardDetected, isCardCentered, isActive, isVerifying, pollState, holdingSteady, unlockTick]);
 
     return (
         <div className="flex flex-col items-center justify-start h-full bg-white">
@@ -1175,6 +1221,25 @@ export default function IDCaptureScreen() {
                     autoPlay
                     style={{ transform: shouldMirror ? 'scaleX(-1)' : 'none' }}
                 />
+                {/* Over a hand-off, the phone's raw video is what is SEEN (2026-11-24):
+                    the browser plays it, so it stays smooth while the page works; the
+                    scanner still reads its own copy underneath. See LivenessCamera. */}
+                {rawPreview && (
+                    <video
+                        ref={(el) => {
+                            if (el && el.srcObject !== rawPreview) {
+                                el.srcObject = rawPreview;
+                                void el.play().catch(() => {});
+                            }
+                        }}
+                        aria-hidden
+                        autoPlay
+                        muted
+                        playsInline
+                        className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                        style={{ transform: shouldMirror ? 'scaleX(-1)' : 'none' }}
+                    />
+                )}
                 <canvas ref={canvasRef} className="hidden" />
                 {scannerOverlay && (
                     <svg
@@ -1393,6 +1458,32 @@ export default function IDCaptureScreen() {
                second ref on it would be two names for one thing. */
                 frameRef={viewfinderRef}
                 facing="environment"
+                // Everything this screen draws, for the phone (2026-11-24).
+                idMirror={{
+                    state: pollState,
+                    status: cameraError ?? statusText,
+                    color: cornerColor,
+                    // In the video's PIXELS; the panel turns them into fractions as it sends.
+                    corners: rawCorners
+                        ? [rawCorners.topLeft, rawCorners.topRight, rawCorners.bottomRight, rawCorners.bottomLeft].map(
+                              (p): [number, number] => [p.x, p.y],
+                          )
+                        : null,
+                    locked: bracketsOnCard,
+                    hold: pollState === 'aligning' && checkResult?.pass ? Math.min(1, stableDuration / 1000) : null,
+                    holdReady: readyToCapture,
+                    side: activeSide,
+                    passport: isPassport,
+                    finished: pollState === 'done' && (isPassport || activeSide === 'back'),
+                    canRetry: pollState === 'idle' || !!cameraError,
+                }}
+                // Retry pressed on the phone: as the Start button here (or, after a camera
+                // failure, its retry).
+                onPhoneRetry={() => {
+                    if (cameraError) void startCamera();
+                    else if (pollState === 'idle') void handleCaptureClick();
+                }}
+                idPreview={pollState === 'processing' || isVerifying ? debugPreview : null}
                 // The QR waits for "Start Live Detection Your ID" (2026-11-23).
                 armed={handoffArmed}
                 onLive={() => {

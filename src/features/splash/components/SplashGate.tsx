@@ -39,6 +39,10 @@ const SEEN_KEY = "root_splash_seen";
 
 function shouldPlay(): boolean {
   if (typeof window === "undefined") return false;
+  // Never on the phone's hand-off page (2026-11-24): it is a camera on the end of
+  // a wire, and the computer starts using it at once — a splash there hid what
+  // the check was already doing.
+  if (window.location.pathname.startsWith("/handoff/")) return false;
   try {
     const [entry] = performance.getEntriesByType(
       "navigation",
