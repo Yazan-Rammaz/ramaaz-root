@@ -134,6 +134,37 @@ export function kickstartSegmenter(): void {
     void loadSegmenter('VIDEO');
 }
 
+/*
+ * The photo's background blur, loaded AND run once as soon as the face screen
+ * opens (2026-11-24). It used to start loading only when the recording ended, and
+ * its first run compiles GPU programs: the first check of a session spent 7–9 s
+ * there ("processFrame took 8589ms") with the page blocked, while a retry — the
+ * model already warm — took 0.16 s. Paid up front, the verdict comes at once.
+ * IMAGE only: that is the one the capture uses. Once per page.
+ */
+let segmenterWarmed: Promise<void> | null = null;
+export function warmUpSegmenter(): Promise<void> {
+    if (segmenterWarmed) return segmenterWarmed;
+    segmenterWarmed = (async () => {
+        const segmenter = await loadSegmenter('IMAGE');
+        if (!segmenter || typeof document === 'undefined') return;
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 256;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(0, 0, 256, 256);
+        }
+        try {
+            segmenter.segment(c).close?.();
+        } catch {
+            /* a failed warm-up only means the first real photo pays instead */
+        }
+    })();
+    return segmenterWarmed;
+}
+
 /** What `applyPortrait` did, for the bench to print. */
 export interface PortraitResult {
     applied: boolean;

@@ -20,10 +20,11 @@ import { isChallengeExpired, KycHttpError } from '@/features/kyc/services/httpKy
 import { restartSignInAction } from '@/features/auth/actions';
 import { waitForSplash } from '@/features/splash/timing';
 import { ensureLandmarker, warmUpLandmarker } from '@/features/kyc/hooks/useFaceLandmarker';
+import { warmUpSegmenter } from '@/features/kyc/services/portrait';
 import { useCamera } from '@/features/kyc/hooks/useCamera';
 import { useLightCheck } from '@/features/kyc/hooks/useLightCheck';
 import type { FaceFrameVerdict } from '@/features/kyc/services/imageQuality';
-import { CAPTURE_LIVE_MESH } from '@/features/kyc/config/capture';
+import { CAPTURE_LIVE_MESH, CAPTURE_PORTRAIT } from '@/features/kyc/config/capture';
 
 // XD px -> scaling rem.
 const rem = (px: number) => `${px * 0.0625}rem`;
@@ -497,9 +498,11 @@ export function FaceLivenessScreen({
      */
     const handheld = useSyncExternalStore(NO_SUBSCRIBE, isHandheldDevice, () => true);
     const lightDone = lightCleared || !handheld;
-    // The mesh model's costly first run, now — not on the first live frame.
+    // The two models' costly first runs, now — not on the first live frame (the mesh)
+    // or after the recording (the photo's blur). One after the other, so they do not
+    // compile on the graphics card at the same moment.
     useEffect(() => {
-        void warmUpLandmarker();
+        void warmUpLandmarker().then(() => (CAPTURE_PORTRAIT.enabled ? warmUpSegmenter() : undefined));
     }, []);
 
     const { verdict: lightVerdict, progress: lightProgress } = useLightCheck({
