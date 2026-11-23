@@ -1,6 +1,6 @@
 import "server-only";
 import { getLocale } from "next-intl/server";
-import { activeOperations, readAllPages } from "@/lib/api/operations";
+import { activeOperations, readAllPagesShared } from "@/lib/api/operations";
 import { pickName } from "@/lib/i18n/localized";
 import { rdbCurrencySchema, type Currency, type RdbCurrency } from "./schema";
 
@@ -19,7 +19,7 @@ import { rdbCurrencySchema, type Currency, type RdbCurrency } from "./schema";
  * so nothing from RDB uses it.
  */
 export async function listCurrencies(): Promise<Currency[]> {
-  const [rows, locale] = await Promise.all([readAllPages("currency.list"), getLocale()]);
+  const [rows, locale] = await Promise.all([readAllPagesShared("currency.list"), getLocale()]);
   return rdbCurrencySchema.array().parse(rows).map((c) => toCurrency(c, locale));
 }
 

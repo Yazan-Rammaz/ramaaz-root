@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { useEffect, useState, useTransition } from 'react';
+import { Suspense, use, useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { iosEase } from '@/components/motion/presets';
@@ -105,8 +105,8 @@ export function WorkStructureScreen({
     managementUrl?: string;
     structure: Structure;
     panel: LevelPanel | null;
-    /** The open level's Data Setting tab. */
-    data: DataSettingsValue | null;
+    /** The open level's Data Setting reads — a promise, read by the two tabs that need it (see WithData). */
+    data: Promise<DataSettingsValue | null> | null;
 }) {
     const t = useTranslations('work');
     const router = useRouter();
@@ -114,7 +114,11 @@ export function WorkStructureScreen({
     // The level being opened shows at once; the panel follows when the server has read it.
     const [picking, setPicking] = useState<string | null>(null);
     const openKey = panel ? levelKey(panel.level) : null;
-    const selectedKey = navigating && picking !== null ? picking : openKey;
+    // Closing (X) is instant everywhere, not only for the panel (2026-11-24): the
+    // row is deselected and the navbar's X turns back into + at the click, while
+    // the server catches up. Opening shows the picked row the same way.
+    const closing = navigating && picking === null;
+    const selectedKey = navigating ? picking : openKey;
 
     const [tab, setTab] = useState<PanelTab>('login');
     const [view, setView] = useState<View>({ kind: 'dashboard' });
@@ -139,12 +143,12 @@ export function WorkStructureScreen({
             setOnClose(() => setView({ kind: 'dashboard' }));
             return () => setOnClose(null);
         }
-        if (!openKey) return;
+        if (!openKey || closing) return;
         setOnClose(() => open(null));
         return () => setOnClose(null);
         // `open` is recreated every render; the close target only changes with these.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [view.kind, openKey, setOnClose]);
+    }, [view.kind, openKey, setOnClose, closing]);
 
     // No live stream yet (add-admin answers §5): while Login Info is open and
     // the window is visible, read the page again every 10 seconds and when the
@@ -173,7 +177,6 @@ export function WorkStructureScreen({
     const node = openKey ? findNode(structure.tree, openKey) : undefined;
     // While another level is being read: its row's node (shown at once), or closing (nothing open).
     const pickedNode = navigating && picking !== null && picking !== openKey ? findNode(structure.tree, picking) : undefined;
-    const closing = navigating && picking === null;
     const admin: BusinessAdmin | undefined =
         panel && (view.kind === 'admin' || view.kind === 'step') ? panel.admins.find((a) => a.id === view.id) : undefined;
     const back = () => setView({ kind: 'dashboard' });
@@ -232,7 +235,11 @@ export function WorkStructureScreen({
                                         onChange={setTab}
                                     />
                                     <div className="thin-scroll flex flex-1 flex-col gap-8 overflow-y-auto px-4 pt-4">
-                                        {tab === 'info' && <InfoTab panel={panel} node={node} data={data} />}
+                                        {tab === 'info' && (
+                                            <Suspense fallback={<PanelSkeleton tab="info" />}>
+                                                <WithData promise={data}>{(d) => <InfoTab panel={panel} node={node} data={d} />}</WithData>
+                                            </Suspense>
+                                        )}
                                         {tab === 'settings' && (
                                             <SettingsForm level={panel.level} policy={panel.policy} templates={panel.templates} />
                                         )}
@@ -249,13 +256,21 @@ export function WorkStructureScreen({
                                             </>
                                         )}
                                         {tab === 'data' && data && (
-                                            <DataSettings
-                                                key={openKey}
-                                                level={panel.level}
-                                                data={data}
-                                                roleChoices={panel.levelRoleChoices}
-                                                levelRoles={panel.levelRoles}
-                                            />
+                                            <Suspense fallback={<PanelSkeleton tab="data" />}>
+                                                <WithData promise={data}>
+                                                    {(d) =>
+                                                        d && (
+                                                            <DataSettings
+                                                                key={openKey}
+                                                                level={panel.level}
+                                                                data={d}
+                                                                roleChoices={panel.levelRoleChoices}
+                                                                levelRoles={panel.levelRoles}
+                                                            />
+                                                        )
+                                                    }
+                                                </WithData>
+                                            </Suspense>
                                         )}
                                     </div>
                                     {tab === 'login' && !node.closed && (
@@ -350,6 +365,12 @@ function PanelHeader({
  * framed blue. A unit shows where it stands beside its name ("North · Jahra");
  * a closed one is greyed out, and opens read-only.
  */
+/** Reads the Data Setting promise for a tab that needs it; its Suspense shows the tab's skeleton meanwhile. */
+function WithData({ promise, children }: { promise: Promise<DataSettingsValue | null> | null; children: (d: DataSettingsValue | null) => ReactNode }) {
+    const d = promise ? use(promise) : null;
+    return <>{children(d)}</>;
+}
+
 function Tree({
     nodes,
     depth,

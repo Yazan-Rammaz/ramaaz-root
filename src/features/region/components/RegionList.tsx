@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
@@ -71,7 +71,6 @@ export function RegionList({
   reopenable: boolean;
 }) {
   const t = useTranslations("region");
-  const router = useRouter();
   const params = useSearchParams();
   // The sub-tab is client state (kept out of the URL). Only the drawer uses a
   // param (?add=country | ?add=division), which the navbar "+" sets from the

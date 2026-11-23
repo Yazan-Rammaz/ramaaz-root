@@ -229,6 +229,9 @@ export function RoleList({
               <Reorder.Item
                 key={r.id}
                 value={r.id}
+                // Position only (2026-11-24): the default also animates SIZE, so when the panel
+                // opened and the list narrowed, every row played that as a stretch and back.
+                layout="position"
                 className="flex cursor-grab gap-4 active:cursor-grabbing"
               >
                 <span className="flex h-50 w-50 shrink-0 items-center justify-center rad-12 bg-surface fz-14 text-ink">

@@ -4,6 +4,7 @@ import { cache } from "react";
 import { z } from "zod";
 import { AUTH_COOKIE_NAMES } from "@/lib/auth/cookies";
 import { backendFetch, getSelectedSystemId } from "./backend";
+import { keptAfter, markWritten } from "./fresh";
 
 /**
  * THE one way to call a project's operation (RDB's currencies, countries,
@@ -80,6 +81,7 @@ export async function readOperation(name: string, input: ReadInput = {}): Promis
  */
 export async function runCommand(name: string, input: CommandInput): Promise<CommandOutcome> {
   forgetShared();
+  await markWritten();
   const raw = await backendFetch.post<unknown>(operationPath(name), input, {
     headers: { "Idempotency-Key": crypto.randomUUID() },
   });
@@ -119,7 +121,7 @@ export function commandOrRetry(
  * (~0.4 s each, measured 2026-11-23): opening a level asked for 13 and waited
  * ~5.5 s for the last. The catalogs among them (departments, job titles, work
  * types, countries, currencies, …) change only when somebody edits them, so a
- * read of one is kept for a minute and shared by the requests that follow.
+ * read of one is kept for a few minutes and shared by the requests that follow.
  *
  * Kept per signed-in session and per project (the session's refresh cookie
  * and the selected system are the key), so nobody is ever served what another
@@ -127,8 +129,11 @@ export function commandOrRetry(
  * every write goes through `runCommand` / `retryCommand` — forgets it all,
  * so a save is seen at once. A failed read is not kept.
  */
-const SHARED_MS = 60_000;
-const shared = new Map<string, { until: number; value: Promise<unknown> }>();
+// 5 minutes (was 1, 2026-11-24): moving between pages a minute apart found it expired
+// every time and paid ~3 s again. Any command still clears it at once; an edit made in
+// the project itself shows here within 5 minutes.
+const SHARED_MS = 5 * 60_000;
+const shared = new Map<string, { at: number; until: number; value: Promise<unknown> }>();
 
 function forgetShared() {
   shared.clear();
@@ -143,22 +148,23 @@ async function sharedKey(name: string, input: unknown): Promise<string | null> {
 async function keep<T>(name: string, input: unknown, read: () => Promise<T>): Promise<T> {
   const key = await sharedKey(name, input);
   if (!key) return read();
-  const now = Date.now();
+  const [since, now] = [await keptAfter(), Date.now()];
   const hit = shared.get(key);
-  if (hit && hit.until > now) return hit.value as Promise<T>;
+  // Not after a refresh, and not if this browser wrote anything since it was kept (./fresh.ts).
+  if (hit && hit.until > now && hit.at > since) return hit.value as Promise<T>;
   for (const [k, v] of shared) if (v.until <= now) shared.delete(k);
   const value = read();
-  shared.set(key, { until: now + SHARED_MS, value });
+  shared.set(key, { at: now, until: now + SHARED_MS, value });
   value.catch(() => shared.delete(key));
   return value;
 }
 
-/** `readOperation` for a list that rarely changes: kept for a minute (see above). */
+/** `readOperation` for a list that rarely changes: kept for a few minutes (see above). */
 export function readShared(name: string, input: ReadInput = {}): Promise<unknown> {
   return keep(name, input, () => readOperation(name, input));
 }
 
-/** `readAllPages` for a list that rarely changes: kept for a minute (see above). */
+/** `readAllPages` for a list that rarely changes: kept for a few minutes (see above). */
 export function readAllPagesShared(name: string, input: ReadInput = {}): Promise<unknown[]> {
   return keep(`pages:${name}`, input, () => readAllPages(name, input));
 }

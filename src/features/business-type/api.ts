@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { readAllPages, readOperation } from "@/lib/api/operations";
+import { readAllPagesShared, readShared } from "@/lib/api/operations";
 import { rdbCatalogItemSchema, type BusinessCountry, type BusinessKind, type BusinessType, type RdbCatalogItem } from "./schema";
 
 /**
@@ -27,7 +27,7 @@ export function toBusinessType(item: RdbCatalogItem, kind: BusinessKind): Busine
 }
 
 export async function listBusinessTypes(): Promise<BusinessType[]> {
-  const [business, work] = await Promise.all([readOperation("business_type.list"), readOperation("work_type.list")]);
+  const [business, work] = await Promise.all([readShared("business_type.list"), readShared("work_type.list")]);
   const kindOf = (group?: string): BusinessKind => (group === "corporate" ? "corporate" : "individual");
   return [
     ...z
@@ -52,6 +52,6 @@ const rdbCountrySchema = z
 
 /** The project's countries from RDB — the ids a type's `countries` holds. A closed one is shown grey. */
 export async function listBusinessCountries(): Promise<BusinessCountry[]> {
-  const rows = z.array(rdbCountrySchema).parse(await readAllPages("country.list", { query: { includeDeleted: "true" } }));
+  const rows = z.array(rdbCountrySchema).parse(await readAllPagesShared("country.list", { query: { includeDeleted: "true" } }));
   return rows.map((c) => ({ id: c.id, name: c.name, code: c.code?.toUpperCase(), closed: !!c.deletedAt }));
 }

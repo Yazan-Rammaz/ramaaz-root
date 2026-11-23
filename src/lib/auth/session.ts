@@ -2,11 +2,11 @@ import "server-only";
 import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { api, ApiError, SessionLockedError } from "@/lib/api/server";
+import { ApiError, SessionLockedError } from "@/lib/api/server";
 import { getAccessToken, readSessionUser } from "@/lib/auth/cookies";
+import { readMe } from "@/lib/auth/me";
 import {
   apiErrorSchema,
-  AUTH_PATHS,
   ERROR_CODES,
   meResponseSchema,
   wireUserSchema,
@@ -131,7 +131,7 @@ const readSession = cache(
     if (!(await getAccessToken())) return { user: null };
 
     try {
-      const raw = await api.get<unknown>(AUTH_PATHS.me);
+      const raw = await readMe();
       return { user: toSessionUser(meResponseSchema.parse(raw).user) };
     } catch (error) {
       // Not signed in on THIS token — which may still be a live session.

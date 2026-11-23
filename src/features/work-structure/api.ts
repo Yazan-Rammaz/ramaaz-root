@@ -103,7 +103,9 @@ async function countries(): Promise<{
 async function regionNames(countryIds: string[]): Promise<Map<string, Record<string, string>>> {
   const lists = await Promise.all(
     countryIds.map((id) =>
-      readAllPages("region.list", { params: { unit_id: id } })
+      // Shared for a minute (lib/api/operations): RDB answers these one at a time, one per
+      // country, and they held the tree back ~0.5 s each on every visit (2026-11-24).
+      readAllPagesShared("region.list", { params: { unit_id: id } })
         .then((rows) => z.array(geoSchema).parse(rows))
         .catch(() => []),
     ),

@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { backendFetch } from "@/lib/api/backend";
-import { readAllPages } from "@/lib/api/operations";
+import { readAllPagesShared } from "@/lib/api/operations";
 import {
   permissionSchema,
   roleSchema,
@@ -58,7 +58,7 @@ const countryCodeSchema = z.object({ id: z.string(), code: z.string() }).loose()
 export async function listRoleCountries(): Promise<RoleCountry[]> {
   const [units, codes] = await Promise.all([
     backendFetch.get<unknown>("/units"),
-    readAllPages("country.list", { query: { includeDeleted: "true" } })
+    readAllPagesShared("country.list", { query: { includeDeleted: "true" } })
       .then((rows) => z.array(countryCodeSchema).parse(rows))
       .catch(() => []),
   ]);

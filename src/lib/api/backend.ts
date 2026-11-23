@@ -4,7 +4,9 @@ import { cookies } from "next/headers";
 // `ApiError` is no longer thrown here — `api` raises it, with the backend's own
 // error envelope and Retry-After already read off the response.
 import { api } from "./server";
-import { AUTH_PATHS, meResponseSchema, type WireProject } from "@/lib/auth/endpoints";
+import { markWritten } from "./fresh";
+import { readMe } from "@/lib/auth/me";
+import { meResponseSchema, type WireProject } from "@/lib/auth/endpoints";
 
 /**
  * THE single way to read a PROJECT's data (RDB, Trydos, …). Server-only.
@@ -137,7 +139,7 @@ export async function clearSelectedSystemCookie() {
  * whole list down.
  */
 export async function listRegistry(): Promise<RegistryEntry[]> {
-  const raw = await api.get<unknown>(AUTH_PATHS.me);
+  const raw = await readMe();
   const projects = meResponseSchema.parse(raw).projects ?? [];
 
   return projects.map(toRegistryEntry);
@@ -189,12 +191,22 @@ async function projectPath(path: string): Promise<string> {
 export const backendFetch = {
   get: async <T>(path: string, options?: Parameters<typeof api.get>[1]) =>
     api.get<T>(await projectPath(path), options),
-  post: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.post>[2]) =>
-    api.post<T>(await projectPath(path), json, options),
-  patch: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.patch>[2]) =>
-    api.patch<T>(await projectPath(path), json, options),
-  put: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.put>[2]) =>
-    api.put<T>(await projectPath(path), json, options),
-  delete: async <T>(path: string, options?: Parameters<typeof api.delete>[1]) =>
-    api.delete<T>(await projectPath(path), options),
+  // Every write marks this browser so no kept read from before it is used (./fresh.ts).
+  // POST /operations/<name> is also how a list is read: those mark through runCommand.
+  post: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.post>[2]) => {
+    if (!path.startsWith("/operations/")) await markWritten();
+    return api.post<T>(await projectPath(path), json, options);
+  },
+  patch: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.patch>[2]) => {
+    await markWritten();
+    return api.patch<T>(await projectPath(path), json, options);
+  },
+  put: async <T>(path: string, json?: unknown, options?: Parameters<typeof api.put>[2]) => {
+    await markWritten();
+    return api.put<T>(await projectPath(path), json, options);
+  },
+  delete: async <T>(path: string, options?: Parameters<typeof api.delete>[1]) => {
+    await markWritten();
+    return api.delete<T>(await projectPath(path), options);
+  },
 };

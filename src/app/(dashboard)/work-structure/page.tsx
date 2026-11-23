@@ -38,10 +38,14 @@ export default async function WorkStructurePage({
   const unit = raw && raw !== "head" && idSchema.safeParse(raw).success ? raw : undefined;
   const level = raw === "head" ? null : unit && structure.units.some((u) => u.id === unit) ? unit : undefined;
 
-  const [panel, data] = await Promise.all([
+  const [panel] = await Promise.all([
     level === undefined ? Promise.resolve(null) : loadLevel(level, structure.units),
-    level === undefined ? Promise.resolve(null) : loadDataSettings(level, structure.units),
   ]);
+  // The Data Setting reads, NOT awaited, and started only once the panel's own reads are in
+  // (2026-11-24): ~13 RDB operations that RDB answers one at a time. Started together, the
+  // panel's unit.get waited ~4 s in line behind them. The ⓘ and Data Setting tabs show their
+  // skeleton until this resolves.
+  const data = level === undefined ? null : loadDataSettings(level, structure.units).catch(() => null);
 
   return (
     <WorkStructureScreen

@@ -2,7 +2,7 @@ import "server-only";
 import { getLocale } from "next-intl/server";
 import { listNameLanguages } from "@/features/language/api";
 import { nameRows, type NameLanguage } from "@/features/language/names";
-import { activeOperations, readAllPages, readOperation } from "@/lib/api/operations";
+import { activeOperations, readAllPagesShared, readShared } from "@/lib/api/operations";
 import { pickName } from "@/lib/i18n/localized";
 import type { Coded } from "./mock-ai";
 import { countryMap, resolveFlag, type GeoImage, type GeoNode } from "./mock-geo";
@@ -47,8 +47,8 @@ export async function loadGeography(): Promise<{
   divisions: Division[];
 }> {
   const [typeRows, countryRows, locale, languages] = await Promise.all([
-    readOperation("region_type.list"),
-    readAllPages("country.list", { query: { includeDeleted: "true" } }),
+    readShared("region_type.list"),
+    readAllPagesShared("country.list", { query: { includeDeleted: "true" } }),
     getLocale(),
     listNameLanguages(),
   ]);
@@ -68,7 +68,7 @@ export async function loadGeography(): Promise<{
         c.deletedAt
           ? []
           : rdbRegionSchema.array().parse(
-              await readAllPages("region.list", {
+              await readAllPagesShared("region.list", {
                 params: { unit_id: c.id },
                 query: { status: "ACTIVE" },
               }),
@@ -115,7 +115,7 @@ async function defaultCurrency(countryId: string, locale: string): Promise<Coded
   try {
     const links = rdbCountryCurrencySchema
       .array()
-      .parse(await readOperation("country.currency.list", { params: { id: countryId } }));
+      .parse(await readShared("country.currency.list", { params: { id: countryId } }));
     const d = links.find((l) => l.isDefault)?.currency;
     return d ? { key: d.id, code: d.symbol, name: pickName(d.name, locale) } : NONE;
   } catch {
