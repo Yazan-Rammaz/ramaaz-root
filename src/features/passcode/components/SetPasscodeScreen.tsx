@@ -242,6 +242,7 @@ export function SetPasscodeScreen({
         <motion.div
           key={step}
           custom={direction}
+          data-keyboard-lift
           className="flex h-full flex-col"
           variants={stepPush}
           initial={reduce ? "center" : "enter"}

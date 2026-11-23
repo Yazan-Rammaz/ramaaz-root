@@ -307,6 +307,7 @@ export function PasscodeLockGate({
             {/* The contents arrive a touch behind the glass and lift into
                 place, so the question is the last thing to settle. */}
             <motion.div
+                data-keyboard-lift
                 className="relative flex h-full w-full flex-col items-center"
                 variants={cardOpen}
                 initial="initial"

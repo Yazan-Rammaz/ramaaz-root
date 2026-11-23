@@ -14,6 +14,9 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
 
+/** Room kept under the boxes above the keyboard — the "Forgot passcode" line. */
+const KEYBOARD_GAP = 64;
+
 /**
  * Segmented code entry for OTP / passcode screens. A single hidden input
  * captures digits; the boxes are display-only and navigate to `nextHref` on
@@ -257,6 +260,43 @@ export function PasscodeBoxes({
      */
     const [cascade, setCascade] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
+    const rootRef = useRef<HTMLDivElement>(null);
+
+    /*
+     * Above the keyboard (2026-11-24). On an iPhone the keyboard and its toolbar
+     * (arrows, ✓ — iOS's own, a page cannot remove it) slide OVER the page without
+     * resizing it, and covered the boxes. While this row has focus, the screen
+     * (the nearest `data-keyboard-lift`, else <main>) is moved up just enough
+     * that the boxes and the line under them sit above what is still visible
+     * (visualViewport), and back down when the keyboard goes. `translate`, not
+     * `transform`: the screens animate their own transform with Motion.
+     */
+    useEffect(() => {
+        const vv = typeof window === 'undefined' ? null : window.visualViewport;
+        const root = rootRef.current;
+        if (!focused || !vv || !root) return;
+        const target =
+            (root.closest('[data-keyboard-lift]') as HTMLElement | null) ??
+            (root.closest('main') as HTMLElement | null) ??
+            root;
+        const rect = root.getBoundingClientRect();
+        const place = () => {
+            const visible = vv.offsetTop + vv.height;
+            const need = Math.round(rect.bottom + KEYBOARD_GAP - visible);
+            // Never so far that the boxes leave the top of the screen.
+            const lift = Math.max(0, Math.min(need, Math.round(rect.top - vv.offsetTop - 16)));
+            target.style.transition = 'translate 280ms cubic-bezier(0.32, 0.72, 0, 1)';
+            target.style.translate = lift ? `0 ${-lift}px` : '';
+        };
+        place();
+        vv.addEventListener('resize', place);
+        vv.addEventListener('scroll', place);
+        return () => {
+            vv.removeEventListener('resize', place);
+            vv.removeEventListener('scroll', place);
+            target.style.translate = '';
+        };
+    }, [focused]);
     const reduce = useReducedMotion();
     // Completion must fire exactly ONCE per fill. Extra keystrokes while the
     // handler is in flight used to re-trigger onComplete with the same value —
@@ -424,6 +464,7 @@ export function PasscodeBoxes({
 
     return (
         <div
+            ref={rootRef}
             className="relative"
             onMouseDown={(e) => {
                 e.preventDefault();
@@ -544,22 +585,20 @@ export function PasscodeBoxes({
                 onBlur={() => setFocused(false)}
                 inputMode="numeric"
                 /*
-                 * ⚠️ "username webauthn", NOT "one-time-code webauthn".
-                 *
-                 * The `webauthn` token is only honoured alongside the autofill names
-                 * browsers actually associate with credentials — `username` and
-                 * `current-password`. Appended to `one-time-code` it parses, warns
-                 * about nothing, and is simply never acted on: no suggestion appears in
-                 * the keyboard bar, the conditional request sits there waiting forever,
-                 * and the only way in is the modal it exists to avoid. That is exactly
-                 * the symptom it produced.
-                 *
-                 * `username` on a six-digit passcode field is a lie about the content,
-                 * and a deliberate one: this input is off-screen and exists only to
-                 * collect keystrokes, nothing reads the token as a description, and it
-                 * is the string that makes the passkey offer appear at all.
+                 * NO AutoFill bar (2026-11-24). On an iPhone "one-time-code" put the
+                 * QuickType AutoFill row (contacts, passwords, codes) above the keyboard,
+                 * over the boxes. Nothing can fill this field anyway: the PIN is only in
+                 * the person's head, and the one-time code comes over WhatsApp, which iOS
+                 * does not read codes from. So every hint is off.
                  */
-                autoComplete={'one-time-code'}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                // "search" in the name: Safari ignores autoComplete="off" and offered
+                // "AutoFill Contact" (the person's name, read off the screen), but it
+                // never offers contacts for a search field.
+                name="search-digits"
                 aria-label="Code"
                 className="absolute inset-0 h-full w-full cursor-default opacity-0 outline-none"
             />
