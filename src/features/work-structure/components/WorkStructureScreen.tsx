@@ -10,6 +10,7 @@ import { DashedFrame } from '@/components/ui/DashedFrame';
 import { FormError } from '@/components/ui/FormError';
 import { Icon } from '@/components/ui/Icon';
 import { cn } from '@/lib/utils/cn';
+import { isDocumentUnlocked } from '@/features/auth/lock-flag';
 import { useAddAction } from '@/features/shell/add-action';
 import { flagEmoji, resolveFlag } from '@/features/region/mock-geo';
 import type { Structure } from '../api';
@@ -149,18 +150,25 @@ export function WorkStructureScreen({
     // the window is visible, read the page again every 10 seconds and when the
     // window comes back into focus. A sheet being filled in keeps its state.
     const watching = !!panel && tab === 'login';
+    // The next read starts 10 seconds after the last one FINISHED, never on a fixed beat:
+    // a slow read (RDB answers one list at a time) used to have the next one start on top
+    // of it, so they piled up (2026-11-23). Skipped while hidden or behind the passcode
+    // lock — every read there is refused and hangs — and tried again 10 seconds later.
+    const [rereading, startReread] = useTransition();
+    const [rereadTick, setRereadTick] = useState(0);
     useEffect(() => {
-        if (!watching) return;
+        if (!watching || rereading) return;
         const reread = () => {
-            if (document.visibilityState === 'visible') router.refresh();
+            if (document.visibilityState === 'visible' && isDocumentUnlocked()) startReread(() => router.refresh());
+            else setRereadTick((n) => n + 1);
         };
-        const timer = window.setInterval(reread, 10_000);
+        const timer = window.setTimeout(reread, 10_000);
         window.addEventListener('focus', reread);
         return () => {
-            window.clearInterval(timer);
+            window.clearTimeout(timer);
             window.removeEventListener('focus', reread);
         };
-    }, [watching, router]);
+    }, [watching, rereading, rereadTick, router]);
 
     const node = openKey ? findNode(structure.tree, openKey) : undefined;
     // While another level is being read: its row's node (shown at once), or closing (nothing open).

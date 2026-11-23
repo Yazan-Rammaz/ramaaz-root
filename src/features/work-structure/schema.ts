@@ -95,6 +95,10 @@ export const grantSchema = z
     ),
     manages: z.array(z.object({ unit: unitRefSchema.nullable() }).loose()).default([]),
     granted_at: z.string().optional(),
+    // Asked for 2026-11-24 (to-backend/2026-11-24-member-details-in-grants.md): who added
+    // the person and, when it went through approval, who approved it (null: it did not).
+    added_by: z.object({ full_name: z.string() }).loose().nullable().optional(),
+    approved_by: z.object({ full_name: z.string() }).loose().nullable().optional(),
   })
   .loose();
 export type Grant = z.infer<typeof grantSchema>;
@@ -511,6 +515,8 @@ export type BusinessAdmin = {
   /** The root who asked for them, and the one who approved it (head office appointments). */
   addedBy?: string;
   approvedBy?: string;
+  /** The appointment took effect at once (no approval): the "Approved By" field is not shown. */
+  noApproval?: boolean;
   /** Their latest contract and how they answered each clause (XD work structure 15, 20). */
   contract?: SignedContract;
   phoneUnverified?: boolean;

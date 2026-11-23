@@ -1101,7 +1101,7 @@ export function AdminInfo({ admin }: { admin: BusinessAdmin }) {
             <FieldError message={words.result.fields?.secret_words} />
             <FormError message={words.result.error ?? read?.error} attempt={words.result} />
             <InfoField label={t('addedBy')} value={admin.addedBy ?? '—'} />
-            <InfoField label={t('approvedBy')} value={admin.approvedBy ?? '—'} />
+            {!admin.noApproval && <InfoField label={t('approvedBy')} value={admin.approvedBy ?? '—'} />}
             <InfoField
                 label={t('addedAt')}
                 value={
