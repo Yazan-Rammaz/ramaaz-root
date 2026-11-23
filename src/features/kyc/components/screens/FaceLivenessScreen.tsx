@@ -10,9 +10,9 @@ import { LivenessCamera } from '@/features/kyc/components/LivenessCamera';
 import { LivenessVerdict } from '@/features/kyc/components/LivenessVerdict';
 import { VerdictMark } from '@/features/kyc/components/VerdictMark';
 import { CameraHandoffPanel } from '@/features/kyc/handoff/CameraHandoffPanel';
-import { relayPreview } from '@/features/kyc/handoff/cameraShim';
+import { handedOverPreview, relayPreview } from '@/features/kyc/handoff/cameraShim';
 import type { HandoffPhase } from '@/features/kyc/handoff/useCameraHandoff';
-import { isHandheldDevice, isShimInstalled } from '@/features/kyc/handoff/cameraShim';
+import { handOverCamera, isHandheldDevice, isShimInstalled } from '@/features/kyc/handoff/cameraShim';
 import type { FaceCapture } from '@/features/kyc/services/faceCapture';
 import { api } from '@/features/kyc/services/kycApi';
 import { createKycService } from '@/features/kyc/services';
@@ -273,13 +273,17 @@ const MESH_MODEL_TIMEOUT_MS = 120_000;
  */
 const PROBE_MODEL_WAIT_MS = 20_000;
 
-/** The phone's live picture under the cover while AWS's camera opens — see relayPreview. */
-function LiveCover({ mirror }: { mirror: boolean }) {
+/**
+ * A live picture under the cover while AWS's camera opens: the phone's over a
+ * hand-off (relayPreview), or a phone's own camera handed from the light check
+ * (handedOverPreview) — never a frozen still.
+ */
+function LiveCover({ mirror, source }: { mirror: boolean; source: () => MediaStream | null }) {
     return (
         <video
             ref={(el) => {
                 if (!el || el.srcObject) return;
-                const stream = relayPreview();
+                const stream = source();
                 if (!stream) return;
                 el.srcObject = stream;
                 void el.play().catch(() => {});
@@ -478,6 +482,7 @@ export function FaceLivenessScreen({
         videoRef: probeVideoRef,
         startCamera: startProbe,
         stopCamera: stopProbe,
+        releaseCamera: releaseProbe,
         isActive: probeLive,
         error: probeError,
         shouldMirror: probeMirror,
@@ -504,6 +509,29 @@ export function FaceLivenessScreen({
     useEffect(() => {
         void warmUpLandmarker().then(() => (CAPTURE_PORTRAIT.enabled ? warmUpSegmenter() : undefined));
     }, []);
+
+    /*
+     * The session is asked for WHILE the light check runs (2026-11-24), not after.
+     * On a phone the light check passing was followed by ~3 s of a frozen picture:
+     * the backend's session (~1 s) only then started, then AWS reopened the camera.
+     * Asked as soon as the check's camera is live, it is usually in hand by the time
+     * the light is good. One request per attempt — the session effect below awaits
+     * this same promise, and a retry (a new `attempt`) asks again.
+     */
+    const earlySession = useRef<{ key: string; promise: Promise<StartResponse | null> } | null>(null);
+    const openSession = useCallback(() => {
+        const key = `${challengeId}:${attempt}`;
+        if (earlySession.current?.key !== key) {
+            traceFaceStartup('session requested (during the light check)');
+            const promise = createKycService().startReverify(challengeId) as Promise<StartResponse | null>;
+            promise.catch(() => {});
+            earlySession.current = { key, promise };
+        }
+        return earlySession.current.promise;
+    }, [challengeId, attempt]);
+    useEffect(() => {
+        if (probeLive && !lightDone && !PASSED.has(challengeId) && !mustRotate) void openSession();
+    }, [probeLive, lightDone, challengeId, mustRotate, openSession]);
 
     const { verdict: lightVerdict, progress: lightProgress } = useLightCheck({
         videoRef: probeVideoRef,
@@ -646,6 +674,8 @@ export function FaceLivenessScreen({
      * the person looking at themselves throughout.
      */
     const [handoverStill, setHandoverStill] = useState<string | null>(null);
+    /** The light check's camera was handed to AWS (still open): the cover shows it live. */
+    const [handedLive, setHandedLive] = useState(false);
 
     useEffect(() => {
         if (!lightReady || lightCleared) return;
@@ -661,10 +691,15 @@ export function FaceLivenessScreen({
                 // No still — the standby mark covers the gap as before.
             }
         }
-        stopProbe();
-        traceFaceStartup('light check passed — light-check camera stopped');
+        // Handed to AWS, not closed (see handOverCamera) — a phone's own camera only;
+        // over a hand-off the camera is the relay, which never closes anyway.
+        const kept = isShimInstalled() ? null : releaseProbe();
+        if (kept) handOverCamera(kept);
+        else stopProbe();
+        setHandedLive(kept !== null);
+        traceFaceStartup(kept ? 'light check passed — camera handed to AWS' : 'light check passed — light-check camera stopped');
         setLightCleared(true);
-    }, [lightReady, lightCleared, stopProbe, probeVideoRef]);
+    }, [lightReady, lightCleared, stopProbe, releaseProbe, probeVideoRef]);
 
 
     /**
@@ -700,6 +735,7 @@ export function FaceLivenessScreen({
     const rearmLightGate = useCallback(() => {
         setLightCleared(false);
         setHandoverStill(null);
+        setHandedLive(false);
         // Drop the last check's verdict with it, so the new one does not open
         // under a warning about a room that has since been fixed.
         setLiveQuality(null);
@@ -800,7 +836,11 @@ export function FaceLivenessScreen({
 
             try {
                 traceFaceStartup('starting AWS session');
-                const started = await createKycService().startReverify(challengeId);
+                const started = await openSession().catch((error: unknown) => {
+                    // A failed request is not kept: the next try asks again.
+                    earlySession.current = null;
+                    throw error;
+                });
                 traceFaceStartup('AWS session started — mounting AWS camera');
                 if (cancelled) return;
                 if (!started?.sessionId) throw new Error('no session id');
@@ -845,7 +885,7 @@ export function FaceLivenessScreen({
         };
         // `attempt` is the retry trigger: AWS liveness sessions are single-use,
         // so going again means opening a new one, not reusing the last id.
-    }, [challengeId, attempt, t, mustRotate, lightDone]);
+    }, [challengeId, attempt, t, mustRotate, lightDone, openSession]);
 
     /**
      * Handed to AWS's SDK, which calls it whenever it needs to sign. Fetching
@@ -1298,7 +1338,11 @@ export function FaceLivenessScreen({
                             {handoffLive ? (
                                 // Over a hand-off the phone never stops filming: the cover is
                                 // the LIVE picture, not a frozen one (2026-11-24).
-                                <LiveCover mirror={probeMirror} />
+                                <LiveCover mirror={probeMirror} source={relayPreview} />
+                            ) : handedLive ? (
+                                // The light check's camera, handed to AWS and still open: shown LIVE
+                                // while the session is fetched (2026-11-24) — the still froze ~1 s.
+                                <LiveCover mirror={probeMirror} source={handedOverPreview} />
                             ) : handoverStill ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img

@@ -38,6 +38,8 @@ interface UseCameraReturn {
     shouldMirror: boolean;
     startCamera: () => Promise<void>;
     stopCamera: () => void;
+    /** Give the open stream away without stopping it (the caller owns it after). */
+    releaseCamera: () => MediaStream | null;
     captureFrame: () => string | null;
 }
 
@@ -139,6 +141,19 @@ export function useCamera({
             videoRef.current.srcObject = null;
         }
         setIsActive(false);
+    }, []);
+
+    /**
+     * Give the open stream away WITHOUT stopping it (2026-11-24) — the light check
+     * hands its camera to AWS (cameraShim's handOverCamera) instead of closing it
+     * for AWS to open again. The caller owns the stream after this.
+     */
+    const releaseCamera = useCallback((): MediaStream | null => {
+        const stream = streamRef.current;
+        streamRef.current = null;
+        if (videoRef.current) videoRef.current.srcObject = null;
+        setIsActive(false);
+        return stream;
     }, []);
 
     /*
@@ -292,6 +307,7 @@ export function useCamera({
         shouldMirror,
         startCamera,
         stopCamera,
+        releaseCamera,
         captureFrame,
     };
 }

@@ -83,6 +83,45 @@ let waiting: ((stream: MediaStream) => void)[] = [];
  */
 let phoneOnlyHolders = 0;
 
+/*
+ * A phone's own camera, handed from the light check to AWS (2026-11-24). Closing
+ * it for AWS to open again froze the picture ~1–2 s on a phone after "light is
+ * good". The NEXT request for video gets this very stream (a real camera: its
+ * track describes itself, so AWS's 15 fps check passes as it always did); not
+ * taken within HANDOVER_MS, it is stopped and the stack goes back to normal.
+ */
+let handedOver: { stream: MediaStream; timer: ReturnType<typeof setTimeout> } | null = null;
+const HANDOVER_MS = 20_000;
+
+export function handOverCamera(stream: MediaStream): void {
+  dropHandover(true);
+  if (!stream.getVideoTracks().some((t) => t.readyState === 'live')) return;
+  handedOver = { stream, timer: setTimeout(() => dropHandover(true), HANDOVER_MS) };
+  apply();
+}
+
+/** The handed-over camera, LIVE, for the screen to show until AWS takes it — its own stream (see relayTracks). */
+export function handedOverPreview(): MediaStream | null {
+  const live = handedOver?.stream.getVideoTracks().filter((t) => t.readyState === 'live') ?? [];
+  return live.length ? new MediaStream(live) : null;
+}
+
+function takeHandover(): MediaStream | null {
+  const h = handedOver;
+  if (!h) return null;
+  dropHandover(false);
+  return h.stream.getVideoTracks().some((t) => t.readyState === 'live') ? h.stream : null;
+}
+
+/** Forget the handed-over stream; `stop` when nobody took it. */
+function dropHandover(stop: boolean): void {
+  if (!handedOver) return;
+  clearTimeout(handedOver.timer);
+  if (stop) handedOver.stream.getTracks().forEach((t) => t.stop());
+  handedOver = null;
+  apply();
+}
+
 export function requirePhoneCamera(on: boolean): void {
   phoneOnlyHolders = Math.max(0, phoneOnlyHolders + (on ? 1 : -1));
   phoneOnly = phoneOnlyHolders > 0;
@@ -429,7 +468,7 @@ function apply(): void {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
     const md = navigator.mediaDevices;
 
-    if (!relayStream && !qualityBoost && !phoneOnly) {
+    if (!relayStream && !qualityBoost && !phoneOnly && !handedOver) {
         if (original) {
             md.getUserMedia = original.gum;
             md.enumerateDevices = original.enumerate;
@@ -481,6 +520,12 @@ function apply(): void {
             // of a relayed stream is the phone's decision, made by
             // `PhoneCamera`'s own constraints at the other end of the link.
             return new MediaStream(relayTracks);
+        }
+
+        // The light check's camera, still open (see handOverCamera).
+        if (constraints?.video) {
+            const kept = takeHandover();
+            if (kept) return kept;
         }
 
         // A computer never opens its own camera: wait for the phone.
