@@ -106,6 +106,43 @@ export type HandoffPhase =
  */
 const DROP_GRACE_MS = 8000;
 
+/**
+ * What the link looked like when it dropped, in the log (2026-11-24): how the two
+ * are connected (direct on the Wi-Fi, or through the internet), the round trip,
+ * the bandwidth the computer estimated, and how much video had arrived. A drop
+ * then says whether it was congestion, a network change, or the phone going quiet.
+ */
+async function reportDrop(pc: RTCPeerConnection) {
+    try {
+        const stats = await pc.getStats();
+        let pair: Record<string, unknown> | null = null;
+        let video: Record<string, unknown> | null = null;
+        const byId = new Map<string, Record<string, unknown>>();
+        stats.forEach((r) => byId.set(r.id, r as Record<string, unknown>));
+        stats.forEach((r) => {
+            const s = r as Record<string, unknown>;
+            if (s.type === 'candidate-pair' && (s.nominated || s.selected) && s.state === 'succeeded') pair = s;
+            if (s.type === 'inbound-rtp' && s.kind === 'video') video = s;
+        });
+        const p = pair as Record<string, unknown> | null;
+        const v = video as Record<string, unknown> | null;
+        const local = p ? byId.get(String(p.localCandidateId)) : undefined;
+        const remote = p ? byId.get(String(p.remoteCandidateId)) : undefined;
+        console.info('[handoff] link dropped', {
+            state: pc.connectionState,
+            route: local && remote ? `${local.candidateType}/${local.protocol} ↔ ${remote.candidateType}` : null,
+            rttMs: typeof p?.currentRoundTripTime === 'number' ? Math.round(p.currentRoundTripTime * 1000) : null,
+            inKbps: typeof p?.availableIncomingBitrate === 'number' ? Math.round(p.availableIncomingBitrate / 1000) : null,
+            framesReceived: v?.framesReceived ?? null,
+            framesDropped: v?.framesDropped ?? null,
+            packetsLost: v?.packetsLost ?? null,
+            bytesReceived: v?.bytesReceived ?? null,
+        });
+    } catch {
+        /* nothing to report */
+    }
+}
+
 export function useCameraHandoff({ onPhoneRetry }: { onPhoneRetry?: () => void } = {}) {
     // Read through a ref: the channel handler is set once, the callback changes.
     const retryRef = useRef(onPhoneRetry);
@@ -253,6 +290,7 @@ export function useCameraHandoff({ onPhoneRetry }: { onPhoneRetry?: () => void }
                         clearTimeout(dropTimer);
                         dropTimer = null;
                     }
+                    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') void reportDrop(pc);
                     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') stop();
                     else if (pc.connectionState === 'disconnected') dropTimer = setTimeout(stop, DROP_GRACE_MS);
                 });

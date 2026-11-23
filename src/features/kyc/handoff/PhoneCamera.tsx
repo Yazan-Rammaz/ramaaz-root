@@ -38,6 +38,29 @@ import {
  * library beside the camera, which would let somebody submit a photograph of a
  * photograph. The whole point of capturing live is that they cannot.
  */
+/*
+ * The phone's video sender (2026-11-24). The link to the computer dropped 10–18 s
+ * into a face check — the moment AWS starts uploading the recording from the
+ * computer over the same Wi-Fi. The phone's video had no cap and normal priority,
+ * which is the setup where it is the one squeezed out. Capped at a rate a face
+ * check reads well at, marked high priority (and its packets too, where the
+ * browser supports it), and still 'maintain-resolution': under pressure it drops
+ * frames, never sharpness.
+ */
+const SEND_MAX_BITRATE = 1_500_000;
+function tuneSender(sender: RTCRtpSender) {
+    const params = sender.getParameters() as RTCRtpSendParameters & { degradationPreference?: string };
+    params.degradationPreference = 'maintain-resolution';
+    params.encodings = (params.encodings?.length ? params.encodings : [{}]).map((e) => ({
+        ...e,
+        maxBitrate: SEND_MAX_BITRATE,
+        maxFramerate: 30,
+        priority: 'high',
+        networkPriority: 'high',
+    })) as RTCRtpEncodingParameters[];
+    void sender.setParameters(params).catch(() => {});
+}
+
 export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | 'environment' }) {
     const [phase, setPhase] = useState<
         'starting' | 'waiting' | 'live' | 'ended' | 'failed'
@@ -145,6 +168,7 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
 
             const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             pcRef.current = pc;
+            let videoSender: RTCRtpSender | null = null;
             stream.getTracks().forEach((t) => {
                 // A face check needs every frame the same size: under a weak
                 // link, drop frames rather than resolution. The computer redraws
@@ -152,10 +176,8 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                 if (t.kind === 'video') t.contentHint = 'detail';
                 const sender = pc.addTrack(t, stream);
                 if (t.kind === 'video') {
-                    const params = sender.getParameters();
-                    void sender
-                        .setParameters({ ...params, degradationPreference: 'maintain-resolution' } as RTCRtpSendParameters)
-                        .catch(() => {});
+                    videoSender = sender;
+                    tuneSender(sender);
                 }
             });
 
@@ -197,7 +219,11 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                     clearTimeout(dropTimer);
                     dropTimer = null;
                 }
-                if (pc.connectionState === 'connected') setPhase('live');
+                if (pc.connectionState === 'connected') {
+                    setPhase('live');
+                    // Encodings exist for certain only once negotiated (Safari): set again.
+                    if (videoSender) tuneSender(videoSender);
+                }
 
                 // ⚠️ `closed` and `disconnected` matter as much as `failed`.
                 //
