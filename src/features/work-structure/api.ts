@@ -377,7 +377,7 @@ export async function loadLevel(level: Level, units: Unit[]): Promise<LevelPanel
         phone: g.admin.phone,
         short: held[0]?.short_name ?? "—",
         roles: held,
-        grantedAt: g.granted_at,
+        grantedAt: g.added_at ?? g.granted_at,
         stage:
           login?.status === "PENDING"
             ? "review"

@@ -95,6 +95,9 @@ export const grantSchema = z
     ),
     manages: z.array(z.object({ unit: unitRefSchema.nullable() }).loose()).default([]),
     granted_at: z.string().optional(),
+    // When they were ADDED (2026-11-24 answer): the "Adding Business Admin Date".
+    // `granted_at` moves with every later edit of their roles.
+    added_at: z.string().nullable().optional(),
     // Asked for 2026-11-24 (to-backend/2026-11-24-member-details-in-grants.md): who added
     // the person and, when it went through approval, who approved it (null: it did not).
     added_by: z.object({ full_name: z.string() }).loose().nullable().optional(),
