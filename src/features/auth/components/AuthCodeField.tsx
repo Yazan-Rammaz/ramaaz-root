@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { useKeyboardLift } from "@/features/auth/hooks/useKeyboardLift";
 
 /**
  * The one auth entry field (private code, password, …). Native caret hidden; a
@@ -60,6 +61,9 @@ export function AuthCodeField({
   const [focused, setFocused] = useState(false);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Above the iPhone keyboard while typing, as the passcode — see useKeyboardLift.
+  useKeyboardLift(rootRef, focused);
   const router = useRouter();
 
   // Focus on mount without scrolling the page (avoids a load-time jump).
@@ -85,7 +89,7 @@ export function AuthCodeField({
   }
 
   return (
-    <div className="relative h-60 w-390">
+    <div ref={rootRef} className="relative h-60 w-390">
       {/* Dashed rounded outline (even dashes via SVG stroke). */}
       <svg
         aria-hidden
