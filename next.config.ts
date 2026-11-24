@@ -27,6 +27,13 @@ const nextConfig: NextConfig = {
         '192.168.137.*',
         '*.trycloudflare.com',
     ],
+    // Pages kept in the browser for 30 s (2026-11-24): going back to one you just
+    // left is instant, with no request ("dynamic"), and a page loaded on hover by
+    // IntentLink is kept the same 30 s ("static", default 5 minutes — too long for
+    // data other people edit). Any save sets a cookie, which clears all of it.
+    experimental: {
+        staleTimes: { dynamic: 30, static: 30 },
+    },
     // Pin the workspace root (a stray lockfile exists in the home dir).
     turbopack: {
         root: import.meta.dirname,

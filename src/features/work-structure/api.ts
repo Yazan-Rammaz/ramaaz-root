@@ -324,7 +324,7 @@ const safe = <T>(p: Promise<T>, what: string): Promise<T | null> =>
  * approves (`202`), so they are not in `/grants` yet: they come from the
  * appointment.
  */
-export async function loadLevel(level: Level, units: Unit[]): Promise<LevelPanel> {
+export async function loadLevel(level: Level, unitsRead: Unit[] | Promise<Unit[]>): Promise<LevelPanel> {
   const [policy, grants, approvals, logins, roles, templates, languages, unitInfo, levelRoles, countryUnits] = await Promise.all([
     safe(backendFetch.get<unknown>(`${levelPath(level)}/dashboard-policy`).then((raw) => policySchema.parse(raw)), "policy"),
     safe(backendFetch.get<unknown>("/grants").then((raw) => list(grantSchema).parse(raw).data), "grants"),
@@ -421,32 +421,30 @@ export async function loadLevel(level: Level, units: Unit[]): Promise<LevelPanel
       }),
   ]);
 
-  // Each person's first sign-in with its evidence, for Files and Review.
+  // The rest of each person's panel, ALL AT ONCE (2026-11-24). These were three
+  // rounds one after another — the first sign-in's evidence, then the contract and
+  // the countries — and the evidence was itself read one sign-in at a time, up to
+  // five in a row per person: about two seconds of waiting on the head office.
+  // None depends on another; each needs only the person's stage, known above.
+  //
+  // First sign-in with its evidence, for Files and Review:
   //   waiting for review → the pending one: it is what Root is judging;
   //   otherwise → the newest that actually CARRIES evidence. A later attempt
   //   (expired, refused, a test) can hold no face and no document, and taking
-  //   the newest blindly emptied the Files of somebody already verified.
+  //   the newest blindly emptied the Files of somebody already verified. The
+  //   candidates are read together and the first with evidence wins, in order.
   const hasEvidence = (l: LoginApproval) =>
     !!(l.evidence?.face_capture_url || l.evidence?.reference_photo_url || l.evidence?.document?.front_image_url);
-  await Promise.all(
-    admins.map(async (a) => {
+  await Promise.all([
+    ...admins.map(async (a) => {
       if (!a.loginApproval) return;
       const mine = (logins ?? []).filter((l) => l.subject.id === a.id);
       const candidates = a.loginApproval.status === "PENDING" ? [a.loginApproval] : mine.slice(0, 5);
-      for (const c of candidates) {
-        const full = await safe(getLoginApproval(c.id), "login approval");
-        if (!full) continue;
-        if (c === candidates[0]) a.loginApproval = full;
-        if (hasEvidence(full)) {
-          a.loginApproval = full;
-          break;
-        }
-      }
+      const fulls = await Promise.all(candidates.map((c) => safe(getLoginApproval(c.id), "login approval")));
+      const pick = fulls.find((x) => x && hasEvidence(x)) ?? fulls[0];
+      if (pick) a.loginApproval = pick;
     }),
-  );
-
-  // Their latest contract, for Files and Review: only someone past Get Started can have signed one.
-  await Promise.all([
+    // Their latest contract: only someone past Get Started can have signed one.
     ...admins.map(async (a) => {
       if (a.stage === "approval" || a.stage === "send") return;
       a.contract = (await safe(memberContract(a), "contract")) ?? undefined;
@@ -462,6 +460,8 @@ export async function loadLevel(level: Level, units: Unit[]): Promise<LevelPanel
     }),
   ]);
 
+  // Needed only here, for which roles this level may give: the tree may still be reading.
+  const units = await unitsRead;
   return {
     level,
     policy,

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import Link from "next/link";
+import { IntentLink } from "@/components/ui/IntentLink";
 import { Icon } from "@/components/ui/Icon";
 import { DashedFrame } from "@/components/ui/DashedFrame";
 import { cn } from "@/lib/utils/cn";
@@ -44,7 +44,7 @@ export function NavBox({
   return (
     <div className="relative shrink-0">
       {href ? (
-        <Link
+        <IntentLink
           href={href}
           aria-label={label}
           aria-current={selected ? "page" : undefined}
@@ -52,7 +52,7 @@ export function NavBox({
           style={style}
         >
           {inner}
-        </Link>
+        </IntentLink>
       ) : (
         <button type="button" aria-label={label} className={className} style={style}>
           {inner}

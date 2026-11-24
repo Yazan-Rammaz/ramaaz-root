@@ -34,13 +34,19 @@ export default async function WorkStructurePage({
   if (!system) redirect("/systems");
 
   const { level: raw } = await searchParams;
-  const structure = await loadStructure();
+  // The panel starts WITH the tree, not after it (2026-11-24): it waited ~3 s for the
+  // whole tree first, though it needs the units only at its very end. Started for the
+  // level the URL names; if that turns out not to be a unit of this tree, its answer
+  // is simply not used.
+  const reading = loadStructure();
   const unit = raw && raw !== "head" && idSchema.safeParse(raw).success ? raw : undefined;
+  const asked = raw === "head" ? null : unit;
+  const early = asked === undefined ? null : loadLevel(asked, reading.then((s) => s.units));
+  early?.catch(() => {});
+  const structure = await reading;
   const level = raw === "head" ? null : unit && structure.units.some((u) => u.id === unit) ? unit : undefined;
 
-  const [panel] = await Promise.all([
-    level === undefined ? Promise.resolve(null) : loadLevel(level, structure.units),
-  ]);
+  const panel = level === undefined || !early ? null : await early;
   // The Data Setting reads, NOT awaited, and started only once the panel's own reads are in
   // (2026-11-24): ~13 RDB operations that RDB answers one at a time. Started together, the
   // panel's unit.get waited ~4 s in line behind them. The ⓘ and Data Setting tabs show their

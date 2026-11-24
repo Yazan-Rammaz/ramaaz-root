@@ -7,6 +7,7 @@
         "dev:mobile": "node ./scripts/dev-mobile.mjs",
         "build": "node ./scripts/sync-vendor.mjs --strict && next build --webpack",
         "start": "next start",
+        "start:mobile": "node ./scripts/start-mobile.mjs",
         "lint": "eslint",
         "typecheck": "tsc --noEmit",
         "format": "prettier --write .",

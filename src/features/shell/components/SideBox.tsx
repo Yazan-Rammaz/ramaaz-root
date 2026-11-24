@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import Link from "next/link";
+import { IntentLink } from "@/components/ui/IntentLink";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 
@@ -35,9 +35,9 @@ export function SideBox({
   return (
     <div className="relative">
       {href ? (
-        <Link href={href} aria-label={label} className={className} style={style}>
+        <IntentLink href={href} aria-label={label} className={className} style={style}>
           {icon && <Icon name={icon} size={26} />}
-        </Link>
+        </IntentLink>
       ) : (
         <button
           type="button"
