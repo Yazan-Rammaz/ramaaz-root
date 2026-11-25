@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { Icon } from '@/components/ui/Icon';
 import type { HandoffMessage, IdMirror, PhoneStage } from './useCameraHandoff';
 import { motion } from 'motion/react';
@@ -62,6 +63,7 @@ function tuneSender(sender: RTCRtpSender) {
 }
 
 export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | 'environment' }) {
+    const t = useTranslations('auth');
     const [phase, setPhase] = useState<
         'starting' | 'waiting' | 'live' | 'ended' | 'failed'
     >('starting');
@@ -262,14 +264,14 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
             console.error('[handoff/phone] failed:', err);
             setError(
                 name === 'NotAllowedError'
-                    ? 'Allow camera access to continue.'
+                    ? t('phoneAllowCamera')
                     : name === 'NotFoundError'
-                      ? 'No camera found on this device.'
-                      : ((err as Error)?.message ?? 'Could not start the camera.'),
+                      ? t('phoneNoCamera')
+                      : t('phoneCameraFailed'),
             );
             setPhase('failed');
         }
-    }, [room, facing]);
+    }, [room, facing, t]);
 
     /**
      * Freeze on the last frame, or go live again.
@@ -416,22 +418,20 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
     // hint arrives.
     const message =
         phase === 'starting'
-            ? 'Starting the camera…'
+            ? t('phoneStarting')
             : phase === 'waiting'
-              ? 'Connecting to your computer…'
+              ? t('phoneConnecting')
               : phase === 'live'
-                ? (hint ?? 'Connected — hold your phone at eye level.')
+                ? (hint ?? t('phoneConnected'))
                 : phase === 'ended'
-                  ? 'This session has ended. Scan the new code on your computer.'
-                  : (error ?? 'Something went wrong.');
+                  ? t('phoneEnded')
+                  : (error ?? t('phoneError'));
 
     if (finished) {
         return (
             <main className="flex h-full flex-col items-center justify-center gap-12 bg-white px-20 text-center">
-                <p className="fz-16 font-medium text-[#1D1D1D]">Done</p>
-                <p className="fz-12 text-[#707070]">
-                    {mirror ? 'Your face was verified.' : 'Your ID was captured.'} You can close this page.
-                </p>
+                <p className="fz-16 font-medium text-[#1D1D1D]">{t('phoneDone')}</p>
+                <p className="fz-12 text-[#707070]">{mirror ? t('phoneFaceDone') : t('phoneIdDone')}</p>
             </main>
         );
     }
@@ -479,7 +479,7 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                             type="button"
                             onClick={retryOnComputer}
                             title="Try again"
-                            aria-label="Try again"
+                            aria-label={t('phoneTryAgain')}
                             className="flex h-56 w-56 items-center justify-center rad-16 border border-white/50 bg-black/40 text-white"
                         >
                             <Icon name="kyc/retry" size={26} mask />
@@ -535,7 +535,7 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                             type="button"
                             onClick={retryOnComputer}
                             title="Try again"
-                            aria-label="Try again"
+                            aria-label={t('phoneTryAgain')}
                             className="flex h-40 w-40 items-center justify-center rad-12 border border-white/40 text-white"
                         >
                             <Icon name="kyc/retry" size={20} mask />
@@ -589,7 +589,7 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                     type="button"
                     onClick={() => void connect()}
                     title="Try again"
-                    aria-label="Try again"
+                    aria-label={t('phoneTryAgain')}
                     className="mt-16 flex h-44 w-44 items-center justify-center rad-12 border border-[#5D5C5D]/40 text-[#1D1D1D] transition-colors hover:border-[#1D1D1D]"
                 >
                     <Icon name="kyc/retry" size={20} mask />

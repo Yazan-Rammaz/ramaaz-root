@@ -11,7 +11,8 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/ui/Icon';
-import { CustomQRCode } from '@/components/ui/CustomQR';
+import { HandoffQrCard } from './HandoffQrCard';
+import { useTranslations } from 'next-intl';
 import { FormError } from '@/components/ui/FormError';
 import {
     type IdMirror,
@@ -154,6 +155,7 @@ export function CameraHandoffPanel({
      */
     style?: CSSProperties;
 }) {
+    const t = useTranslations('auth');
     const { phase, url, error, start, stop, sendHint, sendCameraLive, sendStage, sendProgress, sendId, sendIdPreview } =
         useCameraHandoff({ onPhoneRetry });
 
@@ -444,44 +446,20 @@ export function CameraHandoffPanel({
                   >
                       {phase === 'preparing' && (
                           <p className="fz-12 leading-none font-medium text-[#707070]">
-                              Preparing…
+                              {t('handoffPreparing')}
                           </p>
                       )}
 
                       {phase === 'waiting' && (
-                          <>
-                              {/*
-                                Drawn synchronously from the URL, so no async
-                                step can leave the PREVIOUS step's code on
-                                screen while the next one encodes — each step
-                                mints a new room, and a stale code is a live one
-                                for a room already spent.
-                              */}
-                              <CustomQRCode value={url ?? ''} size={200} />
-                              <p
-                                  className="fz-12 max-w-300 text-center leading-none font-medium text-[#1D1D1D]"
-                                  style={{ marginTop: rem(16) }}
-                              >
-                                  Scan with your phone.
-                              </p>
-                              {/* A fresh code. It was stop(), and the QR came back only through the idle
-                                  restart — the moment the frame could be left empty. */}
-                              <button
-                                  type="button"
-                                  onClick={() => void start(facing)}
-                                  aria-label="New code"
-                                  title="New code"
-                                  className="text-[#707070]"
-                                  style={{ marginTop: rem(12) }}
-                              >
-                                  <Icon name="kyc/retry" size={20} mask />
-                              </button>
-                          </>
+                          // Drawn synchronously from the URL, so no async step can leave the
+                          // PREVIOUS step's code on screen: each step mints a new room, and a
+                          // stale code is a live one for a room already spent.
+                          <HandoffQrCard url={url ?? ''} onNewCode={() => void start(facing)} />
                       )}
 
                       {phase === 'connecting' && (
                           <p className="fz-12 leading-none font-medium text-[#707070]">
-                              Connecting…
+                              {t('handoffConnecting')}
                           </p>
                       )}
 
@@ -491,8 +469,8 @@ export function CameraHandoffPanel({
                               <button
                                   type="button"
                                   onClick={() => void start(facing)}
-                                  aria-label="Try again"
-                                  title="Try again"
+                                  aria-label={t('idTryAgain')}
+                                  title={t('idTryAgain')}
                                   className="text-primary"
                                   style={{ marginTop: rem(12) }}
                               >

@@ -25,6 +25,8 @@ interface UseCameraReturn {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
     isActive: boolean;
     error: string | null;
+    /** Which error, for a screen that words it in the person's language (2026-11-25). */
+    errorKind: 'denied' | 'failed' | null;
     /**
      * Whether the video preview should be CSS-mirrored (scaleX(-1)).
      * True when 'user' was REQUESTED — a self-view — on any device.
@@ -65,6 +67,7 @@ export function useCamera({
     const streamRef = useRef<MediaStream | null>(null);
     const [isActive, setIsActive] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [errorKind, setErrorKind] = useState<'denied' | 'failed' | null>(null);
     const isMobile = isMobileDevice();
 
     /*
@@ -167,6 +170,7 @@ export function useCamera({
      */
     const openCamera = useCallback(async () => {
         setError(null);
+        setErrorKind(null);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -256,6 +260,7 @@ export function useCamera({
                     ? 'Camera permission denied. Please allow camera access in your browser settings.'
                     : 'Failed to access camera. Please check your device.';
             setError(message);
+            setErrorKind(err instanceof DOMException && err.name === 'NotAllowedError' ? 'denied' : 'failed');
             setIsActive(false);
         }
     }, [effectiveFacing, requestedFacing, width, height, aspectRatio]);
@@ -304,6 +309,7 @@ export function useCamera({
         canvasRef,
         isActive,
         error,
+        errorKind,
         shouldMirror,
         startCamera,
         stopCamera,
