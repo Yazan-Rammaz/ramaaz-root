@@ -122,11 +122,35 @@ export function parseMrzFromRawText(rawText: string): MrzFields {
  *  3. Last name comparison (MRZ line 3 vs front lastName) — medium confidence
  *  4. If nothing is comparable → verified=true (can't block what we can't check)
  */
+/** A side's issuing country as ISO-3: the code when the Worker sent one, else from the country's name. */
+function countryCode(side: Partial<IDDocument>): string | undefined {
+    if (side.countryIso3) return side.countryIso3.toUpperCase();
+    const name = (side.country ?? '').trim().toLowerCase();
+    if (/syria|سوري/.test(name)) return 'SYR';
+    if (/leban|لبنان/.test(name)) return 'LBN';
+    if (/turk|türk/.test(name)) return 'TUR';
+    return undefined;
+}
+
 export function verifyBackMatchesFront(
     frontData: Partial<IDDocument>,
     backExtracted: Partial<IDDocument>,
     backRawText: string,
 ): { verified: boolean; reason?: string } {
+    // ── A back from another country's card (2026-11-25) ─────────────────────
+    // A Syrian ID's back has no ID number, document number or name, so the checks
+    // below found nothing to compare and accepted it — under a Lebanese front. The
+    // KYC Worker now names the back's issuing country; a mismatch is refused first.
+    const frontIso = countryCode(frontData);
+    const backIso = countryCode(backExtracted);
+    if (frontIso && backIso && frontIso !== backIso) {
+        console.log(`[backSideVerifier] decision: country ${frontIso} front vs ${backIso} back → REJECT`);
+        return {
+            verified: false,
+            reason: 'This is the back of a different ID. Please use the back of the same document.',
+        };
+    }
+
     // Parse MRZ fields from back rawText.
     const mrz = parseMrzFromRawText(backRawText);
 

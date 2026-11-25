@@ -94,6 +94,8 @@ export interface IDDocument {
     idType: string;
     idName: string;
     country: string;
+    /** ISO-3 code of the issuing country, when the KYC Worker named one (both sides). */
+    countryIso3?: string;
     /** Combined full name. */
     name: string;
     /** First name extracted separately. */

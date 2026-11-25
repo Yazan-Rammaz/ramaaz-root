@@ -131,6 +131,8 @@ export interface IKycService {
         imageData: string,
         side: 'front' | 'back',
         sessionHint?: string,
+        /** The back only: the front's ID photo, compared with the back's portrait. */
+        frontFaceImageData?: string,
     ): Promise<AnalyzeIdResult>;
     captureID(imageData: string, side: 'front' | 'back'): Promise<Partial<IDDocument>>;
     matchFaceToID(faceData: string, idData: string): Promise<MatchResult>;

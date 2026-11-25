@@ -80,6 +80,19 @@ const server = https.createServer({ key: readFileSync(keyFile), cert: readFileSy
     });
     req.pipe(upstream);
 });
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(
+            `\n  Port ${port} is already in use: an earlier start:mobile is still running.\n` +
+                `  Stop it (PowerShell):\n` +
+                `    Get-NetTCPConnection -LocalPort ${port},${inner} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }\n`,
+        );
+    } else {
+        console.error(err);
+    }
+    next.kill();
+    process.exit(1);
+});
 server.listen(port, '0.0.0.0', () => {
     console.log(`\n  Production build, open on the phone:  https://${host}:${port}`);
     console.log('  Same Wi-Fi, and accept the certificate warning once.\n');

@@ -783,6 +783,8 @@ export default function IDCaptureScreen() {
                 croppedBase64Card,
                 activeSide,
                 sessionHintRef.current,
+                // The back's portrait is compared with this (a Syrian back has nothing else to match).
+                activeSide === 'back' ? idFaceImageRef.current : undefined,
             );
             // Status and code only: the result carries the name, numbers,
             // birthday and the ID images, and the console is not private.

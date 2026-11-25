@@ -72,9 +72,10 @@ export class HttpKycService implements IKycService {
         imageData: string,
         side: 'front' | 'back',
         sessionHint = 'default',
+        frontFaceImageData?: string,
     ): Promise<AnalyzeIdResult> {
         return unwrap(
-            await api.kyc.analyzeId({ imageData, side, sessionHint }),
+            await api.kyc.analyzeId({ imageData, side, sessionHint, ...(frontFaceImageData ? { frontFaceImageData } : {}) }),
             'Analyze ID API error',
         );
     }
