@@ -185,6 +185,21 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
             pc.addEventListener('datachannel', (e) => {
                 if (e.channel.label !== 'hints') return;
                 channelRef.current = e.channel;
+                // The computer is finished with this camera — an "end" message, or its
+                // channel closing (2026-11-25): the camera stops NOW, not when the link
+                // times out. After a pass the page finishes on "Done"; otherwise it
+                // says the session ended.
+                const endedByComputer = () => {
+                    streamRef.current?.getTracks().forEach((t) => t.stop());
+                    pcRef.current?.close();
+                    if (doneRef.current) {
+                        setFinished(true);
+                        window.close();
+                    } else {
+                        setPhase('ended');
+                    }
+                };
+                e.channel.onclose = endedByComputer;
                 e.channel.onmessage = (m) => {
                     if (typeof m.data !== 'string') return;
                     let msg: HandoffMessage;
@@ -193,6 +208,7 @@ export function PhoneCamera({ room, facing }: { room: string; facing: 'user' | '
                     } catch {
                         return;
                     }
+                    if (msg.type === 'end') return endedByComputer();
                     if (msg.type === 'hint') setHint(msg.text);
                     if (msg.type === 'camera') setCameraLive(msg.live);
                     if (msg.type === 'stage') setStage(msg.stage);

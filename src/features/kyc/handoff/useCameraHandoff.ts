@@ -52,6 +52,8 @@ export type HandoffMessage =
     | { type: 'progress'; value: number | null }
     /** PHONE → computer: the person pressed retry on the phone. */
     | { type: 'retry' }
+    /** The computer is finished with this camera: the phone closes it now (see stop). */
+    | { type: 'end' }
     /** The ID scanner's screen, drawn on the phone (2026-11-24). */
     | { type: 'id'; id: IdMirror }
     /** The captured card while it is checked (sent once per capture, small). */
@@ -177,6 +179,17 @@ export function useCameraHandoff({ onPhoneRetry }: { onPhoneRetry?: () => void }
         abortRef.current?.abort();
         abortRef.current = null;
 
+        // Say so before closing (2026-11-25). Closing alone, the phone only learnt it
+        // when the link timed out — up to ~30 s of its camera still filming after face
+        // reverify ended on a failure or a cancel. Best effort; the channel's close,
+        // just below, tells the phone too.
+        if (hintsRef.current?.readyState === 'open') {
+            try {
+                hintsRef.current.send(JSON.stringify({ type: 'end' } satisfies HandoffMessage));
+            } catch {
+                /* closing anyway */
+            }
+        }
         hintsRef.current?.close();
         hintsRef.current = null;
 
