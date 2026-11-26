@@ -58,7 +58,7 @@ sample").
 - The browser **never** calls NestJS and **never** holds a token.
 - Server-only `src/lib/api/server.ts` (`api.get/post/...`) is the single client
   for the **root backend** (auth, the systems registry). Its base URL is
-  `NEST_API_URL`, and it **is** set — `https://staging-backend.ramaaz.store`, in
+  `NEST_API_URL`, and it **is** set — `https://staging-backenv3.ramaaz.dev`, in
   `wrangler.jsonc` for the deployed Worker and in `.env.local` / `.dev.vars`
   locally. (The old local `root-backend` service was deleted; this is its remote
   replacement.)

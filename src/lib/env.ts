@@ -18,7 +18,7 @@ const schema = z.object({
   /**
    * Base URL of the backend the BFF proxies to (server-side only).
    *
-   * Set everywhere the app actually runs — `https://staging-backend.ramaaz.store`
+   * Set everywhere the app actually runs — `https://staging-backenv3.ramaaz.dev`
    * in `wrangler.jsonc` (deployed) and in `.env.local` / `.dev.vars` (local).
    *
    * OPTIONAL in the schema anyway, for the one environment that leaves it out:

@@ -4,7 +4,7 @@ import { z } from "zod";
  * THE auth contract — every path, request and response shape the sign-in flow
  * uses, in one place.
  *
- * Base URL is `NEST_API_URL` (staging: https://staging-backend.ramaaz.store).
+ * Base URL is `NEST_API_URL` (staging: https://staging-backenv3.ramaaz.dev).
  *
  * ── The protocol, in one picture ────────────────────────────────────────────
  * Sign-in is ONE state machine with two paths through it. The server decides
